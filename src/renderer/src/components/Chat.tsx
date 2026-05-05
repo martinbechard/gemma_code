@@ -11,6 +11,7 @@ import Composer from "./Composer";
 import Message from "./Message";
 import Sidebar from "./Sidebar";
 import Canvas from "./Canvas";
+import { STORAGE_KEY, isModeLocked } from "../lib/conversationStore";
 
 interface Props {
   model: string;
@@ -27,6 +28,10 @@ interface Conversation {
   // Distinguishes "Code" (user-chosen working directory) from "Build"
   // (per-conversation sandbox) within mode==='code'. Undefined => sandbox.
   workingDir?: string;
+  // The model this conversation was last sent with. Stamped on every send so
+  // the app can auto-load the right runtime when the conversation is reopened
+  // and so switching conversations swaps the active model accordingly.
+  model?: string;
 }
 
 // "Build" and "Code" both map to AgentMode==='code' on the wire; the pill key
@@ -37,8 +42,6 @@ function pillKeyOf(c: Pick<Conversation, "mode" | "workingDir">): PillKey {
   if (c.mode === "chat") return "chat";
   return c.workingDir ? "code" : "build";
 }
-
-const STORAGE_KEY = "gemma-chat:conversations:v2";
 
 function loadConversations(): Conversation[] {
   try {
@@ -131,12 +134,18 @@ export default function Chat({ model, onSwitchModel }: Props) {
 
   // Three-way pill selector. "code" prompts the user for a working directory
   // via the native dialog; cancelling leaves the current pill active.
+  // Once a Code conversation has at least one message (isModeLocked), the
+  // chat / build branches no-op so the agent can't be swapped onto a
+  // different sandbox underneath an in-flight Code session.
   async function selectMode(next: PillKey): Promise<void> {
+    const locked = isModeLocked(activeConversation);
     if (next === "chat") {
+      if (locked) return;
       updateActive((c) => ({ ...c, mode: "chat", canvasOpen: false }));
       return;
     }
     if (next === "build") {
+      if (locked) return;
       updateActive((c) => ({
         ...c,
         mode: "code",
@@ -204,7 +213,14 @@ export default function Chat({ model, onSwitchModel }: Props) {
         c.messages.length === 0
           ? input.slice(0, 48) + (input.length > 48 ? "…" : "")
           : c.title;
-      return { ...c, title, messages: [...c.messages, userMsg, assistantMsg] };
+      // Stamp the current global model on the conversation so it can be
+      // auto-loaded next time the conversation is opened.
+      return {
+        ...c,
+        title,
+        model,
+        messages: [...c.messages, userMsg, assistantMsg],
+      };
     });
 
     const history = [...conv.messages, userMsg].map((m) => ({
@@ -400,12 +416,25 @@ export default function Chat({ model, onSwitchModel }: Props) {
       activeConversation.canvasOpen === true) &&
     activeConversation.canvasOpen !== false;
 
+  // When the user clicks a different conversation, swap to that conversation's
+  // stamped model if it differs from the current one. Conversations without a
+  // stamped model inherit the current global model on their next send.
+  function selectConversation(nextId: string): void {
+    setActiveId(nextId);
+    const next = conversations.find((c) => c.id === nextId);
+    if (next?.model && next.model !== model) {
+      onSwitchModel(next.model);
+    }
+  }
+
+  const modeLocked = isModeLocked(activeConversation);
+
   return (
     <div className="flex h-full w-full">
       <Sidebar
         conversations={conversations}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={selectConversation}
         onNew={() =>
           createConversation(
             activeConversation.mode,
@@ -421,6 +450,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
             pillKey={pillKeyOf(activeConversation)}
             workingDir={activeConversation.workingDir}
             canvasOpen={!!activeConversation.canvasOpen}
+            modeLocked={modeLocked}
             onSelectMode={selectMode}
             onToggleCanvas={toggleCanvas}
             onSwitchModel={onSwitchModel}
@@ -517,6 +547,7 @@ function Header({
   pillKey,
   workingDir,
   canvasOpen,
+  modeLocked,
   onSelectMode,
   onToggleCanvas,
   onSwitchModel,
@@ -525,6 +556,7 @@ function Header({
   pillKey: PillKey;
   workingDir?: string;
   canvasOpen: boolean;
+  modeLocked: boolean;
   onSelectMode: (next: PillKey) => void;
   onToggleCanvas: () => void;
   onSwitchModel: (model: string) => void;
@@ -557,12 +589,24 @@ function Header({
       <div className="no-drag flex items-center gap-1 rounded-lg bg-white/[0.04] p-0.5 text-[12px]">
         <ModePill
           active={pillKey === "chat"}
+          disabled={modeLocked && pillKey !== "chat"}
+          title={
+            modeLocked && pillKey !== "chat"
+              ? "Mode locked: this Code conversation has its own working directory and sandbox. Start a new conversation to chat."
+              : undefined
+          }
           onClick={() => pillKey !== "chat" && onSelectMode("chat")}
         >
           Chat
         </ModePill>
         <ModePill
           active={pillKey === "build"}
+          disabled={modeLocked && pillKey !== "build"}
+          title={
+            modeLocked && pillKey !== "build"
+              ? "Mode locked: this Code conversation has its own working directory and sandbox. Start a new conversation to use Build."
+              : undefined
+          }
           onClick={() => pillKey !== "build" && onSelectMode("build")}
         >
           Build
@@ -677,19 +721,27 @@ function Header({
 function ModePill({
   active,
   onClick,
+  disabled,
+  title,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       className={`rounded-md px-3 py-1 font-medium transition-all duration-200 ease-out ${
         active
           ? "bg-white/10 text-white shadow-sm scale-[1.02]"
-          : "text-ink-400 hover:text-ink-100 scale-100"
+          : disabled
+            ? "text-ink-500 opacity-40 cursor-not-allowed"
+            : "text-ink-400 hover:text-ink-100 scale-100"
       }`}
     >
       {children}

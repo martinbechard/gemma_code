@@ -1,168 +1,199 @@
-import { useEffect, useState } from 'react'
-import { DEFAULT_MODEL, type SetupStatus } from '@shared/types'
-import Setup from './components/Setup'
-import Chat from './components/Chat'
+import { useEffect, useState } from "react";
+import { DEFAULT_MODEL, type SetupStatus } from "@shared/types";
+import Setup from "./components/Setup";
+import Chat from "./components/Chat";
+import {
+  pickStartupModel,
+  readPersistedConversations,
+} from "./lib/conversationStore";
 
 type AppState =
-  | { phase: 'boot' }
-  | { phase: 'setup'; status: SetupStatus; model: string }
-  | { phase: 'ready'; model: string }
-  | { phase: 'switching'; model: string; toModel: string; status: SetupStatus }
-type RepairCapableApi = typeof window.api & { repairModel?: (model: string) => Promise<void> }
+  | { phase: "boot" }
+  | { phase: "setup"; status: SetupStatus; model: string }
+  | { phase: "ready"; model: string }
+  | { phase: "switching"; model: string; toModel: string; status: SetupStatus };
+type RepairCapableApi = typeof window.api & {
+  repairModel?: (model: string) => Promise<void>;
+};
 
 export default function App() {
-  const [state, setState] = useState<AppState>({ phase: 'boot' })
+  const [state, setState] = useState<AppState>({ phase: "boot" });
 
   function handleRepairModel(model: string): void {
     setState((prev) => {
-      if (prev.phase === 'setup') {
+      if (prev.phase === "setup") {
         return {
-          phase: 'setup',
+          phase: "setup",
           model,
-          status: { stage: 'repairing-model', message: 'Resuming model download…' }
-        }
+          status: {
+            stage: "repairing-model",
+            message: "Resuming model download…",
+          },
+        };
       }
-      if (prev.phase === 'ready') {
+      if (prev.phase === "ready") {
         return {
-          phase: 'setup',
+          phase: "setup",
           model,
-          status: { stage: 'repairing-model', message: 'Resuming model download…' }
-        }
+          status: {
+            stage: "repairing-model",
+            message: "Resuming model download…",
+          },
+        };
       }
-      if (prev.phase === 'switching') {
+      if (prev.phase === "switching") {
         return {
           ...prev,
-          status: { stage: 'repairing-model', message: 'Resuming model download…' }
-        }
+          status: {
+            stage: "repairing-model",
+            message: "Resuming model download…",
+          },
+        };
       }
-      return prev
-    })
-    const api = window.api as RepairCapableApi
-    if (typeof api.repairModel === 'function') {
-      void api.repairModel(model)
-      return
+      return prev;
+    });
+    const api = window.api as RepairCapableApi;
+    if (typeof api.repairModel === "function") {
+      void api.repairModel(model);
+      return;
     }
-    void window.api.startSetup(model)
+    void window.api.startSetup(model);
   }
 
   useEffect(() => {
     // Forward raw Gemma output to devtools console for debugging
     const rawUnsub = window.api.onRawChunk((ev) => {
       // eslint-disable-next-line no-console
-      console.log('[gemma]', ev.chunk)
-    })
-    let unsub: (() => void) | undefined
-    ;(async () => {
+      console.log("[gemma]", ev.chunk);
+    });
+    let unsub: (() => void) | undefined;
+    (async () => {
       unsub = window.api.onSetupStatus((status) => {
         setState((prev) => {
-          if (status.stage === 'ready') {
+          if (status.stage === "ready") {
             // If we were switching, the new model is now ready
-            if (prev.phase === 'switching') {
-              return { phase: 'ready', model: prev.toModel }
+            if (prev.phase === "switching") {
+              return { phase: "ready", model: prev.toModel };
             }
-            return { phase: 'ready', model: prev.phase === 'setup' ? prev.model : DEFAULT_MODEL }
+            return {
+              phase: "ready",
+              model: prev.phase === "setup" ? prev.model : DEFAULT_MODEL,
+            };
           }
-          if (status.stage === 'error') {
+          if (status.stage === "error") {
             if (status.repair) {
-              return { phase: 'setup', status, model: status.repair.model }
+              return { phase: "setup", status, model: status.repair.model };
             }
             // If switch failed, go back to the previous model
-            if (prev.phase === 'switching') {
-              return { phase: 'ready', model: prev.model }
+            if (prev.phase === "switching") {
+              return { phase: "ready", model: prev.model };
             }
           }
           // If we're in switching phase, keep it as switching
-          if (prev.phase === 'switching') {
-            return { ...prev, status }
+          if (prev.phase === "switching") {
+            return { ...prev, status };
           }
-          const model = prev.phase === 'setup' ? prev.model : DEFAULT_MODEL
-          return { phase: 'setup', status, model }
-        })
-      })
+          const model = prev.phase === "setup" ? prev.model : DEFAULT_MODEL;
+          return { phase: "setup", status, model };
+        });
+      });
 
-      const local = await window.api.listLocalModels()
-      const hasDefault = local.some(
-        (m) => m === DEFAULT_MODEL || m.startsWith(DEFAULT_MODEL + ':')
-      )
-      if (hasDefault) {
-        const { hasMLX } = await window.api.checkMLX()
+      const local = await window.api.listLocalModels();
+      const isLocallyAvailable = (model: string): boolean =>
+        local.some((m) => m === model || m.startsWith(model + ":"));
+
+      // Prefer the model the most-recently used conversation was sent with,
+      // so reopening the app lands on the model the user was last working
+      // with. Fall back to DEFAULT_MODEL when no conversation has stamped a
+      // model yet (first launch). The Setup welcome screen and the in-chat
+      // model picker remain reachable as a safe-mode fallback when the
+      // chosen model isn't locally available.
+      const stamped = pickStartupModel(readPersistedConversations());
+      const startupModel =
+        stamped && isLocallyAvailable(stamped) ? stamped : DEFAULT_MODEL;
+
+      if (isLocallyAvailable(startupModel)) {
+        const { hasMLX } = await window.api.checkMLX();
         if (hasMLX) {
           setState({
-            phase: 'setup',
-            status: { stage: 'starting-mlx', message: 'Starting model runtime…' },
-            model: DEFAULT_MODEL
-          })
-          window.api.startSetup(DEFAULT_MODEL)
-          return
+            phase: "setup",
+            status: {
+              stage: "starting-mlx",
+              message: "Starting model runtime…",
+            },
+            model: startupModel,
+          });
+          window.api.startSetup(startupModel);
+          return;
         }
       }
       setState({
-        phase: 'setup',
-        status: { stage: 'checking', message: 'Welcome' },
-        model: DEFAULT_MODEL
-      })
-    })()
+        phase: "setup",
+        status: { stage: "checking", message: "Welcome" },
+        model: startupModel,
+      });
+    })();
     return () => {
-      unsub?.()
-      rawUnsub?.()
-    }
-  }, [])
+      unsub?.();
+      rawUnsub?.();
+    };
+  }, []);
 
   function handleSwitchModel(newModel: string): void {
     setState((prev) => {
-      if (prev.phase !== 'ready') return prev
-      if (prev.model === newModel) return prev
+      if (prev.phase !== "ready") return prev;
+      if (prev.model === newModel) return prev;
       return {
-        phase: 'switching',
+        phase: "switching",
         model: prev.model,
         toModel: newModel,
-        status: { stage: 'downloading-model', message: 'Switching model…' }
-      }
-    })
-    window.api.switchModel(newModel)
+        status: { stage: "downloading-model", message: "Switching model…" },
+      };
+    });
+    window.api.switchModel(newModel);
   }
 
-  if (state.phase === 'boot') {
-    return <BootSplash />
+  if (state.phase === "boot") {
+    return <BootSplash />;
   }
 
-  if (state.phase === 'setup') {
+  if (state.phase === "setup") {
     return (
       <div key="setup" className="anim-fade-in h-full w-full">
         <Setup
           status={state.status}
           model={state.model}
           onModelChange={(m) =>
-            setState((s) => (s.phase === 'setup' ? { ...s, model: m } : s))
+            setState((s) => (s.phase === "setup" ? { ...s, model: m } : s))
           }
           onStart={(model) => {
             setState({
-              phase: 'setup',
-              status: { stage: 'checking', message: 'Checking system…' },
-              model
-            })
-            window.api.startSetup(model)
+              phase: "setup",
+              status: { stage: "checking", message: "Checking system…" },
+              model,
+            });
+            window.api.startSetup(model);
           }}
           onRepairModel={handleRepairModel}
         />
       </div>
-    )
+    );
   }
 
-  if (state.phase === 'switching') {
+  if (state.phase === "switching") {
     return (
       <div key="switching" className="anim-fade-in h-full w-full">
         <Chat model={state.model} onSwitchModel={handleSwitchModel} />
         <SwitchingOverlay status={state.status} />
       </div>
-    )
+    );
   }
 
   return (
     <div key="chat" className="anim-fade-scale h-full w-full">
       <Chat model={state.model} onSwitchModel={handleSwitchModel} />
     </div>
-  )
+  );
 }
 
 function BootSplash() {
@@ -170,7 +201,7 @@ function BootSplash() {
     <div className="drag flex h-full w-full items-center justify-center">
       <div className="shimmer h-1 w-40 rounded-full" />
     </div>
-  )
+  );
 }
 
 function SwitchingOverlay({ status }: { status: SetupStatus }) {
@@ -194,5 +225,5 @@ function SwitchingOverlay({ status }: { status: SetupStatus }) {
         )}
       </div>
     </div>
-  )
+  );
 }
