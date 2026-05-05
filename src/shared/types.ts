@@ -42,15 +42,27 @@ export interface ToolCall {
   result?: string;
   error?: string;
   running?: boolean;
+  // When the tool ran inside a <plan> step, this is the id of the step node
+  // (matches PlanNode.id). The renderer groups calls under their step.
+  parentStepId?: string;
 }
 
 export type Role = "user" | "assistant" | "system" | "tool";
+
+export interface PlanNode {
+  id: string;
+  kind: "plan" | "step" | "verify";
+  parentId?: string;
+  name?: string;
+  status: "running" | "ok" | "failed";
+}
 
 export interface ChatMessage {
   id: string;
   role: Role;
   content: string;
   toolCalls?: ToolCall[];
+  planNodes?: PlanNode[];
   createdAt: number;
   model?: string;
   done?: boolean;
@@ -65,6 +77,10 @@ export interface ChatRequest {
   model: string;
   enableTools: boolean;
   mode: AgentMode;
+  // When set with mode==='code', the agent operates on this directory instead
+  // of the per-conversation sandbox. Distinguishes "Build" (sandbox) from
+  // "Code" (user-chosen working directory) without changing AgentMode.
+  workingDir?: string;
 }
 
 export interface WorkspaceInfo {
@@ -90,11 +106,31 @@ export type AgentActivity =
   | { kind: "tool"; tool: string; target?: string; chars?: number }
   | RuntimeActivity;
 
+export type PlanNodeKind = "plan" | "step" | "verify";
+export type PlanNodeStatus = "ok" | "failed";
+
 export type StreamChunk =
   | { type: "token"; text: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; id: string; result?: string; error?: string }
   | { type: "activity"; activity: AgentActivity }
+  | {
+      type: "plan_node_start";
+      kind: PlanNodeKind;
+      id: string;
+      parentId?: string;
+      name?: string;
+    }
+  | {
+      type: "plan_node_end";
+      kind: PlanNodeKind;
+      id: string;
+      status: PlanNodeStatus;
+    }
+  // Replaces the current assistant message body. Used after a round whose
+  // buffer contained a <plan> or <verify> block — the structured PlanView
+  // already covers it, so the raw XML body text is stripped from the chat.
+  | { type: "set_assistant_content"; text: string }
   | { type: "done" }
   | { type: "error"; error: string };
 

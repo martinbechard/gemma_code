@@ -1,52 +1,64 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { marked } from 'marked'
-import type { AgentActivity, ChatMessage, ToolCall } from '@shared/types'
-import gemmaLogoUrl from '../assets/gemma-logo.png'
+import { useEffect, useMemo, useRef, useState } from "react";
+import { marked } from "marked";
+import type {
+  AgentActivity,
+  ChatMessage,
+  PlanNode,
+  ToolCall,
+} from "@shared/types";
+import gemmaLogoUrl from "../assets/gemma-logo.png";
 
 interface Props {
-  message: ChatMessage
-  isLast: boolean
-  streaming: boolean
-  onRegenerate?: () => void
+  message: ChatMessage;
+  isLast: boolean;
+  streaming: boolean;
+  onRegenerate?: () => void;
 }
 
 interface Parsed {
-  thinking: string
-  thinkingInProgress: boolean
-  visible: string
+  thinking: string;
+  thinkingInProgress: boolean;
+  visible: string;
 }
 
 function parseThinking(content: string): Parsed {
-  const openRe = /<think(?:ing)?>/
-  const closeRe = /<\/think(?:ing)?>/
-  const openMatch = content.match(openRe)
-  if (!openMatch) return { thinking: '', thinkingInProgress: false, visible: content }
-  const before = content.slice(0, openMatch.index!)
-  const after = content.slice(openMatch.index! + openMatch[0].length)
-  const closeMatch = after.match(closeRe)
+  const openRe = /<think(?:ing)?>/;
+  const closeRe = /<\/think(?:ing)?>/;
+  const openMatch = content.match(openRe);
+  if (!openMatch)
+    return { thinking: "", thinkingInProgress: false, visible: content };
+  const before = content.slice(0, openMatch.index!);
+  const after = content.slice(openMatch.index! + openMatch[0].length);
+  const closeMatch = after.match(closeRe);
   if (!closeMatch) {
-    return { thinking: after, thinkingInProgress: true, visible: before }
+    return { thinking: after, thinkingInProgress: true, visible: before };
   }
-  const thinking = after.slice(0, closeMatch.index!)
-  const rest = after.slice(closeMatch.index! + closeMatch[0].length)
-  return { thinking, thinkingInProgress: false, visible: (before + rest).trim() }
+  const thinking = after.slice(0, closeMatch.index!);
+  const rest = after.slice(closeMatch.index! + closeMatch[0].length);
+  return {
+    thinking,
+    thinkingInProgress: false,
+    visible: (before + rest).trim(),
+  };
 }
 
-export default function Message({
-  message,
-  streaming,
-  onRegenerate
-}: Props) {
-  const isUser = message.role === 'user'
-  const parsed = useMemo(() => parseThinking(message.content), [message.content])
+export default function Message({ message, streaming, onRegenerate }: Props) {
+  const isUser = message.role === "user";
+  const parsed = useMemo(
+    () => parseThinking(message.content),
+    [message.content],
+  );
   const html = useMemo(() => {
-    if (!parsed.visible) return ''
+    if (!parsed.visible) return "";
     try {
-      return marked.parse(parsed.visible, { async: false, breaks: true }) as string
+      return marked.parse(parsed.visible, {
+        async: false,
+        breaks: true,
+      }) as string;
     } catch {
-      return escapeHtml(parsed.visible).replace(/\n/g, '<br/>')
+      return escapeHtml(parsed.visible).replace(/\n/g, "<br/>");
     }
-  }, [parsed.visible])
+  }, [parsed.visible]);
 
   if (isUser) {
     return (
@@ -55,29 +67,55 @@ export default function Message({
           <div className="whitespace-pre-wrap">{message.content}</div>
         </div>
       </div>
-    )
+    );
   }
 
-  const isEmpty = !parsed.visible && !parsed.thinking && !message.toolCalls?.length
-  const showCursor = streaming && !message.done
+  const isEmpty =
+    !parsed.visible && !parsed.thinking && !message.toolCalls?.length;
+  const showCursor = streaming && !message.done;
   const showActivity =
-    streaming && !message.done && message.activity && message.activity.kind !== 'idle'
+    streaming &&
+    !message.done &&
+    message.activity &&
+    message.activity.kind !== "idle";
 
   return (
     <div className="group flex gap-3">
-      <img src={gemmaLogoUrl} alt="Gemma" className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover" />
+      <img
+        src={gemmaLogoUrl}
+        alt="Gemma"
+        className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover"
+      />
       <div className="selectable min-w-0 flex-1">
         {parsed.thinking && (
-          <ThinkingBlock content={parsed.thinking} inProgress={parsed.thinkingInProgress} />
+          <ThinkingBlock
+            content={parsed.thinking}
+            inProgress={parsed.thinkingInProgress}
+          />
         )}
 
-        {message.toolCalls?.map((tc) => <ToolCallView key={tc.id} call={tc} />)}
+        {message.planNodes && message.planNodes.length > 0 && (
+          <PlanView
+            nodes={message.planNodes}
+            toolCalls={message.toolCalls ?? []}
+          />
+        )}
+
+        {message.toolCalls
+          ?.filter((tc) => !tc.parentStepId)
+          .map((tc) => (
+            <ToolCallView key={tc.id} call={tc} />
+          ))}
 
         {!isEmpty && (
           <div
             className="markdown-body text-[14.5px] text-ink-100"
             dangerouslySetInnerHTML={{
-              __html: html + (showCursor && parsed.visible ? '<span class="anim-caret">▍</span>' : '')
+              __html:
+                html +
+                (showCursor && parsed.visible
+                  ? '<span class="anim-caret">▍</span>'
+                  : ""),
             }}
           />
         )}
@@ -116,132 +154,139 @@ export default function Message({
         )}
       </div>
     </div>
-  )
+  );
 }
 
 const THINKING_VERBS = [
-  'Thinking',
-  'Considering',
-  'Planning',
-  'Pondering',
-  'Reasoning',
-  'Sketching'
-]
-const GENERATING_VERBS = ['Writing', 'Composing', 'Drafting']
+  "Thinking",
+  "Considering",
+  "Planning",
+  "Pondering",
+  "Reasoning",
+  "Sketching",
+];
+const GENERATING_VERBS = ["Writing", "Composing", "Drafting"];
 
 function ActivityBar({
   activity,
   startedAt,
-  toolCalls
+  toolCalls,
 }: {
-  activity: AgentActivity
-  startedAt: number
-  toolCalls?: ToolCall[]
+  activity: AgentActivity;
+  startedAt: number;
+  toolCalls?: ToolCall[];
 }) {
-  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000))
-  const verbIdxRef = useRef(0)
-  const [verbIdx, setVerbIdx] = useState(0)
+  const [elapsed, setElapsed] = useState(() =>
+    Math.floor((Date.now() - startedAt) / 1000),
+  );
+  const verbIdxRef = useRef(0);
+  const [verbIdx, setVerbIdx] = useState(0);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000))
-    }, 1000)
-    return () => window.clearInterval(id)
-  }, [startedAt])
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
 
   useEffect(() => {
-    if (activity.kind === 'thinking' || activity.kind === 'generating') {
+    if (activity.kind === "thinking" || activity.kind === "generating") {
       const id = window.setInterval(() => {
-        verbIdxRef.current++
-        setVerbIdx(verbIdxRef.current)
-      }, 3500)
-      return () => window.clearInterval(id)
+        verbIdxRef.current++;
+        setVerbIdx(verbIdxRef.current);
+      }, 3500);
+      return () => window.clearInterval(id);
     }
-    return undefined
-  }, [activity.kind])
+    return undefined;
+  }, [activity.kind]);
 
   const label = useMemo(() => {
-    if (activity.kind === 'thinking') {
-      const verbs = THINKING_VERBS
-      return verbs[verbIdx % verbs.length]
+    if (activity.kind === "thinking") {
+      const verbs = THINKING_VERBS;
+      return verbs[verbIdx % verbs.length];
     }
-    if (activity.kind === 'generating') {
-      const verbs = GENERATING_VERBS
-      return verbs[verbIdx % verbs.length]
+    if (activity.kind === "generating") {
+      const verbs = GENERATING_VERBS;
+      return verbs[verbIdx % verbs.length];
     }
-    if (activity.kind === 'runtime') {
-      return activity.detail ? `${activity.label} · ${activity.detail}` : activity.label
+    if (activity.kind === "runtime") {
+      return activity.detail
+        ? `${activity.label} · ${activity.detail}`
+        : activity.label;
     }
-    if (activity.kind === 'tool') {
-      const verb = toolVerb(activity.tool)
-      return activity.target ? `${verb} ${activity.target}` : verb
+    if (activity.kind === "tool") {
+      const verb = toolVerb(activity.tool);
+      return activity.target ? `${verb} ${activity.target}` : verb;
     }
-    return ''
-  }, [activity, verbIdx])
+    return "";
+  }, [activity, verbIdx]);
 
   // Hide if there's already a running tool card that conveys the same state
-  const hasRunningTool = toolCalls?.some((t) => t.running)
-  if (hasRunningTool && activity.kind === 'tool') return null
+  const hasRunningTool = toolCalls?.some((t) => t.running);
+  if (hasRunningTool && activity.kind === "tool") return null;
 
-  const chars = (activity as { chars?: number }).chars
-  const elapsedSeconds = activity.kind === 'runtime' ? activity.elapsedSeconds : undefined
+  const chars = (activity as { chars?: number }).chars;
+  const elapsedSeconds =
+    activity.kind === "runtime" ? activity.elapsedSeconds : undefined;
   return (
     <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-400">
       <span className="shimmer-text">{label}…</span>
       <span className="tabular-nums text-ink-400/70">
-        {chars != null && chars > 0 ? `${chars.toLocaleString()} chars · ` : ''}
+        {chars != null && chars > 0 ? `${chars.toLocaleString()} chars · ` : ""}
         {formatElapsed(elapsedSeconds ?? elapsed)}
       </span>
-      {activity.kind === 'runtime' && activity.model && (
-        <span className="truncate font-mono text-ink-400">{activity.model}</span>
+      {activity.kind === "runtime" && activity.model && (
+        <span className="truncate font-mono text-ink-400">
+          {activity.model}
+        </span>
       )}
     </div>
-  )
+  );
 }
 
 function toolVerb(name: string): string {
   switch (name) {
-    case 'write_file':
-      return 'Writing'
-    case 'read_file':
-      return 'Reading'
-    case 'edit_file':
-      return 'Editing'
-    case 'delete_file':
-      return 'Deleting'
-    case 'list_files':
-      return 'Listing'
-    case 'run_bash':
-      return 'Running'
-    case 'open_preview':
-      return 'Revealing preview'
-    case 'web_search':
-      return 'Searching'
-    case 'fetch_url':
-      return 'Fetching'
-    case 'calc':
-      return 'Calculating'
+    case "write_file":
+      return "Writing";
+    case "read_file":
+      return "Reading";
+    case "edit_file":
+      return "Editing";
+    case "delete_file":
+      return "Deleting";
+    case "list_files":
+      return "Listing";
+    case "run_bash":
+      return "Running";
+    case "open_preview":
+      return "Revealing preview";
+    case "web_search":
+      return "Searching";
+    case "fetch_url":
+      return "Fetching";
+    case "calc":
+      return "Calculating";
     default:
-      return 'Running ' + name
+      return "Running " + name;
   }
 }
 
 function formatElapsed(sec: number): string {
-  if (sec < 60) return `${sec}s`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}m ${s}s`
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
 }
 
 function ThinkingBlock({
   content,
-  inProgress
+  inProgress,
 }: {
-  content: string
-  inProgress: boolean
+  content: string;
+  inProgress: boolean;
 }) {
-  const [open, setOpen] = useState(inProgress)
-  const labelClass = inProgress ? 'shimmer-text' : ''
+  const [open, setOpen] = useState(inProgress);
+  const labelClass = inProgress ? "shimmer-text" : "";
   return (
     <div className="mb-3 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02]">
       <button
@@ -250,12 +295,14 @@ function ThinkingBlock({
       >
         <svg
           viewBox="0 0 12 12"
-          className={`h-2.5 w-2.5 transition ${open ? 'rotate-90' : ''}`}
+          className={`h-2.5 w-2.5 transition ${open ? "rotate-90" : ""}`}
           fill="currentColor"
         >
           <path d="M4 2l4 4-4 4V2z" />
         </svg>
-        <span className={labelClass}>{inProgress ? 'Thinking…' : 'Thought process'}</span>
+        <span className={labelClass}>
+          {inProgress ? "Thinking…" : "Thought process"}
+        </span>
       </button>
       {open && (
         <div className="whitespace-pre-wrap border-t border-white/5 px-3 py-2 text-[12.5px] leading-relaxed text-ink-400">
@@ -263,69 +310,69 @@ function ThinkingBlock({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function toolLabel(call: ToolCall): { verb: string; target: string } {
-  const a = call.args
+  const a = call.args;
   switch (call.name) {
-    case 'write_file':
-      return { verb: 'Writing', target: String(a.path ?? '') }
-    case 'read_file':
-      return { verb: 'Reading', target: String(a.path ?? '') }
-    case 'edit_file':
-      return { verb: 'Editing', target: String(a.path ?? '') }
-    case 'delete_file':
-      return { verb: 'Deleting', target: String(a.path ?? '') }
-    case 'list_files':
-      return { verb: 'Listing', target: 'workspace' }
-    case 'run_bash':
-      return { verb: 'Running', target: String(a.command ?? '').slice(0, 80) }
-    case 'open_preview':
-      return { verb: 'Opening', target: 'preview' }
-    case 'web_search':
-      return { verb: 'Searching', target: String(a.query ?? '') }
-    case 'fetch_url':
-      return { verb: 'Fetching', target: String(a.url ?? '') }
-    case 'calc':
-      return { verb: 'Calculating', target: String(a.expression ?? '') }
+    case "write_file":
+      return { verb: "Writing", target: String(a.path ?? "") };
+    case "read_file":
+      return { verb: "Reading", target: String(a.path ?? "") };
+    case "edit_file":
+      return { verb: "Editing", target: String(a.path ?? "") };
+    case "delete_file":
+      return { verb: "Deleting", target: String(a.path ?? "") };
+    case "list_files":
+      return { verb: "Listing", target: "workspace" };
+    case "run_bash":
+      return { verb: "Running", target: String(a.command ?? "").slice(0, 80) };
+    case "open_preview":
+      return { verb: "Opening", target: "preview" };
+    case "web_search":
+      return { verb: "Searching", target: String(a.query ?? "") };
+    case "fetch_url":
+      return { verb: "Fetching", target: String(a.url ?? "") };
+    case "calc":
+      return { verb: "Calculating", target: String(a.expression ?? "") };
     default:
-      return { verb: call.name, target: '' }
+      return { verb: call.name, target: "" };
   }
 }
 
 function toolIcon(name: string): string {
   switch (name) {
-    case 'write_file':
-      return '✎'
-    case 'read_file':
-      return '⇠'
-    case 'edit_file':
-      return '✂'
-    case 'delete_file':
-      return '⊗'
-    case 'list_files':
-      return '☰'
-    case 'run_bash':
-      return '▸'
-    case 'open_preview':
-      return '◉'
-    case 'web_search':
-      return '⌕'
-    case 'fetch_url':
-      return '↗'
-    case 'calc':
-      return '∑'
+    case "write_file":
+      return "✎";
+    case "read_file":
+      return "⇠";
+    case "edit_file":
+      return "✂";
+    case "delete_file":
+      return "⊗";
+    case "list_files":
+      return "☰";
+    case "run_bash":
+      return "▸";
+    case "open_preview":
+      return "◉";
+    case "web_search":
+      return "⌕";
+    case "fetch_url":
+      return "↗";
+    case "calc":
+      return "∑";
     default:
-      return '·'
+      return "·";
   }
 }
 
 function ToolCallView({ call }: { call: ToolCall }) {
-  const [open, setOpen] = useState(false)
-  const running = !!call.running
-  const { verb, target } = toolLabel(call)
-  const ico = toolIcon(call.name)
+  const [open, setOpen] = useState(false);
+  const running = !!call.running;
+  const { verb, target } = toolLabel(call);
+  const ico = toolIcon(call.name);
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02]">
       <button
@@ -334,7 +381,11 @@ function ToolCallView({ call }: { call: ToolCall }) {
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center font-mono text-[13px]">
           {running ? (
-            <svg className="h-3.5 w-3.5 animate-spin text-white/70" viewBox="0 0 24 24" fill="none">
+            <svg
+              className="h-3.5 w-3.5 animate-spin text-white/70"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
               <circle
                 cx="12"
                 cy="12"
@@ -351,16 +402,18 @@ function ToolCallView({ call }: { call: ToolCall }) {
           )}
         </span>
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={running ? 'shimmer-text' : 'text-ink-100'}>
+          <span className={running ? "shimmer-text" : "text-ink-100"}>
             {running ? `${verb}…` : verb}
           </span>
           {target && (
-            <span className="truncate font-mono text-[11.5px] text-ink-400">{target}</span>
+            <span className="truncate font-mono text-[11.5px] text-ink-400">
+              {target}
+            </span>
           )}
         </span>
         <svg
           viewBox="0 0 12 12"
-          className={`h-2.5 w-2.5 shrink-0 text-ink-400 transition ${open ? 'rotate-90' : ''}`}
+          className={`h-2.5 w-2.5 shrink-0 text-ink-400 transition ${open ? "rotate-90" : ""}`}
           fill="currentColor"
         >
           <path d="M4 2l4 4-4 4V2z" />
@@ -368,15 +421,16 @@ function ToolCallView({ call }: { call: ToolCall }) {
       </button>
       {open && (
         <div className="border-t border-white/5 px-3 py-2 font-mono text-[11.5px] text-ink-400">
-          {call.name === 'write_file' && typeof call.args.content === 'string' ? (
+          {call.name === "write_file" &&
+          typeof call.args.content === "string" ? (
             <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap break-words text-ink-200">
               {String(call.args.content).slice(0, 4000)}
-              {String(call.args.content).length > 4000 ? '\n…' : ''}
+              {String(call.args.content).length > 4000 ? "\n…" : ""}
             </pre>
           ) : (
             <div className="mb-1 text-ink-400/80">
               args: {JSON.stringify(call.args).slice(0, 400)}
-              {JSON.stringify(call.args).length > 400 ? '…' : ''}
+              {JSON.stringify(call.args).length > 400 ? "…" : ""}
             </div>
           )}
           {call.result && (
@@ -388,13 +442,162 @@ function ToolCallView({ call }: { call: ToolCall }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function escapeHtml(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+interface PlanTreeNode {
+  node: PlanNode;
+  children: PlanTreeNode[];
+}
+
+function buildPlanTree(nodes: PlanNode[]): PlanTreeNode[] {
+  const byId = new Map<string, PlanTreeNode>();
+  for (const n of nodes) byId.set(n.id, { node: n, children: [] });
+  const roots: PlanTreeNode[] = [];
+  for (const n of nodes) {
+    const t = byId.get(n.id)!;
+    const parent = n.parentId ? byId.get(n.parentId) : undefined;
+    if (parent) parent.children.push(t);
+    else roots.push(t);
+  }
+  return roots;
+}
+
+function planStatusGlyph(status: PlanNode["status"]): string {
+  if (status === "ok") return "✓";
+  if (status === "failed") return "×";
+  return "•";
+}
+
+function planStatusColor(status: PlanNode["status"]): string {
+  if (status === "ok") return "text-emerald-400";
+  if (status === "failed") return "text-red-400";
+  return "text-ink-400";
+}
+
+function PlanRow({
+  tree,
+  depth,
+  toolCalls,
+}: {
+  tree: PlanTreeNode;
+  depth: number;
+  toolCalls: ToolCall[];
+}) {
+  const { node, children } = tree;
+  const running = node.status === "running";
+  const isStep = node.kind === "step";
+  const stepCalls = isStep
+    ? toolCalls.filter((tc) => tc.parentStepId === node.id)
+    : [];
+  const expandable = isStep && (stepCalls.length > 0 || children.length > 0);
+  const [open, setOpen] = useState(running);
+
+  const label =
+    node.kind === "plan"
+      ? "Plan"
+      : node.kind === "step"
+        ? node.name
+          ? `Step: ${node.name}`
+          : "Step"
+        : "Verify";
+
+  const headerInner = (
+    <>
+      <span
+        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center font-mono ${planStatusColor(node.status)}`}
+      >
+        {running ? (
+          <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeDasharray="40 100"
+            />
+          </svg>
+        ) : (
+          <span>{planStatusGlyph(node.status)}</span>
+        )}
+      </span>
+      <span className={running ? "shimmer-text" : "text-ink-100"}>{label}</span>
+      {expandable && (
+        <svg
+          viewBox="0 0 12 12"
+          className={`h-2.5 w-2.5 shrink-0 text-ink-400 transition ${open ? "rotate-90" : ""}`}
+          fill="currentColor"
+        >
+          <path d="M4 2l4 4-4 4V2z" />
+        </svg>
+      )}
+    </>
+  );
+
+  return (
+    <>
+      {expandable ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-2 py-0.5 text-left text-[12.5px] hover:bg-white/[0.02]"
+          style={{ paddingLeft: depth * 14 }}
+        >
+          {headerInner}
+        </button>
+      ) : (
+        <div
+          className="flex items-center gap-2 py-0.5 text-[12.5px]"
+          style={{ paddingLeft: depth * 14 }}
+        >
+          {headerInner}
+        </div>
+      )}
+      {(!expandable || open) && (
+        <>
+          {stepCalls.length > 0 && (
+            <div style={{ paddingLeft: (depth + 1) * 14 }} className="my-1">
+              {stepCalls.map((tc) => (
+                <ToolCallView key={tc.id} call={tc} />
+              ))}
+            </div>
+          )}
+          {children.map((c) => (
+            <PlanRow
+              key={c.node.id}
+              tree={c}
+              depth={depth + 1}
+              toolCalls={toolCalls}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function PlanView({
+  nodes,
+  toolCalls,
+}: {
+  nodes: PlanNode[];
+  toolCalls: ToolCall[];
+}) {
+  const trees = useMemo(() => buildPlanTree(nodes), [nodes]);
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
+      {trees.map((t) => (
+        <PlanRow key={t.node.id} tree={t} depth={0} toolCalls={toolCalls} />
+      ))}
+    </div>
+  );
 }

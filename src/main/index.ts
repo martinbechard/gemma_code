@@ -6,6 +6,7 @@ import {
   nativeTheme,
   session,
   nativeImage,
+  dialog,
 } from "electron";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -45,9 +46,14 @@ import {
   listTree,
   workspaceDir,
   wsWriteFile,
+  setWorkspaceOverride,
+  clearWorkspaceOverride,
 } from "./workspace";
 import type { ChatRequest, StreamChunk, ToolCall } from "../shared/types";
 import { setRuntimePaths } from "./runtimePaths";
+import { findNextPlan, parseVerifyResult } from "./plan/parser";
+import { PlanExecutionState } from "./plan/executionState";
+import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
@@ -406,6 +412,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     const baseMessages: MLXChatMessage[] = [];
 
     if (req.mode === "code") {
+      // Code mode with a user-chosen working directory bypasses the sandbox by
+      // registering a workspace override before ensureWorkspace runs. Build mode
+      // (no workingDir) falls through to the per-conversation sandbox.
+      if (req.workingDir) {
+        setWorkspaceOverride(req.conversationId, req.workingDir);
+      }
       const wsPath = await ensureWorkspace(req.conversationId);
       const href = previewUrl(req.conversationId);
       baseMessages.push({
@@ -447,6 +459,31 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       req.mode === "code" ? MAX_TOOL_ROUNDS_CODE : MAX_TOOL_ROUNDS_CHAT;
 
     emitRuntimeActivity("preparing request");
+
+    let planState: PlanExecutionState | null = null;
+    let awaitingVerify = false;
+
+    const drainPlanEvents = (): void => {
+      if (!planState) return;
+      for (const ev of planState.drainEvents()) {
+        if (ev.type === "plan_node_start") {
+          emit({
+            type: "plan_node_start",
+            kind: ev.kind,
+            id: ev.id,
+            parentId: ev.parentId,
+            name: ev.name,
+          });
+        } else {
+          emit({
+            type: "plan_node_end",
+            kind: ev.kind,
+            id: ev.id,
+            status: ev.status,
+          });
+        }
+      }
+    };
 
     for (let round = 0; round < maxRounds; round++) {
       let buffer = "";
@@ -630,6 +667,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               name: found.name,
               args: found.args,
               running: true,
+              ...(planState?.currentStepId
+                ? { parentStepId: planState.currentStepId }
+                : {}),
             };
             emit({ type: "tool_call", call });
             emit({
@@ -687,27 +727,134 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         }
       }
 
-      if (!executedAction) {
-        // In Build mode, if the model just described a plan without writing code,
-        // nudge it to start coding immediately instead of ending the turn.
-        if (req.mode === "code" && round === 0 && buffer.trim().length > 0) {
-          // Flush the plan text to the UI
-          if (emittedIdx < buffer.length) {
-            emit({ type: "token", text: buffer.slice(emittedIdx) });
-          }
-          baseMessages.push({ role: "assistant", content: buffer });
-          baseMessages.push({
-            role: "user",
-            content:
-              "Good plan. Now start building — emit a write_file action with the first file immediately.",
-          });
-          emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
-          continue; // go to round 1
+      if (executedAction) {
+        // Body of the active step continues in the next round.
+        continue;
+      }
+
+      const flushBufferToUI = (): void => {
+        if (emittedIdx < buffer.length) {
+          emit({ type: "token", text: buffer.slice(emittedIdx) });
+          emittedIdx = buffer.length;
         }
+      };
+
+      // Plan / verify XML is rendered structurally by PlanView; replace the
+      // streamed body with a cleaned version so the raw tag text doesn't
+      // appear twice in the chat.
+      const replaceBodyStripped = (): void => {
+        const cleaned = stripPlanArtifacts(buffer);
+        emit({ type: "set_assistant_content", text: cleaned });
+      };
+
+      // Verify-phase response handling: parse <verify result="..."/> from the
+      // buffer and feed it to the state machine.
+      if (planState && awaitingVerify) {
+        const vr = parseVerifyResult(buffer);
+        if (vr) {
+          flushBufferToUI();
+          replaceBodyStripped();
+          baseMessages.push({ role: "assistant", content: buffer });
+          const outcome = planState.applyVerify(vr);
+          drainPlanEvents();
+          awaitingVerify = false;
+          if (outcome === "abort" || planState.state !== "running") {
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
+          baseMessages.push({ role: "user", content: next.text });
+          awaitingVerify = next.kind === "verify";
+          emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+          continue;
+        }
+        // Model failed to emit a verify tag. End the task gracefully.
+        flushBufferToUI();
         emit({ type: "activity", activity: { kind: "idle" } });
         emit({ type: "done" });
         return;
       }
+
+      // Look for a plan in the buffer (top-level or nested-during-step).
+      const planFound = findNextPlan(buffer);
+      if (planFound && planFound !== "incomplete") {
+        flushBufferToUI();
+        replaceBodyStripped();
+        baseMessages.push({ role: "assistant", content: buffer });
+        if (planState) {
+          try {
+            planState.pushNestedPlan(planFound);
+          } catch (e) {
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({
+              type: "error",
+              error: `Plan rejected: ${(e as Error).message}`,
+            });
+            return;
+          }
+        } else {
+          planState = new PlanExecutionState(planFound);
+        }
+        drainPlanEvents();
+        const next = planState.nextPrompt();
+        if (!next) {
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({ type: "done" });
+          return;
+        }
+        baseMessages.push({ role: "user", content: next.text });
+        awaitingVerify = next.kind === "verify";
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+        continue;
+      }
+
+      // No action, no plan, no verify pending: if a plan is active, the
+      // current step's body has just finished.
+      if (planState) {
+        flushBufferToUI();
+        replaceBodyStripped();
+        baseMessages.push({ role: "assistant", content: buffer });
+        planState.finishStepBody();
+        drainPlanEvents();
+        if (planState.state !== "running") {
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({ type: "done" });
+          return;
+        }
+        const next = planState.nextPrompt();
+        if (!next) {
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({ type: "done" });
+          return;
+        }
+        baseMessages.push({ role: "user", content: next.text });
+        awaitingVerify = next.kind === "verify";
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+        continue;
+      }
+
+      // Build mode round-0 fallback: nudge a non-plan narration toward action.
+      if (req.mode === "code" && round === 0 && buffer.trim().length > 0) {
+        flushBufferToUI();
+        baseMessages.push({ role: "assistant", content: buffer });
+        baseMessages.push({
+          role: "user",
+          content:
+            "Good plan. Now start building — emit a write_file action with the first file immediately.",
+        });
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+        continue;
+      }
+
+      emit({ type: "activity", activity: { kind: "idle" } });
+      emit({ type: "done" });
+      return;
     }
     emit({ type: "activity", activity: { kind: "idle" } });
     emit({
@@ -851,6 +998,40 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle("workspace:server-port", async () => getWorkspaceServerPort());
+
+  ipcMain.handle(
+    "workspace:set-override",
+    async (_e, conversationId: string, absolutePath: string) => {
+      setWorkspaceOverride(conversationId, absolutePath);
+    },
+  );
+
+  ipcMain.handle(
+    "workspace:clear-override",
+    async (_e, conversationId: string) => {
+      clearWorkspaceOverride(conversationId);
+    },
+  );
+
+  // Native directory picker used by the renderer to bind a Code-mode
+  // conversation to a working directory. Returns null when the user cancels.
+  ipcMain.handle(
+    "dialog:choose-directory",
+    async (_e, defaultPath?: string): Promise<string | null> => {
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined;
+      const result = win
+        ? await dialog.showOpenDialog(win, {
+            properties: ["openDirectory", "createDirectory"],
+            defaultPath,
+          })
+        : await dialog.showOpenDialog({
+            properties: ["openDirectory", "createDirectory"],
+            defaultPath,
+          });
+      if (result.canceled || result.filePaths.length === 0) return null;
+      return result.filePaths[0];
+    },
+  );
 
   ipcMain.handle(
     "audio:transcribe",
