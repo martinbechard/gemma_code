@@ -101,7 +101,8 @@ export class PlanExecutionState {
       }
       const header =
         `Execute step "${step.name}" now. Use <action> tags to do the work. ` +
-        `Do NOT emit another <plan> — you are already inside a plan and the host is driving each step. ` +
+        `Do NOT emit a <plan> in this turn — you are already inside a plan and the host is driving each step. Any <plan> tag you emit here will be rejected and this step will be re-prompted unchanged. ` +
+        `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
         `When this step's work is done, write a brief plain-text summary and stop; the host will then ask you to verify.`;
       const body = f.retryReason

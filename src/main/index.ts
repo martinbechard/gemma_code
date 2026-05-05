@@ -826,8 +826,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       // Look for a plan in the buffer. Two paths:
       //   - top-level (no active planState): persist the plan and stop, so
       //     the user can review and approve before any step executes.
-      //   - nested (active planState): the model is decomposing the current
-      //     step into a sub-plan; auto-execute as before.
+      //   - inside an active planState: nested plans are not allowed; they
+      //     turn into a recursive loop where each sub-plan re-emits the same
+      //     step prompt. Reject the plan and re-prompt the current step so
+      //     the model does the work directly.
       const planFound = findNextPlan(buffer);
       if (planFound && planFound !== "incomplete") {
         flushBufferToUI();
@@ -855,17 +857,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           emit({ type: "done" });
           return;
         }
-        try {
-          planState.pushNestedPlan(planFound);
-        } catch (e) {
-          emit({ type: "activity", activity: { kind: "idle" } });
-          emit({
-            type: "error",
-            error: `Plan rejected: ${(e as Error).message}`,
-          });
-          return;
-        }
-        drainPlanEvents();
+        // Nested plan inside an active step: reject and re-prompt the same
+        // step. The state machine is left untouched (still in step phase),
+        // so nextPrompt() returns the same step text again.
+        const corrective =
+          `You emitted a <plan> while inside an active plan step. That is not allowed and the plan was discarded. ` +
+          `Do the work for the current step directly using <action> tags, or write a brief plain-text summary if no tools are needed. ` +
+          `If the step is too large, do what you can and let verify fail with a reason describing what's left.`;
+        baseMessages.push({ role: "user", content: corrective });
         const next = planState.nextPrompt();
         if (!next) {
           emit({ type: "activity", activity: { kind: "idle" } });
