@@ -37,6 +37,7 @@ import {
   cleanFileContent,
   type ToolContext,
 } from "./tools";
+import { saveLastPrompt } from "./debugPrompt";
 import {
   ensureWorkspace,
   startWorkspaceServer,
@@ -421,9 +422,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       }
       const wsPath = await ensureWorkspace(req.conversationId);
       const href = previewUrl(req.conversationId);
+      // A user-supplied workingDir means we're editing an existing project
+      // (Code mode); without it we're in the per-conversation sandbox (Build).
+      const codeMode = req.workingDir ? "code" : "build";
       baseMessages.push({
         role: "system",
-        content: codeSystemPrompt(wsPath, href),
+        content: codeSystemPrompt(wsPath, href, codeMode),
       });
     } else {
       baseMessages.push({
@@ -581,6 +585,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
       emitRuntimeActivity("connecting to MLX");
       emitRuntimeActivity("waiting for first token");
+      // Persist the assembled conversation to <userData>/debug/last-system-prompt.txt
+      // so the human can inspect what the model actually receives. Overwritten
+      // every round so the file always reflects the latest call.
+      try {
+        saveLastPrompt(baseMessages, { mode: req.mode, model: req.model });
+      } catch {
+        // debug aid only; never let a write failure abort the chat round
+      }
       streamLoop: for await (const chunk of chatStream({
         model: req.model,
         messages: baseMessages,

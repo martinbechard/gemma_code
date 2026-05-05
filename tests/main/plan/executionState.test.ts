@@ -38,6 +38,9 @@ describe("PlanExecutionState — single step happy path", () => {
     expect(p1?.kind).toBe("step");
     expect(p1?.text).toContain("do explore");
     expect(p1?.text).toMatch(/do not emit another <plan>/i);
+    // Grounding reminder: every step prompt nudges the model to read
+    // the canonical file before adding host-project code.
+    expect(p1?.text).toMatch(/read.*canonical/i);
 
     s.finishStepBody();
 

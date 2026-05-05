@@ -12,15 +12,18 @@ import {
 } from "./workspace";
 import { appRootDir, isPackaged } from "./runtimePaths";
 
-const PROJECT_INSTRUCTIONS_FILE = "Gemma.md";
+const COMMON_INSTRUCTIONS_FILE = "Gemma.md";
 
-// Read Gemma.md from the app root (dev) or unpacked resources (packaged).
-// Returns null if the file is absent or unreadable so prompt assembly stays
-// well-defined even when the project file is missing.
-export function loadProjectInstructions(): string | null {
+export type PromptMode = "chat" | "code" | "build";
+
+// Read Gemma.md (common) and optionally Gemma.{mode}.md (mode-specific) from
+// the app root (dev) or unpacked resources (packaged). The mode-specific file
+// is appended after the common one so it can layer additional rules without
+// duplicating the shared baseline. Returns null if neither file is found.
+function readInstructionsFile(filename: string): string | null {
   const candidates = isPackaged()
-    ? [join(process.resourcesPath, PROJECT_INSTRUCTIONS_FILE)]
-    : [join(appRootDir(), PROJECT_INSTRUCTIONS_FILE)];
+    ? [join(process.resourcesPath, filename)]
+    : [join(appRootDir(), filename)];
   for (const p of candidates) {
     if (existsSync(p)) {
       try {
@@ -32,6 +35,16 @@ export function loadProjectInstructions(): string | null {
     }
   }
   return null;
+}
+
+export function loadProjectInstructions(mode?: PromptMode): string | null {
+  const common = readInstructionsFile(COMMON_INSTRUCTIONS_FILE);
+  const modeFile = mode ? readInstructionsFile(`Gemma.${mode}.md`) : null;
+  const parts: string[] = [];
+  if (common) parts.push(common);
+  if (modeFile) parts.push(modeFile);
+  if (parts.length === 0) return null;
+  return parts.join("\n\n");
 }
 
 export interface ToolContext {
@@ -494,10 +507,10 @@ function renderToolHelp(mode: "chat" | "code"): string {
   return lines.join("\n");
 }
 
-function projectInstructionsBlock(): string[] {
-  // Project instructions from Gemma.md are appended last so they override
-  // earlier guidance when the user customizes the file.
-  const md = loadProjectInstructions();
+function projectInstructionsBlock(mode?: PromptMode): string[] {
+  // Project instructions from Gemma.md (+ Gemma.{mode}.md) are appended last
+  // so they override earlier guidance when the user customizes the file.
+  const md = loadProjectInstructions(mode);
   if (!md) return [];
   return ["", "PROJECT INSTRUCTIONS", "====================", md];
 }
@@ -510,7 +523,7 @@ export function chatSystemPrompt(enableTools: boolean): string {
       "You are Gemma, an AI assistant running 100% locally on the user's Mac.",
       `Current date/time: ${now} (${day}). Timezone: ${tz()}.`,
       "Be clear, concise, and helpful. Use markdown for formatting when useful.",
-      ...projectInstructionsBlock(),
+      ...projectInstructionsBlock("chat"),
     ].join("\n");
   }
   return [
@@ -535,41 +548,24 @@ export function chatSystemPrompt(enableTools: boolean): string {
     "Tools:",
     "",
     renderToolHelp("chat"),
-    ...projectInstructionsBlock(),
+    ...projectInstructionsBlock("chat"),
   ].join("\n");
 }
 
 export function codeSystemPrompt(
   workspacePath: string,
   previewHref: string,
+  codeMode: "code" | "build" = "build",
 ): string {
   const now = new Date().toISOString();
   const day = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  // Behavioral guidance (what to build, file conventions, how to start) lives
+  // in the mode-specific Gemma.{code|build}.md addendum so it can vary by mode
+  // without rebuilding this prompt. This function only emits the structural
+  // baseline that is true for both modes.
   return [
     "You are Gemma, a local coding agent running entirely on the user's Mac.",
     `Date: ${now} (${day}). Workspace: ${workspacePath}. Preview: ${previewHref}`,
-    "",
-    "WHAT TO BUILD",
-    "You build small apps, pages, demos, and scripts. Quality matters — the user is watching.",
-    "- Modern, polished design by default: clean typography, generous whitespace, subtle gradients, rounded corners, smooth transitions. Dark-mode-friendly when it fits.",
-    "- Real-feeling copy, not lorem ipsum. Invent brand names and details.",
-    "- Make it actually work: click handlers wired, animations smooth, forms usable.",
-    "- Fetch real images only when asked; otherwise use CSS/SVG for illustrations.",
-    "",
-    "FILE STRUCTURE — PREFER MULTI-FILE FOR ANYTHING NON-TRIVIAL",
-    "- One-off widgets / tiny demos → single `index.html` with <style> + <script> inline.",
-    "- Landing pages, apps with state, anything > ~200 lines → split into:",
-    '    `index.html` — structure + <link rel="stylesheet" href="style.css"> + <script src="app.js" defer></script>',
-    "    `style.css`  — all styling",
-    "    `app.js`     — all behavior",
-    "- Multi-file is easier to read, edit later, and shows off modular thinking. Emit a separate write_file action for each file.",
-    "",
-    "HOW YOU WORK",
-    '1. Start with ONE sentence describing your plan (e.g., "I\'ll split this into index.html, style.css, and app.js."). Then IMMEDIATELY emit your first write_file action in the SAME response. Do NOT stop after planning — start building right away.',
-    '2. After each action, STOP and wait for the result. In subsequent turns, one sentence of narration (e.g., "Now the stylesheet."), then the action, then STOP.',
-    "3. After all files are written, call `open_preview`, then write a one-sentence plain-text summary. Emit no further actions.",
-    "",
-    "CRITICAL: You MUST emit a write_file action in your VERY FIRST response. Never respond with only a plan or description. Always start coding immediately.",
     "",
     "ACTION FORMAT — EXACT",
     '<action name="tool_name">',
@@ -583,28 +579,7 @@ export function codeSystemPrompt(
     "- Close <content> with </content> on its own line, immediately after the last line of the file.",
     "- Then close the action with </action> on its own line.",
     "",
-    "EXAMPLE — multi-file build (FIRST response)",
-    "",
-    "I'll split this into three files: index.html for structure, style.css for the design, and app.js for the countdown behavior. Starting with the HTML shell.",
-    "",
-    '<action name="write_file">',
-    "<path>index.html</path>",
-    "<content>",
-    "<!doctype html>",
-    '<html lang="en">',
-    "<head>",
-    '<meta charset="utf-8">',
-    "<title>Coming Soon</title>",
-    '<link rel="stylesheet" href="style.css">',
-    '<script src="app.js" defer></script>',
-    "</head>",
-    "<body><main><h1>Coming soon</h1></main></body>",
-    "</html>",
-    "</content>",
-    "</action>",
-    "",
-    "HARD RULES",
-    "- ALWAYS start coding in your first response. Never reply with only a plan.",
+    "HARD RULES (apply in every code/build session)",
     "- Never paste file contents in your chat reply — only inside <content>.",
     "- Never wrap <action> tags in ``` code fences.",
     "- Paths are relative to the workspace (no leading slashes).",
@@ -613,7 +588,7 @@ export function codeSystemPrompt(
     "AVAILABLE TOOLS",
     "",
     renderToolHelp("code"),
-    ...projectInstructionsBlock(),
+    ...projectInstructionsBlock(codeMode),
   ].join("\n");
 }
 

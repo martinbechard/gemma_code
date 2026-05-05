@@ -52,7 +52,9 @@ export async function runChat(opts: AgentRunOptions): Promise<void> {
       const href = previewUrl(conversationId);
       messages.push({
         role: "system",
-        content: codeSystemPrompt(wsPath, href),
+        // CLI always runs against the user's current directory, so it is
+        // always Code mode (never the per-conversation sandbox).
+        content: codeSystemPrompt(wsPath, href, "code"),
       });
       meta(`workspace: ${wsPath} (cwd)`);
       meta(`preview:   ${href}`);
