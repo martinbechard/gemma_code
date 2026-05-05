@@ -37,5 +37,9 @@ workspaces/
 # MLX venv (auto-provisioned at runtime in userData)
 mlx-venv/
 
+# Local Python virtualenvs used for MLX debugging / development
+.venv/
+.venv*/
+
 # macOS iconset intermediates (the .icns is tracked)
 build/icon.iconset/

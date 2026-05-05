@@ -8,9 +8,42 @@ type AppState =
   | { phase: 'setup'; status: SetupStatus; model: string }
   | { phase: 'ready'; model: string }
   | { phase: 'switching'; model: string; toModel: string; status: SetupStatus }
+type RepairCapableApi = typeof window.api & { repairModel?: (model: string) => Promise<void> }
 
 export default function App() {
   const [state, setState] = useState<AppState>({ phase: 'boot' })
+
+  function handleRepairModel(model: string): void {
+    setState((prev) => {
+      if (prev.phase === 'setup') {
+        return {
+          phase: 'setup',
+          model,
+          status: { stage: 'repairing-model', message: 'Resuming model download…' }
+        }
+      }
+      if (prev.phase === 'ready') {
+        return {
+          phase: 'setup',
+          model,
+          status: { stage: 'repairing-model', message: 'Resuming model download…' }
+        }
+      }
+      if (prev.phase === 'switching') {
+        return {
+          ...prev,
+          status: { stage: 'repairing-model', message: 'Resuming model download…' }
+        }
+      }
+      return prev
+    })
+    const api = window.api as RepairCapableApi
+    if (typeof api.repairModel === 'function') {
+      void api.repairModel(model)
+      return
+    }
+    void window.api.startSetup(model)
+  }
 
   useEffect(() => {
     // Forward raw Gemma output to devtools console for debugging
@@ -30,6 +63,9 @@ export default function App() {
             return { phase: 'ready', model: prev.phase === 'setup' ? prev.model : DEFAULT_MODEL }
           }
           if (status.stage === 'error') {
+            if (status.repair) {
+              return { phase: 'setup', status, model: status.repair.model }
+            }
             // If switch failed, go back to the previous model
             if (prev.phase === 'switching') {
               return { phase: 'ready', model: prev.model }
@@ -107,6 +143,7 @@ export default function App() {
             })
             window.api.startSetup(model)
           }}
+          onRepairModel={handleRepairModel}
         />
       </div>
     )

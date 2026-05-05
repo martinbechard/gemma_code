@@ -1,178 +1,207 @@
-import { app } from 'electron'
-import { createServer, type Server } from 'http'
-import { createReadStream } from 'fs'
-import { mkdir, readFile, writeFile, readdir, stat, access, rm, rename } from 'fs/promises'
-import { join, resolve, dirname, extname, relative, sep } from 'path'
-import { spawn } from 'child_process'
+import { createServer, type Server } from "http";
+import { createReadStream } from "fs";
+import {
+  mkdir,
+  readFile,
+  writeFile,
+  readdir,
+  stat,
+  access,
+  rm,
+  rename,
+} from "fs/promises";
+import { join, resolve, dirname, extname, relative, sep } from "path";
+import { spawn } from "child_process";
+import { userDataDir } from "./runtimePaths";
 
-let server: Server | null = null
-let serverPort = 0
+let server: Server | null = null;
+let serverPort = 0;
+
+// Per-conversation overrides for workspaceDir. The CLI uses this to run
+// against an arbitrary directory (process.cwd()) instead of the per-id
+// sandbox under userData, while the Electron app continues to use the
+// sandbox by leaving the override unset.
+const workspaceOverrides = new Map<string, string>();
 
 export function workspacesRoot(): string {
-  return join(app.getPath('userData'), 'workspaces')
+  return join(userDataDir(), "workspaces");
 }
 
 export function workspaceDir(conversationId: string): string {
-  return join(workspacesRoot(), sanitizeId(conversationId))
+  const id = sanitizeId(conversationId);
+  const override = workspaceOverrides.get(id);
+  if (override) return override;
+  return join(workspacesRoot(), id);
+}
+
+export function setWorkspaceOverride(
+  conversationId: string,
+  absolutePath: string,
+): void {
+  workspaceOverrides.set(sanitizeId(conversationId), resolve(absolutePath));
+}
+
+export function clearWorkspaceOverride(conversationId: string): void {
+  workspaceOverrides.delete(sanitizeId(conversationId));
 }
 
 function sanitizeId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'default'
+  return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "default";
 }
 
 export async function ensureWorkspace(conversationId: string): Promise<string> {
-  const dir = workspaceDir(conversationId)
-  await mkdir(dir, { recursive: true })
-  return dir
+  const dir = workspaceDir(conversationId);
+  await mkdir(dir, { recursive: true });
+  return dir;
 }
 
 export function assertInWorkspace(base: string, target: string): string {
-  const resolved = resolve(base, target)
-  const rel = relative(base, resolved)
-  if (rel.startsWith('..') || rel.startsWith('/') || rel.includes('..' + sep)) {
-    throw new Error(`Path escapes workspace: ${target}`)
+  const resolved = resolve(base, target);
+  const rel = relative(base, resolved);
+  if (rel.startsWith("..") || rel.startsWith("/") || rel.includes(".." + sep)) {
+    throw new Error(`Path escapes workspace: ${target}`);
   }
-  return resolved
+  return resolved;
 }
 
 const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.htm': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.cjs': 'text/javascript; charset=utf-8',
-  '.ts': 'text/javascript; charset=utf-8',
-  '.jsx': 'text/javascript; charset=utf-8',
-  '.tsx': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8',
-  '.md': 'text/markdown; charset=utf-8',
-  '.pdf': 'application/pdf',
-  '.wasm': 'application/wasm',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2'
-}
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".cjs": "text/javascript; charset=utf-8",
+  ".ts": "text/javascript; charset=utf-8",
+  ".jsx": "text/javascript; charset=utf-8",
+  ".tsx": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".pdf": "application/pdf",
+  ".wasm": "application/wasm",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
 
 export async function startWorkspaceServer(): Promise<number> {
-  if (server) return serverPort
-  await mkdir(workspacesRoot(), { recursive: true })
+  if (server) return serverPort;
+  await mkdir(workspacesRoot(), { recursive: true });
 
   server = createServer(async (req, res) => {
     try {
-      const origin = req.headers.origin
-      res.setHeader('Access-Control-Allow-Origin', origin ?? '*')
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-      res.setHeader('Access-Control-Allow-Headers', 'content-type')
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
-      res.setHeader('Pragma', 'no-cache')
+      const origin = req.headers.origin;
+      res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "content-type");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204)
-        res.end()
-        return
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
       }
 
-      const url = new URL(req.url ?? '/', `http://localhost`)
-      const parts = url.pathname.split('/').filter(Boolean)
+      const url = new URL(req.url ?? "/", `http://localhost`);
+      const parts = url.pathname.split("/").filter(Boolean);
       if (parts.length === 0) {
-        res.writeHead(200, { 'content-type': 'text/plain' })
-        res.end('gemma-chat workspace server')
-        return
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("gemma-chat workspace server");
+        return;
       }
-      const id = parts[0]
-      const root = workspaceDir(id)
-      const rel = parts.slice(1).join('/') || ''
-      let target: string
+      const id = parts[0];
+      const root = workspaceDir(id);
+      const rel = parts.slice(1).join("/") || "";
+      let target: string;
       try {
-        target = assertInWorkspace(root, rel)
+        target = assertInWorkspace(root, rel);
       } catch {
-        res.writeHead(400, { 'content-type': 'text/plain' })
-        res.end('Bad path')
-        return
+        res.writeHead(400, { "content-type": "text/plain" });
+        res.end("Bad path");
+        return;
       }
 
-      let s
+      let s;
       try {
-        s = await stat(target)
+        s = await stat(target);
       } catch {
         // Maybe it's a root with no index yet — render placeholder
-        if (rel === '' || rel === '/') {
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-          res.end(renderPlaceholder(id))
-          return
+        if (rel === "" || rel === "/") {
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderPlaceholder(id));
+          return;
         }
-        res.writeHead(404, { 'content-type': 'text/plain' })
-        res.end('Not found')
-        return
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("Not found");
+        return;
       }
 
       if (s.isDirectory()) {
-        const indexPath = join(target, 'index.html')
+        const indexPath = join(target, "index.html");
         try {
-          await access(indexPath)
-          const body = await readFile(indexPath)
-          res.writeHead(200, { 'content-type': MIME['.html'] })
-          res.end(body)
-          return
+          await access(indexPath);
+          const body = await readFile(indexPath);
+          res.writeHead(200, { "content-type": MIME[".html"] });
+          res.end(body);
+          return;
         } catch {
           // directory listing
-          const entries = await readdir(target, { withFileTypes: true })
+          const entries = await readdir(target, { withFileTypes: true });
           const files = entries.map((e) => ({
             name: e.name,
-            kind: e.isDirectory() ? 'dir' : 'file'
-          }))
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-          res.end(renderDirList(id, rel, files))
-          return
+            kind: e.isDirectory() ? "dir" : "file",
+          }));
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderDirList(id, rel, files));
+          return;
         }
       }
 
-      const ext = extname(target).toLowerCase()
-      const mime = MIME[ext] ?? 'application/octet-stream'
+      const ext = extname(target).toLowerCase();
+      const mime = MIME[ext] ?? "application/octet-stream";
       res.writeHead(200, {
-        'content-type': mime,
-        'content-length': s.size
-      })
-      createReadStream(target).pipe(res)
+        "content-type": mime,
+        "content-length": s.size,
+      });
+      createReadStream(target).pipe(res);
     } catch (e) {
-      res.writeHead(500, { 'content-type': 'text/plain' })
-      res.end((e as Error).message)
+      res.writeHead(500, { "content-type": "text/plain" });
+      res.end((e as Error).message);
     }
-  })
+  });
 
   await new Promise<void>((resolve, reject) => {
-    server!.once('error', reject)
-    server!.listen(0, '127.0.0.1', () => resolve())
-  })
-  const addr = server.address()
-  if (addr && typeof addr !== 'string') {
-    serverPort = addr.port
+    server!.once("error", reject);
+    server!.listen(0, "127.0.0.1", () => resolve());
+  });
+  const addr = server.address();
+  if (addr && typeof addr !== "string") {
+    serverPort = addr.port;
   }
-  return serverPort
+  return serverPort;
 }
 
 export function stopWorkspaceServer(): void {
   if (server) {
-    server.close()
-    server = null
-    serverPort = 0
+    server.close();
+    server = null;
+    serverPort = 0;
   }
 }
 
 export function getWorkspaceServerPort(): number {
-  return serverPort
+  return serverPort;
 }
 
 export function previewUrl(conversationId: string): string {
-  return `http://127.0.0.1:${serverPort}/${sanitizeId(conversationId)}/`
+  return `http://127.0.0.1:${serverPort}/${sanitizeId(conversationId)}/`;
 }
 
 function renderPlaceholder(_id: string): string {
@@ -188,20 +217,20 @@ function renderPlaceholder(_id: string): string {
   <div class="title">No preview yet</div>
   <div>Ask Gemma to create <code style="color:#bbb">index.html</code> to see it here.</div>
 </div>
-</body></html>`
+</body></html>`;
 }
 
 function renderDirList(
   id: string,
   rel: string,
-  files: Array<{ name: string; kind: string }>
+  files: Array<{ name: string; kind: string }>,
 ): string {
   const rows = files
     .map(
       (f) =>
-        `<li><a href="/${id}/${rel}${rel ? '/' : ''}${f.name}">${escapeHtml(f.name)}</a> <span class="k">${f.kind}</span></li>`
+        `<li><a href="/${id}/${rel}${rel ? "/" : ""}${f.name}">${escapeHtml(f.name)}</a> <span class="k">${f.kind}</span></li>`,
     )
-    .join('')
+    .join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(rel || id)}</title>
 <style>
   body{margin:0;padding:24px 28px;background:#0e0e0e;color:#e8e8e8;font:13.5px/1.6 -apple-system,BlinkMacSystemFont,sans-serif}
@@ -212,79 +241,82 @@ function renderDirList(
   a:hover{color:#7aa2f7}
   .k{color:#555;font-size:11px;margin-left:8px}
 </style></head><body>
-<h1>/${escapeHtml(rel || '')}</h1>
+<h1>/${escapeHtml(rel || "")}</h1>
 <ul>${rows}</ul>
-</body></html>`
+</body></html>`;
 }
 
 function escapeHtml(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 export interface FileEntry {
-  path: string
-  kind: 'file' | 'dir'
-  size?: number
+  path: string;
+  kind: "file" | "dir";
+  size?: number;
 }
 
 export async function listTree(base: string, max = 200): Promise<FileEntry[]> {
-  const out: FileEntry[] = []
+  const out: FileEntry[] = [];
   async function walk(dir: string, prefix: string): Promise<void> {
-    if (out.length >= max) return
-    let entries
+    if (out.length >= max) return;
+    let entries;
     try {
-      entries = await readdir(dir, { withFileTypes: true })
+      entries = await readdir(dir, { withFileTypes: true });
     } catch {
-      return
+      return;
     }
     entries.sort((a, b) => {
-      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
     for (const e of entries) {
-      if (e.name.startsWith('.')) continue
-      if (e.name === 'node_modules') continue
-      const p = prefix ? `${prefix}/${e.name}` : e.name
+      if (e.name.startsWith(".")) continue;
+      if (e.name === "node_modules") continue;
+      const p = prefix ? `${prefix}/${e.name}` : e.name;
       if (e.isDirectory()) {
-        out.push({ path: p, kind: 'dir' })
-        await walk(join(dir, e.name), p)
+        out.push({ path: p, kind: "dir" });
+        await walk(join(dir, e.name), p);
       } else {
         try {
-          const s = await stat(join(dir, e.name))
-          out.push({ path: p, kind: 'file', size: s.size })
+          const s = await stat(join(dir, e.name));
+          out.push({ path: p, kind: "file", size: s.size });
         } catch {
-          out.push({ path: p, kind: 'file' })
+          out.push({ path: p, kind: "file" });
         }
       }
-      if (out.length >= max) return
+      if (out.length >= max) return;
     }
   }
-  await walk(base, '')
-  return out
+  await walk(base, "");
+  return out;
 }
 
 export async function wsWriteFile(
   conversationId: string,
   path: string,
-  content: string
+  content: string,
 ): Promise<string> {
-  const base = await ensureWorkspace(conversationId)
-  const target = assertInWorkspace(base, path)
-  await mkdir(dirname(target), { recursive: true })
-  const tmp = target + '.tmp-' + Date.now()
-  await writeFile(tmp, content, 'utf-8')
-  await rename(tmp, target)
-  return target
+  const base = await ensureWorkspace(conversationId);
+  const target = assertInWorkspace(base, path);
+  await mkdir(dirname(target), { recursive: true });
+  const tmp = target + ".tmp-" + Date.now();
+  await writeFile(tmp, content, "utf-8");
+  await rename(tmp, target);
+  return target;
 }
 
-export async function wsReadFile(conversationId: string, path: string): Promise<string> {
-  const base = await ensureWorkspace(conversationId)
-  const target = assertInWorkspace(base, path)
-  return readFile(target, 'utf-8')
+export async function wsReadFile(
+  conversationId: string,
+  path: string,
+): Promise<string> {
+  const base = await ensureWorkspace(conversationId);
+  const target = assertInWorkspace(base, path);
+  return readFile(target, "utf-8");
 }
 
 export async function wsEditFile(
@@ -292,106 +324,114 @@ export async function wsEditFile(
   path: string,
   oldString: string,
   newString: string,
-  replaceAll = false
+  replaceAll = false,
 ): Promise<{ occurrences: number }> {
-  const content = await wsReadFile(conversationId, path)
+  const content = await wsReadFile(conversationId, path);
   if (replaceAll) {
-    const parts = content.split(oldString)
-    if (parts.length === 1) throw new Error(`old_string not found in ${path}`)
-    const next = parts.join(newString)
-    await wsWriteFile(conversationId, path, next)
-    return { occurrences: parts.length - 1 }
+    const parts = content.split(oldString);
+    if (parts.length === 1) throw new Error(`old_string not found in ${path}`);
+    const next = parts.join(newString);
+    await wsWriteFile(conversationId, path, next);
+    return { occurrences: parts.length - 1 };
   }
-  const idx = content.indexOf(oldString)
-  if (idx < 0) throw new Error(`old_string not found in ${path}`)
-  const second = content.indexOf(oldString, idx + oldString.length)
+  const idx = content.indexOf(oldString);
+  if (idx < 0) throw new Error(`old_string not found in ${path}`);
+  const second = content.indexOf(oldString, idx + oldString.length);
   if (second >= 0) {
-    throw new Error(`old_string appears multiple times in ${path}. Use replace_all or add context.`)
+    throw new Error(
+      `old_string appears multiple times in ${path}. Use replace_all or add context.`,
+    );
   }
-  const next = content.slice(0, idx) + newString + content.slice(idx + oldString.length)
-  await wsWriteFile(conversationId, path, next)
-  return { occurrences: 1 }
+  const next =
+    content.slice(0, idx) + newString + content.slice(idx + oldString.length);
+  await wsWriteFile(conversationId, path, next);
+  return { occurrences: 1 };
 }
 
-export async function wsDeleteFile(conversationId: string, path: string): Promise<void> {
-  const base = await ensureWorkspace(conversationId)
-  const target = assertInWorkspace(base, path)
-  await rm(target, { recursive: true, force: true })
+export async function wsDeleteFile(
+  conversationId: string,
+  path: string,
+): Promise<void> {
+  const base = await ensureWorkspace(conversationId);
+  const target = assertInWorkspace(base, path);
+  await rm(target, { recursive: true, force: true });
 }
 
 export interface BashResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-  truncated: boolean
-  durationMs: number
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  durationMs: number;
 }
 
 const BASH_DENY =
-  /\b(rm\s+-rf\s+\/|sudo|:\(\)\s*\{|chmod\s+777\s+\/|mkfs|dd\s+if=|shutdown|reboot)/i
+  /\b(rm\s+-rf\s+\/|sudo|:\(\)\s*\{|chmod\s+777\s+\/|mkfs|dd\s+if=|shutdown|reboot)/i;
 
 export async function wsRunBash(
   conversationId: string,
   command: string,
   timeoutMs = 60_000,
-  maxBytes = 16_000
+  maxBytes = 16_000,
 ): Promise<BashResult> {
   if (BASH_DENY.test(command)) {
-    throw new Error('Blocked by safety policy: command contains a denied pattern.')
+    throw new Error(
+      "Blocked by safety policy: command contains a denied pattern.",
+    );
   }
-  const base = await ensureWorkspace(conversationId)
-  const start = Date.now()
+  const base = await ensureWorkspace(conversationId);
+  const start = Date.now();
 
   return new Promise((resolve) => {
-    const proc = spawn('/bin/bash', ['-lc', command], {
+    const proc = spawn("/bin/bash", ["-lc", command], {
       cwd: base,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }
-    })
-    let stdout = ''
-    let stderr = ''
-    let truncated = false
+      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    });
+    let stdout = "";
+    let stderr = "";
+    let truncated = false;
     const killTimer = setTimeout(() => {
-      proc.kill('SIGKILL')
-      truncated = true
-    }, timeoutMs)
+      proc.kill("SIGKILL");
+      truncated = true;
+    }, timeoutMs);
 
-    proc.stdout.on('data', (d: Buffer) => {
+    proc.stdout.on("data", (d: Buffer) => {
       if (stdout.length < maxBytes) {
-        stdout += d.toString('utf-8')
+        stdout += d.toString("utf-8");
         if (stdout.length >= maxBytes) {
-          stdout = stdout.slice(0, maxBytes) + '\n[…output truncated]'
-          truncated = true
+          stdout = stdout.slice(0, maxBytes) + "\n[…output truncated]";
+          truncated = true;
         }
       }
-    })
-    proc.stderr.on('data', (d: Buffer) => {
+    });
+    proc.stderr.on("data", (d: Buffer) => {
       if (stderr.length < maxBytes) {
-        stderr += d.toString('utf-8')
+        stderr += d.toString("utf-8");
         if (stderr.length >= maxBytes) {
-          stderr = stderr.slice(0, maxBytes) + '\n[…stderr truncated]'
-          truncated = true
+          stderr = stderr.slice(0, maxBytes) + "\n[…stderr truncated]";
+          truncated = true;
         }
       }
-    })
-    proc.on('close', (code) => {
-      clearTimeout(killTimer)
+    });
+    proc.on("close", (code) => {
+      clearTimeout(killTimer);
       resolve({
         exitCode: code,
         stdout,
         stderr,
         truncated,
-        durationMs: Date.now() - start
-      })
-    })
-    proc.on('error', (e) => {
-      clearTimeout(killTimer)
+        durationMs: Date.now() - start,
+      });
+    });
+    proc.on("error", (e) => {
+      clearTimeout(killTimer);
       resolve({
         exitCode: -1,
         stdout,
-        stderr: (stderr + '\n' + String(e)).trim(),
+        stderr: (stderr + "\n" + String(e)).trim(),
         truncated,
-        durationMs: Date.now() - start
-      })
-    })
-  })
+        durationMs: Date.now() - start,
+      });
+    });
+  });
 }

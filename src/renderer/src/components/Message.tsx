@@ -169,6 +169,9 @@ function ActivityBar({
       const verbs = GENERATING_VERBS
       return verbs[verbIdx % verbs.length]
     }
+    if (activity.kind === 'runtime') {
+      return activity.detail ? `${activity.label} · ${activity.detail}` : activity.label
+    }
     if (activity.kind === 'tool') {
       const verb = toolVerb(activity.tool)
       return activity.target ? `${verb} ${activity.target}` : verb
@@ -181,13 +184,17 @@ function ActivityBar({
   if (hasRunningTool && activity.kind === 'tool') return null
 
   const chars = (activity as { chars?: number }).chars
+  const elapsedSeconds = activity.kind === 'runtime' ? activity.elapsedSeconds : undefined
   return (
     <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-400">
       <span className="shimmer-text">{label}…</span>
       <span className="tabular-nums text-ink-400/70">
         {chars != null && chars > 0 ? `${chars.toLocaleString()} chars · ` : ''}
-        {formatElapsed(elapsed)}
+        {formatElapsed(elapsedSeconds ?? elapsed)}
       </span>
+      {activity.kind === 'runtime' && activity.model && (
+        <span className="truncate font-mono text-ink-400">{activity.model}</span>
+      )}
     </div>
   )
 }

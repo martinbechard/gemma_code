@@ -16,12 +16,11 @@
 
 <img width="960" height="593" alt="Gemma4-Vibecoding" src="https://github.com/user-attachments/assets/4c45a83c-7c87-4c70-a293-fe475b7e34fa" />
 
-
 What if you could vibe code from an airplane? Or a cabin with no cell signal? Or just... without sending your code to someone else's server?
 
-**Gemma Chat** is an open-source Electron app that runs Gemma 4 natively on Apple Silicon. You describe what you want to build, and it writes the code — HTML, CSS, JavaScript, multi-file projects — with a live preview that updates as the model types. No internet connection needed after the initial model download.
+**Gemma Chat** is an open-source Electron app that runs Gemma natively on Apple Silicon. You describe what you want to build, and it writes the code — HTML, CSS, JavaScript, multi-file projects — with a live preview that updates as the model types. No internet connection needed after the initial model download.
 
-It's a proof-of-concept for **fully offline, local-first vibe coding** using a small open model. The model is ~3 GB. The whole thing runs on your laptop.
+It's a proof-of-concept for **fully offline, local-first vibe coding** using a small open model. The recommended model is ~3.2 GB. The whole thing runs on your laptop.
 
 ## How It Works
 
@@ -42,12 +41,23 @@ Everything happens locally. The model runs via [MLX-LM](https://github.com/ml-ex
 
 ## Available Models
 
-| Model | Size | Best For |
-|---|---|---|
-| Gemma 4 E2B | ~1.5 GB | Fast Q&A, simple tasks |
-| **Gemma 4 E4B** | **~3 GB** | **Recommended.** Speed + capability balance |
-| Gemma 4 27B MoE | ~8 GB | Stronger reasoning (needs 16 GB+ RAM) |
-| Gemma 4 31B | ~18 GB | Maximum quality (needs 32 GB+ RAM) |
+| Model                                                                                 | Size    | Best For                 |
+| ------------------------------------------------------------------------------------- | ------- | ------------------------ |
+| [Gemma 3 Text 4B (MLX)](https://huggingface.co/mlx-community/gemma-3-text-4b-it-4bit) | ~3.2 GB | Default local chat model |
+
+### MLX Smoke Test
+
+Use the standalone smoke test to verify that the app-managed MLX environment can start the local server and complete both non-streaming and streaming chat requests:
+
+```bash
+node scripts/test-mlx.mjs
+```
+
+You can pass another Hugging Face model ID when validating a candidate model:
+
+```bash
+node scripts/test-mlx.mjs mlx-community/gemma-3-text-4b-it-4bit
+```
 
 ## Getting Started
 
@@ -60,7 +70,7 @@ npm install
 npm run dev
 ```
 
-First launch will auto-detect Python → create a venv → install MLX-LM → download the model (~3 GB) → ready to vibe code.
+First launch will auto-detect Python → create a venv → install MLX packages (`mlx`, `mlx-lm`, `mlx-vlm`) → download the selected MLX model → ready to vibe code.
 
 > **Tip:** Install Python via Homebrew if you don't have it: `brew install python@3.13`
 
@@ -74,12 +84,12 @@ Produces a signed `.dmg` in `dist/`. Share it directly — recipients just drag 
 
 ## Tech Stack
 
-| Layer | Tech |
-|---|---|
-| App Shell | Electron + Vite + React 19 + TypeScript + Tailwind |
-| Model Runtime | MLX-LM (auto-installed into a local venv) |
-| Speech-to-Text | transformers.js (Whisper, runs in-browser via WASM) |
-| Workspace | Per-conversation sandboxed filesystem + local HTTP server |
+| Layer          | Tech                                                      |
+| -------------- | --------------------------------------------------------- |
+| App Shell      | Electron + Vite + React 19 + TypeScript + Tailwind        |
+| Model Runtime  | MLX-LM (auto-installed into a local venv)                 |
+| Speech-to-Text | transformers.js (Whisper, runs in-browser via WASM)       |
+| Workspace      | Per-conversation sandboxed filesystem + local HTTP server |
 
 ## Architecture
 

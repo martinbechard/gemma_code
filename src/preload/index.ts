@@ -12,6 +12,8 @@ const api = {
 
   switchModel: (model: string): Promise<void> => ipcRenderer.invoke('model:switch', model),
 
+  repairModel: (model: string): Promise<void> => ipcRenderer.invoke('model:repair', model),
+
   checkMLX: (): Promise<{ hasMLX: boolean }> => ipcRenderer.invoke('setup:status'),
 
   onSetupStatus: (cb: (s: SetupStatus) => void): (() => void) => {
