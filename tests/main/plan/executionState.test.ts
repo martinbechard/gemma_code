@@ -66,6 +66,41 @@ describe("PlanExecutionState — single step happy path", () => {
     const ends = endEvents(events);
     expect(ends.map((e) => e.status)).toEqual(["ok", "ok", "ok"]);
   });
+
+  it("plan_node_start for step carries the original prompt text", () => {
+    const s = new PlanExecutionState(plan({ name: "explore" }), {
+      idGen: counter(),
+    });
+    s.nextPrompt();
+    const ev = startEvents(s.drainEvents()).find((e) => e.kind === "step");
+    expect(ev?.prompt).toBe("do explore");
+  });
+
+  it("plan_node_start for verify carries the original criterion text", () => {
+    const s = new PlanExecutionState(plan({ name: "explore" }), {
+      idGen: counter(),
+    });
+    s.nextPrompt();
+    s.finishStepBody();
+    s.nextPrompt();
+    const ev = startEvents(s.drainEvents()).find((e) => e.kind === "verify");
+    expect(ev?.criterion).toBe("explore ok");
+  });
+
+  it("plan_node_end for verify failure carries the reason", () => {
+    const s = new PlanExecutionState(plan({ name: "x" }), {
+      idGen: counter(),
+      maxRetries: 0,
+    });
+    s.nextPrompt();
+    s.finishStepBody();
+    s.nextPrompt();
+    s.applyVerify({ result: "fail", reason: "missing artifact" });
+    const verifyEnds = endEvents(s.drainEvents()).filter(
+      (e) => e.kind === "verify",
+    );
+    expect(verifyEnds[0]?.reason).toBe("missing artifact");
+  });
 });
 
 describe("PlanExecutionState — verify=none auto-advance", () => {

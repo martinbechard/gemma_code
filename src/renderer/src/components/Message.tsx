@@ -4,6 +4,7 @@ import type {
   AgentActivity,
   ChatMessage,
   PlanNode,
+  ProposedStep,
   ToolCall,
 } from "@shared/types";
 import gemmaLogoUrl from "../assets/gemma-logo.png";
@@ -13,6 +14,7 @@ interface Props {
   isLast: boolean;
   streaming: boolean;
   onRegenerate?: () => void;
+  onExecutePlan?: () => void;
 }
 
 interface Parsed {
@@ -42,7 +44,12 @@ function parseThinking(content: string): Parsed {
   };
 }
 
-export default function Message({ message, streaming, onRegenerate }: Props) {
+export default function Message({
+  message,
+  streaming,
+  onRegenerate,
+  onExecutePlan,
+}: Props) {
   const isUser = message.role === "user";
   const parsed = useMemo(
     () => parseThinking(message.content),
@@ -91,6 +98,14 @@ export default function Message({ message, streaming, onRegenerate }: Props) {
           <ThinkingBlock
             content={parsed.thinking}
             inProgress={parsed.thinkingInProgress}
+          />
+        )}
+
+        {message.proposedPlan && message.proposedPlan.length > 0 && (
+          <PlanProposalView
+            steps={message.proposedPlan}
+            executed={!!message.planExecuted}
+            onExecute={onExecutePlan}
           />
         )}
 
@@ -495,10 +510,14 @@ function PlanRow({
   const { node, children } = tree;
   const running = node.status === "running";
   const isStep = node.kind === "step";
+  const isVerify = node.kind === "verify";
   const stepCalls = isStep
     ? toolCalls.filter((tc) => tc.parentStepId === node.id)
     : [];
-  const expandable = isStep && (stepCalls.length > 0 || children.length > 0);
+  const expandable =
+    (isStep &&
+      (!!node.prompt || stepCalls.length > 0 || children.length > 0)) ||
+    (isVerify && (!!node.criterion || !!node.reason));
   const [open, setOpen] = useState(running);
 
   const label =
@@ -508,7 +527,11 @@ function PlanRow({
         ? node.name
           ? `Step: ${node.name}`
           : "Step"
-        : "Verify";
+        : node.status === "failed"
+          ? "Verify: fail"
+          : node.status === "ok"
+            ? "Verify: pass"
+            : "Verify";
 
   const headerInner = (
     <>
@@ -543,6 +566,8 @@ function PlanRow({
     </>
   );
 
+  const bodyPad = (depth + 1) * 14;
+
   return (
     <>
       {expandable ? (
@@ -564,8 +589,46 @@ function PlanRow({
       )}
       {(!expandable || open) && (
         <>
+          {isStep && node.prompt && (
+            <div style={{ paddingLeft: bodyPad }} className="my-1">
+              <div className="rounded-md border border-white/5 bg-black/20 px-2.5 py-1.5">
+                <div className="mb-0.5 text-[10.5px] uppercase tracking-wide text-ink-400/80">
+                  Prompt
+                </div>
+                <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-ink-200">
+                  {node.prompt}
+                </div>
+              </div>
+            </div>
+          )}
+          {isVerify && (node.criterion || node.reason) && (
+            <div style={{ paddingLeft: bodyPad }} className="my-1">
+              <div className="rounded-md border border-white/5 bg-black/20 px-2.5 py-1.5">
+                {node.criterion && (
+                  <>
+                    <div className="mb-0.5 text-[10.5px] uppercase tracking-wide text-ink-400/80">
+                      Criterion
+                    </div>
+                    <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-ink-200">
+                      {node.criterion}
+                    </div>
+                  </>
+                )}
+                {node.reason && (
+                  <>
+                    <div className="mb-0.5 mt-2 text-[10.5px] uppercase tracking-wide text-red-400/80">
+                      Fail reason
+                    </div>
+                    <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-red-300">
+                      {node.reason}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {stepCalls.length > 0 && (
-            <div style={{ paddingLeft: (depth + 1) * 14 }} className="my-1">
+            <div style={{ paddingLeft: bodyPad }} className="my-1">
               {stepCalls.map((tc) => (
                 <ToolCallView key={tc.id} call={tc} />
               ))}
@@ -598,6 +661,81 @@ function PlanView({
       {trees.map((t) => (
         <PlanRow key={t.node.id} tree={t} depth={0} toolCalls={toolCalls} />
       ))}
+    </div>
+  );
+}
+
+function PlanProposalView({
+  steps,
+  executed,
+  onExecute,
+}: {
+  steps: ProposedStep[];
+  executed: boolean;
+  onExecute?: () => void;
+}) {
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-amber-300/20 bg-amber-300/[0.04] px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-[12px] font-medium text-amber-200/90">
+          {executed ? "Plan approved" : "Proposed plan"}
+          <span className="ml-1.5 text-[11px] text-ink-400">
+            ({steps.length} {steps.length === 1 ? "step" : "steps"})
+          </span>
+        </div>
+        {!executed && onExecute && (
+          <button
+            type="button"
+            onClick={onExecute}
+            className="rounded-md bg-amber-300/15 px-2.5 py-1 text-[11.5px] font-medium text-amber-100 transition hover:bg-amber-300/25"
+          >
+            Execute Plan
+          </button>
+        )}
+      </div>
+      <ol className="flex flex-col gap-0.5">
+        {steps.map((s, i) => {
+          const open = openIdx === i;
+          return (
+            <li key={i}>
+              <button
+                type="button"
+                onClick={() => setOpenIdx(open ? null : i)}
+                className="flex w-full items-center gap-2 py-0.5 text-left text-[12.5px] hover:bg-white/[0.02]"
+              >
+                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center font-mono text-ink-400">
+                  {i + 1}.
+                </span>
+                <span className="text-ink-100">{s.name}</span>
+                <svg
+                  viewBox="0 0 12 12"
+                  className={`h-2.5 w-2.5 shrink-0 text-ink-400 transition ${open ? "rotate-90" : ""}`}
+                  fill="currentColor"
+                >
+                  <path d="M4 2l4 4-4 4V2z" />
+                </svg>
+              </button>
+              {open && (
+                <div className="my-1 ml-6 rounded-md border border-white/5 bg-black/20 px-2.5 py-1.5">
+                  <div className="mb-0.5 text-[10.5px] uppercase tracking-wide text-ink-400/80">
+                    Prompt
+                  </div>
+                  <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-ink-200">
+                    {s.prompt}
+                  </div>
+                  <div className="mb-0.5 mt-2 text-[10.5px] uppercase tracking-wide text-ink-400/80">
+                    Verify
+                  </div>
+                  <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-ink-200">
+                    {s.verify}
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

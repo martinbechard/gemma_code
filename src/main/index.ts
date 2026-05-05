@@ -54,6 +54,7 @@ import { setRuntimePaths } from "./runtimePaths";
 import { findNextPlan, parseVerifyResult } from "./plan/parser";
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
+import { clearPlan, loadPlan, savePlan } from "./plan/planStore";
 
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
@@ -473,6 +474,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             id: ev.id,
             parentId: ev.parentId,
             name: ev.name,
+            prompt: ev.prompt,
+            criterion: ev.criterion,
           });
         } else {
           emit({
@@ -480,10 +483,37 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             kind: ev.kind,
             id: ev.id,
             status: ev.status,
+            reason: ev.reason,
           });
         }
       }
     };
+
+    // executePlan path: a previously-proposed plan was approved by the user.
+    // Load it, build the state machine, and seed the first step's synthetic
+    // user prompt so the loop's first round streams the model's work for it.
+    if (req.executePlan) {
+      const saved = loadPlan(req.conversationId);
+      if (!saved) {
+        emit({ type: "activity", activity: { kind: "idle" } });
+        emit({
+          type: "error",
+          error: "No proposed plan to execute for this conversation.",
+        });
+        return;
+      }
+      clearPlan(req.conversationId);
+      planState = new PlanExecutionState(saved);
+      drainPlanEvents();
+      const next = planState.nextPrompt();
+      if (!next) {
+        emit({ type: "activity", activity: { kind: "idle" } });
+        emit({ type: "done" });
+        return;
+      }
+      baseMessages.push({ role: "user", content: next.text });
+      awaitingVerify = next.kind === "verify";
+    }
 
     for (let round = 0; round < maxRounds; round++) {
       let buffer = "";
@@ -781,25 +811,47 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         return;
       }
 
-      // Look for a plan in the buffer (top-level or nested-during-step).
+      // Look for a plan in the buffer. Two paths:
+      //   - top-level (no active planState): persist the plan and stop, so
+      //     the user can review and approve before any step executes.
+      //   - nested (active planState): the model is decomposing the current
+      //     step into a sub-plan; auto-execute as before.
       const planFound = findNextPlan(buffer);
       if (planFound && planFound !== "incomplete") {
         flushBufferToUI();
         replaceBodyStripped();
         baseMessages.push({ role: "assistant", content: buffer });
-        if (planState) {
-          try {
-            planState.pushNestedPlan(planFound);
-          } catch (e) {
+        if (!planState) {
+          if (planFound.steps.length === 0) {
             emit({ type: "activity", activity: { kind: "idle" } });
             emit({
               type: "error",
-              error: `Plan rejected: ${(e as Error).message}`,
+              error: "Plan rejected: no valid steps",
             });
             return;
           }
-        } else {
-          planState = new PlanExecutionState(planFound);
+          savePlan(req.conversationId, planFound.raw);
+          emit({
+            type: "plan_proposed",
+            steps: planFound.steps.map((s) => ({
+              name: s.name,
+              prompt: s.prompt,
+              verify: s.verify,
+            })),
+          });
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({ type: "done" });
+          return;
+        }
+        try {
+          planState.pushNestedPlan(planFound);
+        } catch (e) {
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({
+            type: "error",
+            error: `Plan rejected: ${(e as Error).message}`,
+          });
+          return;
         }
         drainPlanEvents();
         const next = planState.nextPrompt();

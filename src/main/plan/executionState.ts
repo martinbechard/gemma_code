@@ -13,12 +13,19 @@ export type PlanEvent =
       id: string;
       parentId?: string;
       name?: string;
+      // For step nodes: the original <prompt> text from the plan, so the
+      // renderer can show what instructions the model gave itself for the step.
+      prompt?: string;
+      // For verify nodes: the original <verify> criterion text.
+      criterion?: string;
     }
   | {
       type: "plan_node_end";
       kind: "plan" | "step" | "verify";
       id: string;
       status: "ok" | "failed";
+      // For verify nodes that failed: the reason the model returned.
+      reason?: string;
     };
 
 export type Prompt =
@@ -89,6 +96,7 @@ export class PlanExecutionState {
           id: f.currentStepNodeId,
           parentId: f.planNodeId,
           name: step.name,
+          prompt: step.prompt,
         });
       }
       const header =
@@ -110,6 +118,7 @@ export class PlanExecutionState {
         kind: "verify",
         id: f.currentVerifyNodeId,
         parentId: f.currentStepNodeId,
+        criterion: step.verify,
       });
     }
     const text = `Verify: ${step.verify}\n\nReply with <verify result="pass"/> or <verify result="fail" reason="...">.`;
@@ -142,7 +151,7 @@ export class PlanExecutionState {
     }
 
     if (f.retryCount < this.maxRetries) {
-      this.endVerify(f, "failed");
+      this.endVerify(f, "failed", result.reason);
       f.retryCount++;
       f.retryReason = result.reason;
       f.phase = "step";
@@ -151,7 +160,7 @@ export class PlanExecutionState {
       return "retry";
     }
 
-    this.endVerify(f, "failed");
+    this.endVerify(f, "failed", result.reason);
     this.endStep(f, "failed");
     while (this.frames.length > 0) {
       const top = this.frames.pop()!;
@@ -218,12 +227,13 @@ export class PlanExecutionState {
     }
   }
 
-  private endVerify(f: Frame, status: "ok" | "failed"): void {
+  private endVerify(f: Frame, status: "ok" | "failed", reason?: string): void {
     if (f.currentVerifyNodeId) {
       this.events.push({
         type: "plan_node_end",
         kind: "verify",
         id: f.currentVerifyNodeId,
+        ...(reason ? { reason } : {}),
         status,
       });
     }

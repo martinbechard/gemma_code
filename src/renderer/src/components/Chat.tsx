@@ -226,81 +226,94 @@ export default function Chat({ model, onSwitchModel }: Props) {
           mode: conv.mode,
           workingDir: conv.workingDir,
         },
-        (chunk: StreamChunk) => {
-          if (streamRef.current.abort) return;
-          setConversations((cs) =>
-            cs.map((c) => {
-              if (c.id !== activeId) return c;
-              const msgs = [...c.messages];
-              const last = msgs[msgs.length - 1];
-              if (!last || last.role !== "assistant") return c;
-              if (chunk.type === "token") {
-                msgs[msgs.length - 1] = {
-                  ...last,
-                  content: last.content + chunk.text,
-                };
-              } else if (chunk.type === "tool_call") {
-                const tc: ToolCall = { ...chunk.call, running: true };
-                msgs[msgs.length - 1] = {
-                  ...last,
-                  toolCalls: [...(last.toolCalls ?? []), tc],
-                };
-              } else if (chunk.type === "tool_result") {
-                const tcs = (last.toolCalls ?? []).map((t) =>
-                  t.id === chunk.id
-                    ? {
-                        ...t,
-                        running: false,
-                        result: chunk.result,
-                        error: chunk.error,
-                      }
-                    : t,
-                );
-                msgs[msgs.length - 1] = { ...last, toolCalls: tcs };
-              } else if (chunk.type === "plan_node_start") {
-                const nodes = [...(last.planNodes ?? [])];
-                nodes.push({
-                  id: chunk.id,
-                  kind: chunk.kind,
-                  parentId: chunk.parentId,
-                  name: chunk.name,
-                  status: "running",
-                });
-                msgs[msgs.length - 1] = { ...last, planNodes: nodes };
-              } else if (chunk.type === "plan_node_end") {
-                const nodes = (last.planNodes ?? []).map((n) =>
-                  n.id === chunk.id ? { ...n, status: chunk.status } : n,
-                );
-                msgs[msgs.length - 1] = { ...last, planNodes: nodes };
-              } else if (chunk.type === "set_assistant_content") {
-                msgs[msgs.length - 1] = { ...last, content: chunk.text };
-              } else if (chunk.type === "activity") {
-                msgs[msgs.length - 1] = { ...last, activity: chunk.activity };
-              } else if (chunk.type === "done") {
-                msgs[msgs.length - 1] = {
-                  ...last,
-                  done: true,
-                  activity: { kind: "idle" },
-                };
-              } else if (chunk.type === "error") {
-                msgs[msgs.length - 1] = {
-                  ...last,
-                  done: true,
-                  activity: { kind: "idle" },
-                  content:
-                    last.content +
-                    (last.content ? "\n\n" : "") +
-                    `⚠️ ${chunk.error}`,
-                };
-              }
-              return { ...c, messages: msgs };
-            }),
-          );
-        },
+        (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
     } finally {
       setStreaming(false);
     }
+  }
+
+  function onStreamChunk(targetId: string, chunk: StreamChunk): void {
+    if (streamRef.current.abort) return;
+    setConversations((cs) =>
+      cs.map((c) => {
+        if (c.id !== targetId) return c;
+        const msgs = [...c.messages];
+        const last = msgs[msgs.length - 1];
+        if (!last || last.role !== "assistant") return c;
+        if (chunk.type === "token") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            content: last.content + chunk.text,
+          };
+        } else if (chunk.type === "tool_call") {
+          const tc: ToolCall = { ...chunk.call, running: true };
+          msgs[msgs.length - 1] = {
+            ...last,
+            toolCalls: [...(last.toolCalls ?? []), tc],
+          };
+        } else if (chunk.type === "tool_result") {
+          const tcs = (last.toolCalls ?? []).map((t) =>
+            t.id === chunk.id
+              ? {
+                  ...t,
+                  running: false,
+                  result: chunk.result,
+                  error: chunk.error,
+                }
+              : t,
+          );
+          msgs[msgs.length - 1] = { ...last, toolCalls: tcs };
+        } else if (chunk.type === "plan_node_start") {
+          const nodes = [...(last.planNodes ?? [])];
+          nodes.push({
+            id: chunk.id,
+            kind: chunk.kind,
+            parentId: chunk.parentId,
+            name: chunk.name,
+            status: "running",
+            prompt: chunk.prompt,
+            criterion: chunk.criterion,
+          });
+          msgs[msgs.length - 1] = { ...last, planNodes: nodes };
+        } else if (chunk.type === "plan_node_end") {
+          const nodes = (last.planNodes ?? []).map((n) =>
+            n.id === chunk.id
+              ? {
+                  ...n,
+                  status: chunk.status,
+                  ...(chunk.reason ? { reason: chunk.reason } : {}),
+                }
+              : n,
+          );
+          msgs[msgs.length - 1] = { ...last, planNodes: nodes };
+        } else if (chunk.type === "set_assistant_content") {
+          msgs[msgs.length - 1] = { ...last, content: chunk.text };
+        } else if (chunk.type === "plan_proposed") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            proposedPlan: chunk.steps,
+          };
+        } else if (chunk.type === "activity") {
+          msgs[msgs.length - 1] = { ...last, activity: chunk.activity };
+        } else if (chunk.type === "done") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            done: true,
+            activity: { kind: "idle" },
+          };
+        } else if (chunk.type === "error") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            done: true,
+            activity: { kind: "idle" },
+            content:
+              last.content + (last.content ? "\n\n" : "") + `⚠️ ${chunk.error}`,
+          };
+        }
+        return { ...c, messages: msgs };
+      }),
+    );
   }
 
   async function handleStop(): Promise<void> {
@@ -325,6 +338,61 @@ export default function Chat({ model, onSwitchModel }: Props) {
       return { ...c, messages: msgs.slice(0, -1) };
     });
     setTimeout(() => handleSend(lastUser.content), 0);
+  }
+
+  async function handleExecutePlan(messageId: string): Promise<void> {
+    if (streaming) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv) return;
+    const proposalMsg = conv.messages.find((m) => m.id === messageId);
+    if (!proposalMsg || !proposalMsg.proposedPlan || proposalMsg.planExecuted)
+      return;
+
+    const assistantMsg: ChatMessage = {
+      id: newId("m"),
+      role: "assistant",
+      content: "",
+      createdAt: Date.now(),
+      model,
+      toolCalls: [],
+      activity: { kind: "thinking" },
+    };
+
+    updateActive((c) => ({
+      ...c,
+      messages: [
+        ...c.messages.map((m) =>
+          m.id === messageId ? { ...m, planExecuted: true } : m,
+        ),
+        assistantMsg,
+      ],
+    }));
+
+    const history = conv.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      toolCalls: m.toolCalls,
+    }));
+
+    setStreaming(true);
+    streamRef.current.abort = false;
+
+    try {
+      await window.api.sendChat(
+        {
+          conversationId: activeId,
+          messages: history,
+          model,
+          enableTools: true,
+          mode: conv.mode,
+          workingDir: conv.workingDir,
+          executePlan: true,
+        },
+        (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
+      );
+    } finally {
+      setStreaming(false);
+    }
   }
 
   const canvasVisible =
@@ -362,6 +430,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
             streaming={streaming}
             mode={activeConversation.mode}
             onRegenerate={handleRegenerate}
+            onExecutePlan={handleExecutePlan}
           />
           <Composer
             onSend={handleSend}
@@ -633,11 +702,13 @@ function MessageList({
   streaming,
   mode,
   onRegenerate,
+  onExecutePlan,
 }: {
   messages: ChatMessage[];
   streaming: boolean;
   mode: AgentMode;
   onRegenerate: () => void;
+  onExecutePlan: (messageId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -682,6 +753,11 @@ function MessageList({
                   m.role === "assistant" &&
                   i === messages.length - 1
                     ? onRegenerate
+                    : undefined
+                }
+                onExecutePlan={
+                  !streaming && m.role === "assistant" && !!m.proposedPlan
+                    ? () => onExecutePlan(m.id)
                     : undefined
                 }
               />

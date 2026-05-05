@@ -55,6 +55,12 @@ export interface PlanNode {
   parentId?: string;
   name?: string;
   status: "running" | "ok" | "failed";
+  // For step nodes: the original <prompt> text from the plan.
+  prompt?: string;
+  // For verify nodes: the original <verify> criterion text.
+  criterion?: string;
+  // For verify nodes that failed: the reason the model returned.
+  reason?: string;
 }
 
 export interface ChatMessage {
@@ -63,6 +69,13 @@ export interface ChatMessage {
   content: string;
   toolCalls?: ToolCall[];
   planNodes?: PlanNode[];
+  // When the assistant emitted a top-level <plan> on this turn, the parsed
+  // steps are surfaced here so the renderer can show the proposal alongside
+  // an Execute Plan button.
+  proposedPlan?: ProposedStep[];
+  // True once the user has approved the proposedPlan; suppresses further
+  // Execute clicks and lets the renderer mark it as approved.
+  planExecuted?: boolean;
   createdAt: number;
   model?: string;
   done?: boolean;
@@ -81,6 +94,16 @@ export interface ChatRequest {
   // of the per-conversation sandbox. Distinguishes "Build" (sandbox) from
   // "Code" (user-chosen working directory) without changing AgentMode.
   workingDir?: string;
+  // When set, the harness skips streaming a fresh assistant turn and instead
+  // loads a previously-proposed plan for this conversation, building a
+  // PlanExecutionState and entering the standard step/verify loop.
+  executePlan?: boolean;
+}
+
+export interface ProposedStep {
+  name: string;
+  prompt: string;
+  verify: string;
 }
 
 export interface WorkspaceInfo {
@@ -120,17 +143,25 @@ export type StreamChunk =
       id: string;
       parentId?: string;
       name?: string;
+      prompt?: string;
+      criterion?: string;
     }
   | {
       type: "plan_node_end";
       kind: PlanNodeKind;
       id: string;
       status: PlanNodeStatus;
+      reason?: string;
     }
   // Replaces the current assistant message body. Used after a round whose
   // buffer contained a <plan> or <verify> block — the structured PlanView
   // already covers it, so the raw XML body text is stripped from the chat.
   | { type: "set_assistant_content"; text: string }
+  // The model proposed a top-level plan. The harness has saved the XML to
+  // disk and is waiting for the user to approve execution; the renderer
+  // shows the proposal and an Execute Plan affordance that fires
+  // window.api.executePlan(conversationId).
+  | { type: "plan_proposed"; steps: ProposedStep[] }
   | { type: "done" }
   | { type: "error"; error: string };
 

@@ -22,7 +22,14 @@ Hard rules:
 
 ## Plans — multi-step work
 
-For tasks that need more than two or three actions, emit a `<plan>` instead of trying to keep state in narrative prose. The host turns each step into its own synthetic user turn, so you don't have to remember what's left to do — you just answer the prompt the host hands you.
+For tasks that need more than two or three actions, emit a `<plan>` instead of trying to keep state in narrative prose. A plan is a series of instructions you are writing **to yourself**, to be executed by an AI coding agent (you, on subsequent turns). Phrase each `<prompt>` like a directive to a teammate who will pick it up cold: name files explicitly, state expected outputs, avoid vague verbs like "review" or "consider".
+
+A plan goes through two phases:
+
+1. **Propose.** You emit the `<plan>` and STOP. The host saves it and shows it to the human for review. Nothing executes yet.
+2. **Execute.** When the human approves, the host hands you the first step's `<prompt>` as a synthetic user turn. You answer it (running tools as needed), then the host asks you to verify, then advances to the next step.
+
+Because the human reviews the plan before any tool runs, write the plan as if your edits will be inspected — be conservative, list reads before writes, and prefer narrow steps over broad ones.
 
 ```
 <plan>
@@ -43,8 +50,8 @@ Plan rules:
 - `<prompt>` is what the host injects back to you; phrase it as an instruction to yourself.
 - `<verify>` is the post-condition the host will ask you to judge after the step body finishes.
 - Don't mix `<plan>` and `<action>` in the same turn. Choose one.
-- After emitting `</plan>`, STOP. The host will give you the first step's prompt next.
-- Plans may nest: while executing a step, you may emit another `<plan>` to break that step into substeps. Maximum nesting depth is 3.
+- After emitting `</plan>`, STOP. Do not start working on the first step yourself; the host will hand you the step's `<prompt>` only after the human approves the plan.
+- Plans may nest: while executing a step, you may emit another `<plan>` to break that step into substeps. Sub-plans during execution do **not** require human approval — they auto-execute. Maximum nesting depth is 3.
 
 ### Verify responses
 
