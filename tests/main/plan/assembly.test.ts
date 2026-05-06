@@ -6,6 +6,7 @@ import {
   createPlanAssemblyState,
   finalizePlanAssembly,
 } from "../../../src/main/plan/assembly";
+import { validatePlanForExecution } from "../../../src/main/plan/validation";
 
 const exploreStep = [
   "plan:",
@@ -21,6 +22,22 @@ const testStep = [
   "    - name: test",
   "      prompt: Update tests/main/plan/assembly.test.ts, then run npm test tests/main/plan/assembly.test.ts.",
   "      verify: npm test tests/main/plan/assembly.test.ts reports the expected failing assertion before implementation.",
+].join("\n");
+
+const implementStep = [
+  "plan:",
+  "  steps:",
+  "    - name: implement",
+  "      prompt: Edit src/main/index.ts and src/main/plan/assembly.ts to wire iterative plan assembly.",
+  "      verify: src/main/index.ts calls applyPlanAssemblyResponse and src/main/plan/assembly.ts contains the assembly state machine.",
+].join("\n");
+
+const verifyStep = [
+  "plan:",
+  "  steps:",
+  "    - name: verify",
+  "      prompt: Run npm test tests/main/plan/assembly.test.ts, npm test, and npm run build, then report exact results.",
+  "      verify: npm test tests/main/plan/assembly.test.ts, npm test, and npm run build pass.",
 ].join("\n");
 
 describe("iterative plan assembly", () => {
@@ -118,5 +135,43 @@ describe("iterative plan assembly", () => {
 
   it("finalizes to null until at least one step exists", () => {
     expect(finalizePlanAssembly(createPlanAssemblyState())).toBeNull();
+  });
+
+  it("produces a final plan compatible with existing execution validation", () => {
+    let result = applyPlanAssemblyResponse(createPlanAssemblyState(), exploreStep);
+    if (result.kind !== "accepted") throw new Error("expected explore step");
+
+    result = applyPlanAssemblyResponse(result.state, testStep);
+    if (result.kind !== "accepted") throw new Error("expected test step");
+
+    result = applyPlanAssemblyResponse(result.state, implementStep);
+    if (result.kind !== "accepted") throw new Error("expected implement step");
+
+    result = applyPlanAssemblyResponse(result.state, verifyStep);
+    if (result.kind !== "accepted") throw new Error("expected verify step");
+
+    const done = applyPlanAssemblyResponse(result.state, PLAN_ASSEMBLY_DONE_TEXT);
+    if (done.kind !== "finished") throw new Error("expected finished plan");
+
+    expect(validatePlanForExecution(done.plan)).toEqual({ valid: true });
+  });
+
+  it("rejects placeholder wording before it can be saved", () => {
+    const placeholderStep = [
+      "plan:",
+      "  steps:",
+      "    - name: test",
+      "      prompt: Run relevant tests.",
+      "      verify: The relevant tests pass.",
+    ].join("\n");
+
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      placeholderStep,
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.reason).toContain("placeholder");
   });
 });

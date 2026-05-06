@@ -1,4 +1,4 @@
-import type { ParsedPlan } from "./parser";
+import type { ParsedPlan, ParsedStep } from "./parser";
 
 export type PlanValidationResult =
   | { valid: true }
@@ -44,18 +44,8 @@ export function validatePlanForExecution(
     return { valid: false, reason: "Plan has no executable steps." };
   }
   for (const step of plan.steps) {
-    const text = `${step.prompt}\n${step.verify}`;
-    const placeholder = PLACEHOLDER_PATTERNS.find(({ pattern }) =>
-      pattern.test(text),
-    );
-    if (placeholder) {
-      return {
-        valid: false,
-        reason:
-          `Step "${step.name}" still uses placeholder wording "${placeholder.label}". ` +
-          "Name exact files, test paths, and commands before the plan can run.",
-      };
-    }
+    const stepValidation = validatePlanStepText(step);
+    if (!stepValidation.valid) return stepValidation;
   }
 
   if (plan.steps.length < 4) {
@@ -104,5 +94,23 @@ export function validatePlanForExecution(
     };
   }
 
+  return { valid: true };
+}
+
+export function validatePlanStepText(
+  step: ParsedStep,
+): PlanValidationResult {
+  const text = `${step.prompt}\n${step.verify}`;
+  const placeholder = PLACEHOLDER_PATTERNS.find(({ pattern }) =>
+    pattern.test(text),
+  );
+  if (placeholder) {
+    return {
+      valid: false,
+      reason:
+        `Step "${step.name}" still uses placeholder wording "${placeholder.label}". ` +
+        "Name exact files, test paths, and commands before the plan can run.",
+    };
+  }
   return { valid: true };
 }

@@ -1,5 +1,6 @@
 import { stringify } from "yaml";
 import { findNextPlan, type ParsedPlan, type ParsedStep } from "./parser";
+import { validatePlanStepText } from "./validation";
 
 const MAX_PLAN_ASSEMBLY_STEPS = 16;
 
@@ -82,6 +83,10 @@ export function applyPlanAssemblyResponse(
   }
 
   const [step] = parsed.steps;
+  const stepValidation = validatePlanStepText(step);
+  if (!stepValidation.valid) {
+    return rejected(state, stepValidation.reason);
+  }
   if (state.steps.some((existing) => existing.name === step.name)) {
     return rejected(state, 'Duplicate step name "' + step.name + '".');
   }

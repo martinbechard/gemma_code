@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { validatePlanForExecution } from "../../../src/main/plan/validation";
+import {
+  validatePlanForExecution,
+  validatePlanStepText,
+} from "../../../src/main/plan/validation";
 import type { ParsedPlan } from "../../../src/main/plan/parser";
 
 const parsedPlan = (
@@ -12,6 +15,19 @@ const parsedPlan = (
 });
 
 describe("validatePlanForExecution", () => {
+  it("rejects placeholder wording in a single step", () => {
+    const result = validatePlanStepText({
+      name: "test",
+      prompt: "Run relevant tests.",
+      verify: "The relevant tests pass.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("test");
+    expect(result.reason).toContain("relevant tests");
+  });
+
   it("rejects plans with no executable steps", () => {
     const result = validatePlanForExecution(parsedPlan([]));
 
