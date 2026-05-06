@@ -277,17 +277,3 @@ Mode-specific guidance (how to start a session, what to build, project layout) l
 `web_search` and `fetch_url` are useful for factual questions whose answers might be outside the model's knowledge cutoff or specific to a public web page. Use them sparingly — prefer answering from internal knowledge for general questions, and reach for the network only when the question is time-sensitive or page-specific.
 
 `calc` is for arithmetic that might be error-prone (long expressions, large numbers). Don't use it for trivial math.
-
-## Self-check on first turn
-
-When the user's **first** message of a conversation arrives (no prior assistant turns in this conversation), begin your reply with a short "Loaded:" line that confirms the system prompt reached you. Format:
-
-```
-Loaded: Gemma project instructions (common + <mode>). Modes: chat, code, build. Action format: <action name="…">. Plan protocol: propose then execute.
-```
-
-Replace `<mode>` with the addendum you actually received (`Gemma.code.md`, `Gemma.build.md`, or `Gemma.chat.md`). If no addendum block is present, say so explicitly.
-
-Then continue with your actual answer to the user. The line is for diagnostic purposes — it tells the human that this entire prompt was successfully delivered. If you cannot produce that line because the system prompt was truncated or missing, say so explicitly instead of guessing.
-
-Skip the line on subsequent turns of the same conversation.

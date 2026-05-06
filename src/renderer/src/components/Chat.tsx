@@ -14,6 +14,7 @@ import Sidebar from "./Sidebar";
 import Canvas from "./Canvas";
 import {
   STORAGE_KEY,
+  hasSystemPromptSnapshot,
   isModeLocked,
   shouldDisplayConversationMessage,
 } from "../lib/conversationStore";
@@ -295,6 +296,13 @@ export default function Chat({ model, onSwitchModel }: Props) {
           msgs[msgs.length - 1] = {
             ...last,
             content: last.content + chunk.text,
+          };
+        } else if (chunk.type === "system_prompt") {
+          const snapshot = { label: chunk.label, content: chunk.content };
+          if (hasSystemPromptSnapshot(msgs, snapshot)) return c;
+          msgs[msgs.length - 1] = {
+            ...last,
+            systemPrompts: [...(last.systemPrompts ?? []), snapshot],
           };
         } else if (chunk.type === "tool_call") {
           const tc: ToolCall = { ...chunk.call, running: true };

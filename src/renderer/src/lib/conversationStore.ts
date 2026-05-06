@@ -3,6 +3,7 @@
 // under tests/renderer/ without touching localStorage or the React tree.
 
 import type { AgentMode } from "@shared/types";
+import type { ChatMessage, SystemPromptSnapshot } from "@shared/types";
 
 export const STORAGE_KEY = "gemma-chat:conversations:v2";
 
@@ -21,6 +22,18 @@ export function shouldDisplayConversationMessage(message: {
   role?: string;
 }): boolean {
   return message.role !== "system" && message.role !== "harness";
+}
+
+export function hasSystemPromptSnapshot(
+  messages: ChatMessage[],
+  snapshot: SystemPromptSnapshot,
+): boolean {
+  return messages.some((message) =>
+    message.systemPrompts?.some(
+      (prompt) =>
+        prompt.label === snapshot.label && prompt.content === snapshot.content,
+    ),
+  );
 }
 
 // Returns the stamped model of the most-recent conversation in the persisted

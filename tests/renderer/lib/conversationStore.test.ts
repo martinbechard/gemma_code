@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   pickStartupModel,
   isModeLocked,
+  hasSystemPromptSnapshot,
   shouldDisplayConversationMessage,
   type PersistedConversationLite,
 } from "../../../src/renderer/src/lib/conversationStore";
@@ -122,9 +123,54 @@ describe("prompt display helpers", () => {
       "src/renderer/src/components/Chat.tsx",
       "src/shared/types.ts",
       "src/cli/agent.ts",
+      "Gemma.md",
     ]) {
       const source = readFileSync(join(process.cwd(), path), "utf8");
       expect(source).not.toContain("Loaded: Gemma project instructions");
     }
+  });
+
+  it("keeps the system prompt debug bubble renderer wired", () => {
+    const messageSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Message.tsx"),
+      "utf8",
+    );
+    const mainSource = readFileSync(
+      join(process.cwd(), "src/main/index.ts"),
+      "utf8",
+    );
+
+    expect(messageSource).toContain("SystemPromptView");
+    expect(messageSource).toContain("System prompt:");
+    expect(mainSource).toContain('type: "system_prompt"');
+    expect(
+      readFileSync(
+        join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+        "utf8",
+      ),
+    ).toContain("hasSystemPromptSnapshot");
+  });
+
+  it("recognizes duplicate system prompt snapshots across assistant messages", () => {
+    expect(
+      hasSystemPromptSnapshot(
+        [
+          {
+            id: "m1",
+            role: "assistant",
+            content: "",
+            createdAt: 1,
+            systemPrompts: [{ label: "code discuss", content: "prompt body" }],
+          },
+          {
+            id: "m2",
+            role: "assistant",
+            content: "",
+            createdAt: 2,
+          },
+        ],
+        { label: "code discuss", content: "prompt body" },
+      ),
+    ).toBe(true);
   });
 });

@@ -580,6 +580,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     const baseMessages: MLXChatMessage[] = [];
 
     let planExecutionSystemPrompt: string | null = null;
+    const emitSystemPrompt = (label: string, content: string): void => {
+      emit({ type: "system_prompt", label, content });
+    };
     const pushHarnessPrompt = (_label: string, content: string): void => {
       baseMessages.push({ role: "user", content });
     };
@@ -589,6 +592,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       role: "system",
       content: resolvedSystemPrompt.content,
     });
+    emitSystemPrompt(resolvedSystemPrompt.label, resolvedSystemPrompt.content);
     planExecutionSystemPrompt =
       req.mode === "code" &&
       req.workingDir &&

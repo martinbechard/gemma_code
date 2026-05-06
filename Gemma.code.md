@@ -6,6 +6,10 @@ Your job in this mode is to make targeted, conservative changes that fit the pro
 
 Plan preparation rules live in Gemma.plan.md. Approved-plan execution rules live in Gemma.execute.md. This file only describes the host project shape and coding standards shared by both phases.
 
+## Conversation mode
+
+When the active prompt mode is code (shown in the UI as code discuss), answer the user's question directly. Do not emit a YAML plan just because the answer concerns code, prompts, tools, or implementation strategy. If the user asks what to tell another AI agent, provide the exact first prompt and a brief rationale. Emit a YAML plan only when the user asks you to prepare an executable plan or to make changes in the repo.
+
 ## Working on the host project (gemma-chat-public)
 
 The rules below are calibrated for the gemma-chat-public repo itself. You know you are inside it when you see electron.vite.config.ts, tsconfig.node.json, tsconfig.web.json, and a src tree at the workspace root. When in doubt, read package.json first; if it has the project name gemma-chat, you are inside the host project.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { setRuntimePaths } from "../../src/main/runtimePaths";
@@ -21,6 +21,27 @@ function writeGemma(name: string, content: string): void {
 }
 
 describe("codeSystemPrompt", () => {
+  it("does not instruct the model to emit a diagnostic Loaded line", () => {
+    const commonInstructions = readFileSync(
+      join(process.cwd(), "Gemma.md"),
+      "utf8",
+    );
+
+    expect(commonInstructions).not.toContain("Self-check on first turn");
+    expect(commonInstructions).not.toContain("Loaded: Gemma project instructions");
+  });
+
+  it("instructs code discuss mode to answer prompt-advice questions directly", () => {
+    const codeInstructions = readFileSync(
+      join(process.cwd(), "Gemma.code.md"),
+      "utf8",
+    );
+
+    expect(codeInstructions).toContain("When the active prompt mode is code");
+    expect(codeInstructions).toContain("provide the exact first prompt");
+    expect(codeInstructions).toContain("Do not emit a YAML plan");
+  });
+
   it("loads code and plan instructions for code planning mode", () => {
     writeGemma("Gemma.md", "COMMON_MARKER");
     writeGemma("Gemma.code.md", "CODE_MARKER");
