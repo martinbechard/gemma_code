@@ -42,6 +42,29 @@ describe("codeSystemPrompt", () => {
     expect(codeInstructions).toContain("Do not emit a YAML plan");
   });
 
+  it("teaches plan mode to emit one step at a time", () => {
+    const planPrompt = readFileSync(
+      join(process.cwd(), "Gemma.plan.md"),
+      "utf8",
+    );
+
+    expect(planPrompt).toContain(
+      "exactly one YAML plan containing exactly one step",
+    );
+    expect(planPrompt).toContain("no plan + no action");
+    expect(planPrompt).not.toContain(
+      "Emit one complete YAML plan covering the work end to end",
+    );
+  });
+
+  it("keeps common plan instructions aligned with iterative assembly", () => {
+    const commonPrompt = readFileSync(join(process.cwd(), "Gemma.md"), "utf8");
+
+    expect(commonPrompt).toContain("you do not write the whole plan at once");
+    expect(commonPrompt).toContain("host accumulates accepted steps");
+    expect(commonPrompt).toContain("no plan + no action");
+  });
+
   it("loads code and plan instructions for code planning mode", () => {
     writeGemma("Gemma.md", "COMMON_MARKER");
     writeGemma("Gemma.code.md", "CODE_MARKER");
