@@ -34,6 +34,12 @@ tsconfig.tsbuildinfo
 models/
 workspaces/
 
+# CLI git worktrees (--worktree)
+.worktrees/
+
+# CLI conversation snapshots
+.gemma-cli/
+
 # MLX venv (auto-provisioned at runtime in userData)
 mlx-venv/
 

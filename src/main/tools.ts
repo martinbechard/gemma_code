@@ -11,10 +11,27 @@ import {
   previewUrl,
 } from "./workspace";
 import { appRootDir, isPackaged } from "./runtimePaths";
+import {
+  killBackgroundTask,
+  listBackgroundTasks,
+  startBackgroundTask,
+  type BackgroundTaskSnapshot,
+} from "./backgroundTasks";
 
 const COMMON_INSTRUCTIONS_FILE = "Gemma.md";
+const PROJECT_SCRIPT_DEFAULT_TIMEOUT_MS = 120_000;
+const PROJECT_SCRIPT_MAX_TIMEOUT_MS = 300_000;
+const PROJECT_SCRIPT_ALLOWED_NAMES = ["build", "test", "dev"] as const;
+const PROJECT_SCRIPT_MANAGERS = ["npm", "pnpm"] as const;
 
-export type PromptMode = "chat" | "code" | "build";
+type ProjectScriptName = (typeof PROJECT_SCRIPT_ALLOWED_NAMES)[number];
+type ProjectScriptManager = (typeof PROJECT_SCRIPT_MANAGERS)[number];
+
+export type PromptMode = "chat" | "code" | "build" | "plan" | "execute";
+
+export interface ProjectInstructionOptions {
+  includeCommon?: boolean;
+}
 
 // Read Gemma.md (common) and optionally Gemma.{mode}.md (mode-specific) from
 // the app root (dev) or unpacked resources (packaged). The mode-specific file
@@ -37,12 +54,19 @@ function readInstructionsFile(filename: string): string | null {
   return null;
 }
 
-export function loadProjectInstructions(mode?: PromptMode): string | null {
+export function loadProjectInstructions(
+  mode?: PromptMode | PromptMode[],
+  opts: ProjectInstructionOptions = {},
+): string | null {
+  const includeCommon = opts.includeCommon ?? true;
   const common = readInstructionsFile(COMMON_INSTRUCTIONS_FILE);
-  const modeFile = mode ? readInstructionsFile(`Gemma.${mode}.md`) : null;
+  const modes = Array.isArray(mode) ? mode : mode ? [mode] : [];
   const parts: string[] = [];
-  if (common) parts.push(common);
-  if (modeFile) parts.push(modeFile);
+  if (includeCommon && common) parts.push(common);
+  for (const m of modes) {
+    const modeFile = readInstructionsFile(`Gemma.${m}.md`);
+    if (modeFile) parts.push(modeFile);
+  }
   if (parts.length === 0) return null;
   return parts.join("\n\n");
 }
@@ -177,6 +201,21 @@ async function calc(args: Record<string, unknown>): Promise<string> {
   } catch (e) {
     return `Error: ${(e as Error).message}`;
   }
+}
+
+async function getCurrentDatetime(
+  _args: Record<string, unknown>,
+): Promise<string> {
+  const now = new Date();
+  return [
+    `ISO: ${now.toISOString()}`,
+    `Unix milliseconds: ${now.getTime()}`,
+    `Timezone: ${tz()}`,
+    `Local: ${now.toLocaleString("en-US", {
+      dateStyle: "full",
+      timeStyle: "long",
+    })}`,
+  ].join("\n");
 }
 
 async function writeFile(
@@ -327,6 +366,97 @@ async function runBash(
   }
 }
 
+export function projectScriptCommand(
+  script: string,
+  manager: string,
+): string {
+  if (!PROJECT_SCRIPT_ALLOWED_NAMES.includes(script as ProjectScriptName)) {
+    throw new Error(
+      `Unsupported project script "${script}". Allowed: ${PROJECT_SCRIPT_ALLOWED_NAMES.join(", ")}`,
+    );
+  }
+  if (!PROJECT_SCRIPT_MANAGERS.includes(manager as ProjectScriptManager)) {
+    throw new Error(
+      `Unsupported package manager "${manager}". Allowed: ${PROJECT_SCRIPT_MANAGERS.join(", ")}`,
+    );
+  }
+  return `${manager} run ${script}`;
+}
+
+function projectScriptTimeout(args: Record<string, unknown>): number {
+  const requested =
+    typeof args.timeout_ms === "number"
+      ? args.timeout_ms
+      : PROJECT_SCRIPT_DEFAULT_TIMEOUT_MS;
+  return Math.min(requested, PROJECT_SCRIPT_MAX_TIMEOUT_MS);
+}
+
+function formatBackgroundTask(task: BackgroundTaskSnapshot): string {
+  const parts = [
+    `${task.id} ${task.status} pid=${task.pid ?? "unknown"} command=${task.command}`,
+  ];
+  if (task.stdout) parts.push("stdout:\n" + task.stdout);
+  if (task.stderr) parts.push("stderr:\n" + task.stderr);
+  return parts.join("\n");
+}
+
+async function runProjectScript(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const script = String(args.script ?? "").trim();
+  const manager = String(args.manager ?? "npm").trim();
+  const background = args.background === true;
+  if (!script) return "Error: missing <script>";
+  try {
+    const command = projectScriptCommand(script, manager);
+    if (background) {
+      const cwd = await ensureWorkspace(ctx.conversationId);
+      const task = startBackgroundTask({
+        conversationId: ctx.conversationId,
+        command,
+        cwd,
+      });
+      return `Started background task.\n${formatBackgroundTask(task)}`;
+    }
+    const r = await wsRunBash(
+      ctx.conversationId,
+      command,
+      projectScriptTimeout(args),
+    );
+    ctx.onFileChange?.();
+    const parts: string[] = [];
+    parts.push(`command=${command}`);
+    parts.push(`exit=${r.exitCode ?? "killed"} (${r.durationMs}ms)`);
+    if (r.stdout) parts.push("stdout:\n" + r.stdout);
+    if (r.stderr) parts.push("stderr:\n" + r.stderr);
+    if (r.truncated) parts.push("[output was truncated]");
+    return parts.join("\n");
+  } catch (e) {
+    return `Error: ${(e as Error).message}`;
+  }
+}
+
+async function listBackgroundTasksTool(
+  _args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const tasks = listBackgroundTasks(ctx.conversationId);
+  if (tasks.length === 0) return "No background tasks.";
+  return tasks.map(formatBackgroundTask).join("\n\n");
+}
+
+async function killBackgroundTaskTool(
+  args: Record<string, unknown>,
+  _ctx: ToolContext,
+): Promise<string> {
+  const id = String(args.id ?? "").trim();
+  if (!id) return "Error: missing <id>";
+  const task = killBackgroundTask(id);
+  if (!task) return `Error: background task not found: ${id}`;
+  return `Killed background task.\n${formatBackgroundTask(task)}`;
+}
+
 async function openPreview(
   _args: Record<string, unknown>,
   ctx: ToolContext,
@@ -370,6 +500,15 @@ export const TOOLS: Record<string, ToolSpec> = {
       '<action name="calc">\n<expression>2 + 2 * 3</expression>\n</action>',
     mode: "both",
     run: calc,
+  },
+  get_current_datetime: {
+    name: "get_current_datetime",
+    description:
+      "Return the current app date and time during inference, including ISO, local time, Unix milliseconds, and timezone.",
+    params: [],
+    example: '<action name="get_current_datetime"></action>',
+    mode: "both",
+    run: getCurrentDatetime,
   },
   write_file: {
     name: "write_file",
@@ -464,6 +603,57 @@ export const TOOLS: Record<string, ToolSpec> = {
     mode: "code",
     run: runBash,
   },
+  run_project_script: {
+    name: "run_project_script",
+    description:
+      "Run an allowed package.json script by name. Allowed scripts: build, test, dev. Package managers: npm, pnpm.",
+    params: [
+      {
+        name: "script",
+        description: "script name: build, test, or dev",
+        required: true,
+      },
+      {
+        name: "manager",
+        description: "package manager: npm or pnpm",
+      },
+      {
+        name: "timeout_ms",
+        description: "timeout in milliseconds",
+      },
+      {
+        name: "background",
+        description: "true to leave the script running as a background task",
+      },
+    ],
+    example:
+      '<action name="run_project_script">\n<script>build</script>\n<manager>npm</manager>\n</action>',
+    mode: "code",
+    run: runProjectScript,
+  },
+  list_background_tasks: {
+    name: "list_background_tasks",
+    description: "List background tasks started in this workspace.",
+    params: [],
+    example: '<action name="list_background_tasks"></action>',
+    mode: "code",
+    run: listBackgroundTasksTool,
+  },
+  kill_background_task: {
+    name: "kill_background_task",
+    description: "Kill a background task by id.",
+    params: [
+      {
+        name: "id",
+        description: "background task id",
+        required: true,
+      },
+    ],
+    example:
+      '<action name="kill_background_task">\n<id>task-1</id>\n</action>',
+    mode: "code",
+    run: killBackgroundTaskTool,
+  },
   open_preview: {
     name: "open_preview",
     description:
@@ -507,10 +697,13 @@ function renderToolHelp(mode: "chat" | "code"): string {
   return lines.join("\n");
 }
 
-function projectInstructionsBlock(mode?: PromptMode): string[] {
+function projectInstructionsBlock(
+  mode?: PromptMode | PromptMode[],
+  opts: ProjectInstructionOptions = {},
+): string[] {
   // Project instructions from Gemma.md (+ Gemma.{mode}.md) are appended last
   // so they override earlier guidance when the user customizes the file.
-  const md = loadProjectInstructions(mode);
+  const md = loadProjectInstructions(mode, opts);
   if (!md) return [];
   return ["", "PROJECT INSTRUCTIONS", "====================", md];
 }
@@ -555,14 +748,13 @@ export function chatSystemPrompt(enableTools: boolean): string {
 export function codeSystemPrompt(
   workspacePath: string,
   previewHref: string,
-  codeMode: "code" | "build" = "build",
+  codeMode: "code" | "build" | "plan" | "execute" = "build",
 ): string {
   const now = new Date().toISOString();
   const day = new Date().toLocaleDateString("en-US", { weekday: "long" });
-  // Behavioral guidance (what to build, file conventions, how to start) lives
-  // in the mode-specific Gemma.{code|build}.md addendum so it can vary by mode
-  // without rebuilding this prompt. This function only emits the structural
-  // baseline that is true for both modes.
+  // Behavioral guidance lives in mode-specific Gemma addenda so planning and
+  // plan execution can use different instructions without rebuilding this
+  // structural prompt.
   return [
     "You are Gemma, a local coding agent running entirely on the user's Mac.",
     `Date: ${now} (${day}). Workspace: ${workspacePath}. Preview: ${previewHref}`,
@@ -588,8 +780,18 @@ export function codeSystemPrompt(
     "AVAILABLE TOOLS",
     "",
     renderToolHelp("code"),
-    ...projectInstructionsBlock(codeMode),
+    ...projectInstructionsBlock(instructionModesForCodePrompt(codeMode), {
+      includeCommon: codeMode !== "execute",
+    }),
   ].join("\n");
+}
+
+function instructionModesForCodePrompt(
+  codeMode: "code" | "build" | "plan" | "execute",
+): PromptMode[] {
+  if (codeMode === "plan") return ["code", "plan"];
+  if (codeMode === "execute") return ["code", "execute"];
+  return [codeMode];
 }
 
 export interface ParsedAction {

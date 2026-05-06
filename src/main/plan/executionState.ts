@@ -1,7 +1,6 @@
-// Pure state machine driving a parsed <plan> through step / verify phases,
-// with depth-first descent into nested plans. The agent loop calls
-// `nextPrompt` to obtain the next synthetic-user turn, then reports back via
-// `finishStepBody`, `pushNestedPlan`, or `applyVerify`. Events are buffered
+// Pure state machine driving a parsed <plan> through step / verify phases.
+// The agent loop calls `nextPrompt` to obtain the next synthetic-user turn,
+// then reports back via `finishStepBody` or `applyVerify`. Events are buffered
 // for the renderer and drained by the caller.
 
 import type { ParsedPlan, VerifyResult } from "./parser";
@@ -38,7 +37,6 @@ export type ApplyResult = "advance" | "retry" | "abort";
 export interface PlanExecutionStateOptions {
   idGen?: () => string;
   maxRetries?: number;
-  maxDepth?: number;
 }
 
 interface Frame {
@@ -60,24 +58,11 @@ export class PlanExecutionState {
   private events: PlanEvent[] = [];
   private readonly idGen: () => string;
   private readonly maxRetries: number;
-  private readonly maxDepth: number;
 
   constructor(plan: ParsedPlan, opts: PlanExecutionStateOptions = {}) {
     this.idGen = opts.idGen ?? defaultIdGen();
     this.maxRetries = opts.maxRetries ?? 2;
-    this.maxDepth = opts.maxDepth ?? 3;
     this.pushFrame(plan, undefined);
-  }
-
-  pushNestedPlan(plan: ParsedPlan): void {
-    if (this.frames.length >= this.maxDepth) {
-      throw new Error(`max plan depth ${this.maxDepth} exceeded`);
-    }
-    const top = this.top();
-    if (top.phase !== "step") {
-      throw new Error("nested plan can only be pushed during a step body");
-    }
-    this.pushFrame(plan, top.currentStepNodeId);
   }
 
   nextPrompt(): Prompt | null {
@@ -104,6 +89,8 @@ export class PlanExecutionState {
         `Do NOT emit a <plan> in this turn — you are already inside a plan and the host is driving each step. Any <plan> tag you emit here will be rejected and this step will be re-prompted unchanged. ` +
         `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
+        `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
+        `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
         `When this step's work is done, write a brief plain-text summary and stop; the host will then ask you to verify.`;
       const body = f.retryReason
         ? `${step.prompt}\n\nPrevious attempt failed: ${f.retryReason}. Try a different approach.`
@@ -123,8 +110,21 @@ export class PlanExecutionState {
         criterion: step.verify,
       });
     }
-    const text = `Verify: ${step.verify}\n\nReply with <verify result="pass"/> or <verify result="fail" reason="...">.`;
+    const text =
+      `Verify: ${step.verify}\n\n` +
+      `Use only prior tool results and visible file evidence from this step. ` +
+      `Do not guess, infer, or rely on intended behavior. If no tool result proves the condition, fail and name the missing evidence. ` +
+      `A targeted search result with no match for the exact requested text is valid evidence that the text was not found in the searched files. ` +
+      `If any required edit failed or any required command exited nonzero without a later successful rerun, fail and name that evidence. ` +
+      `Reply with <verify result="pass"/> or <verify result="fail" reason="...">.`;
     return { kind: "verify", stepId: f.currentStepNodeId!, text };
+  }
+
+  currentVerifyCriterion(): string | null {
+    if (this.state !== "running" || this.frames.length === 0) return null;
+    const f = this.top();
+    if (f.phase !== "verify") return null;
+    return f.plan.steps[f.stepIndex]?.verify ?? null;
   }
 
   finishStepBody(): void {
@@ -263,16 +263,6 @@ export class PlanExecutionState {
 
     if (this.frames.length === 0) {
       this.state = "complete";
-      return;
-    }
-
-    const parent = this.top();
-    const parentStep = parent.plan.steps[parent.stepIndex];
-    if (parentStep.verify.toLowerCase() === "none") {
-      this.endStep(parent, "ok");
-      this.advanceAfterStep(parent);
-    } else {
-      parent.phase = "verify";
     }
   }
 }

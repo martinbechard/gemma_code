@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { findNextPlan } from "../../../src/main/plan/parser";
+import {
+  containsCompletePlan,
+  findNextPlan,
+} from "../../../src/main/plan/parser";
 
 describe("findNextPlan — null / incomplete", () => {
   it("returns null when there is no <plan> tag", () => {
@@ -157,5 +160,23 @@ describe("findNextPlan — from offset", () => {
     const second = findNextPlan(text, first.end);
     if (second === null || second === "incomplete") throw new Error("expected plan");
     expect(second.steps[0].name).toBe("b");
+  });
+});
+
+describe("containsCompletePlan", () => {
+  it("returns true when a message contains a complete plan", () => {
+    expect(
+      containsCompletePlan(
+        `Here is the plan:
+<plan>
+<step name="a"><prompt>p</prompt><verify>v</verify></step>
+</plan>`,
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when there is no complete plan", () => {
+    expect(containsCompletePlan("plain response")).toBe(false);
+    expect(containsCompletePlan("<plan><step name=\"a\">")).toBe(false);
   });
 });

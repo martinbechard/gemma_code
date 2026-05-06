@@ -41,12 +41,18 @@ describe("PlanExecutionState — single step happy path", () => {
     // Grounding reminder: every step prompt nudges the model to read
     // the canonical file before adding host-project code.
     expect(p1?.text).toMatch(/read.*canonical/i);
+    expect(p1?.text).toMatch(/gather.*evidence/i);
+    expect(p1?.text).toMatch(/required write, edit, or command action fails/i);
 
     s.finishStepBody();
 
     const p2 = s.nextPrompt();
     expect(p2?.kind).toBe("verify");
     expect(p2?.text).toContain("explore ok");
+    expect(p2?.text).toContain("Use only prior tool results");
+    expect(p2?.text).toContain("any required edit failed");
+    expect(p2?.text).toContain("targeted search result with no match");
+    expect(s.currentVerifyCriterion()).toBe("explore ok");
 
     expect(s.applyVerify({ result: "pass" })).toBe("advance");
     expect(s.nextPrompt()).toBeNull();
@@ -175,17 +181,18 @@ describe("PlanExecutionState — currentStepId", () => {
     expect(p2!.stepId).not.toBe(p1!.stepId);
   });
 
-  it("tracks the inner step id while a nested plan is active", () => {
+  it("keeps the same top-level step id through body and verify", () => {
     const s = new PlanExecutionState(plan({ name: "outer" }), {
       idGen: counter(),
     });
-    const outerStep = s.nextPrompt()!;
-    expect(s.currentStepId).toBe(outerStep.stepId);
+    const step = s.nextPrompt()!;
+    expect(s.currentStepId).toBe(step.stepId);
 
-    s.pushNestedPlan(plan({ name: "inner" }));
-    const innerStep = s.nextPrompt()!;
-    expect(s.currentStepId).toBe(innerStep.stepId);
-    expect(innerStep.stepId).not.toBe(outerStep.stepId);
+    s.finishStepBody();
+    expect(s.currentStepId).toBe(step.stepId);
+
+    const verify = s.nextPrompt()!;
+    expect(verify.stepId).toBe(step.stepId);
   });
 });
 
@@ -234,36 +241,10 @@ describe("PlanExecutionState — verify retry and abort", () => {
   });
 });
 
-describe("PlanExecutionState — nested plans", () => {
-  it("descends into a nested plan during a step's body, then resumes outer verify", () => {
-    const s = new PlanExecutionState(plan({ name: "outer" }), {
-      idGen: counter(),
-    });
-    s.nextPrompt();
-    s.pushNestedPlan(plan({ name: "inner" }));
-
-    const inner = s.nextPrompt();
-    expect(inner?.kind).toBe("step");
-    expect(inner?.text).toContain("do inner");
-    s.finishStepBody();
-    s.nextPrompt();
-    s.applyVerify({ result: "pass" });
-
-    const outerVerify = s.nextPrompt();
-    expect(outerVerify?.kind).toBe("verify");
-    expect(outerVerify?.text).toContain("outer ok");
-    s.applyVerify({ result: "pass" });
-    expect(s.state).toBe("complete");
-  });
-
-  it("rejects nested plans beyond maxDepth", () => {
-    const s = new PlanExecutionState(plan({ name: "L1" }), {
-      idGen: counter(),
-      maxDepth: 2,
-    });
-    s.nextPrompt();
-    s.pushNestedPlan(plan({ name: "L2" }));
-    s.nextPrompt();
-    expect(() => s.pushNestedPlan(plan({ name: "L3" }))).toThrow(/depth/i);
+describe("PlanExecutionState — non-recursive plan execution", () => {
+  it("does not expose nested plan execution", () => {
+    expect(Object.hasOwn(PlanExecutionState.prototype, "pushNestedPlan")).toBe(
+      false,
+    );
   });
 });

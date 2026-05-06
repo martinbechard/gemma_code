@@ -47,6 +47,11 @@ export interface ToolCall {
   parentStepId?: string;
 }
 
+export interface SystemPromptSnapshot {
+  label: string;
+  content: string;
+}
+
 export type Role = "user" | "assistant" | "system" | "tool";
 
 export interface PlanNode {
@@ -68,6 +73,7 @@ export interface ChatMessage {
   role: Role;
   content: string;
   toolCalls?: ToolCall[];
+  systemPrompts?: SystemPromptSnapshot[];
   planNodes?: PlanNode[];
   // When the assistant emitted a top-level <plan> on this turn, the parsed
   // steps are surfaced here so the renderer can show the proposal alongside
@@ -134,6 +140,7 @@ export type PlanNodeStatus = "ok" | "failed";
 
 export type StreamChunk =
   | { type: "token"; text: string }
+  | { type: "system_prompt"; label: string; content: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; id: string; result?: string; error?: string }
   | { type: "activity"; activity: AgentActivity }

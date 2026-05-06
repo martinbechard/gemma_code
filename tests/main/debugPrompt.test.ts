@@ -6,6 +6,7 @@ import { setRuntimePaths } from "../../src/main/runtimePaths";
 import {
   saveLastPrompt,
   debugPromptPath,
+  formatSystemPromptDisplay,
 } from "../../src/main/debugPrompt";
 
 let dir = "";
@@ -116,5 +117,12 @@ describe("debugPrompt", () => {
     );
     // No throw → directory creation worked.
     expect(readFileSync(debugPromptPath(), "utf8")).toContain("x");
+  });
+
+  it("formats the full system prompt for live display", () => {
+    const out = formatSystemPromptDisplay("code plan", "system body");
+
+    expect(out).toContain("SYSTEM PROMPT: code plan");
+    expect(out).toContain("system body");
   });
 });

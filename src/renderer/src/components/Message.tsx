@@ -101,6 +101,14 @@ export default function Message({
           />
         )}
 
+        {message.systemPrompts?.map((prompt, index) => (
+          <SystemPromptView
+            key={`${prompt.label}-${index}`}
+            label={prompt.label}
+            content={prompt.content}
+          />
+        ))}
+
         {message.proposedPlan && message.proposedPlan.length > 0 && (
           <PlanProposalView
             steps={message.proposedPlan}
@@ -273,6 +281,12 @@ function toolVerb(name: string): string {
       return "Listing";
     case "run_bash":
       return "Running";
+    case "run_project_script":
+      return "Running script";
+    case "list_background_tasks":
+      return "Listing tasks";
+    case "kill_background_task":
+      return "Killing task";
     case "open_preview":
       return "Revealing preview";
     case "web_search":
@@ -291,6 +305,25 @@ function formatElapsed(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}m ${s}s`;
+}
+
+function SystemPromptView({
+  label,
+  content,
+}: {
+  label: string;
+  content: string;
+}) {
+  return (
+    <details className="mb-3 rounded-lg border border-white/10 bg-black/20">
+      <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium text-ink-300">
+        System prompt: {label}
+      </summary>
+      <pre className="max-h-[420px] overflow-auto border-t border-white/10 px-3 py-2 text-[11px] leading-relaxed text-ink-200">
+        {content}
+      </pre>
+    </details>
+  );
 }
 
 function ThinkingBlock({
@@ -343,6 +376,12 @@ function toolLabel(call: ToolCall): { verb: string; target: string } {
       return { verb: "Listing", target: "workspace" };
     case "run_bash":
       return { verb: "Running", target: String(a.command ?? "").slice(0, 80) };
+    case "run_project_script":
+      return { verb: "Running script", target: String(a.script ?? "") };
+    case "list_background_tasks":
+      return { verb: "Listing", target: "background tasks" };
+    case "kill_background_task":
+      return { verb: "Killing task", target: String(a.id ?? "") };
     case "open_preview":
       return { verb: "Opening", target: "preview" };
     case "web_search":
@@ -370,6 +409,12 @@ function toolIcon(name: string): string {
       return "☰";
     case "run_bash":
       return "▸";
+    case "run_project_script":
+      return "▸";
+    case "list_background_tasks":
+      return "☰";
+    case "kill_background_task":
+      return "■";
     case "open_preview":
       return "◉";
     case "web_search":

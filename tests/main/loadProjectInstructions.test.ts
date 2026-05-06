@@ -50,6 +50,22 @@ describe("loadProjectInstructions(mode)", () => {
     );
   });
 
+  it("concatenates Gemma.md and multiple mode files in order", () => {
+    writeGemma("Gemma.md", "# Common");
+    writeGemma("Gemma.code.md", "# Code mode addendum");
+    writeGemma("Gemma.plan.md", "# Planning addendum");
+    const out = loadProjectInstructions(["code", "plan"]);
+    expect(out).toContain("# Common");
+    expect(out).toContain("# Code mode addendum");
+    expect(out).toContain("# Planning addendum");
+    expect(out!.indexOf("# Common")).toBeLessThan(
+      out!.indexOf("# Code mode addendum"),
+    );
+    expect(out!.indexOf("# Code mode addendum")).toBeLessThan(
+      out!.indexOf("# Planning addendum"),
+    );
+  });
+
   it("concatenates Gemma.md and Gemma.build.md for build mode", () => {
     writeGemma("Gemma.md", "# Common");
     writeGemma("Gemma.build.md", "# Build mode addendum");

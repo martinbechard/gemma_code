@@ -60,6 +60,11 @@ export function findNextPlan(
   };
 }
 
+export function containsCompletePlan(text: string): boolean {
+  const plan = findNextPlan(text);
+  return plan !== null && plan !== "incomplete";
+}
+
 function parseSteps(body: string): ParsedStep[] {
   const out: ParsedStep[] = [];
   STEP_RE.lastIndex = 0;

@@ -53,7 +53,7 @@ Plan rules:
 - `<verify>` is the post-condition the host will ask you to judge after the step body finishes.
 - Don't mix `<plan>` and `<action>` in the same turn. Choose one.
 - After emitting `</plan>`, STOP. Do not start working on the first step yourself; the host will hand you the step's `<prompt>` only after the human approves the plan.
-- Plans may nest: while executing a step, you may emit another `<plan>` to break that step into substeps. Sub-plans during execution do **not** require human approval — they auto-execute. Maximum nesting depth is 3.
+- Do not emit a `<plan>` while executing a step. The host is already driving the approved plan one step at a time. Inside a step, either emit `<action>` tags to do the work, or write a brief plain-text summary and stop so the host can ask you to verify.
 
 ### Verify responses
 
@@ -132,6 +132,18 @@ Example:
 <action name="calc">
 <expression>2 + 2 * 3</expression>
 </action>
+```
+
+### get_current_datetime
+
+Return the current app date and time during inference. Use this when the answer depends on fresh time during a long-running conversation or tool loop.
+
+No parameters.
+
+Example:
+
+```
+<action name="get_current_datetime"></action>
 ```
 
 ## Tools available in code/build mode

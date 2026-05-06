@@ -2,6 +2,7 @@ import {
   locateMLX,
   installMLX,
   startServer,
+  stopServer,
   inspectModelCache,
   isModelCacheReadyForInference,
   warmupInference,
@@ -72,10 +73,10 @@ export async function runStatus(model: string): Promise<void> {
   log(`Ready for inference: ${isModelCacheReadyForInference(cache)}`);
 }
 
-export async function ensureMlxRunning(model: string): Promise<void> {
+export async function ensureMlxRunning(model: string): Promise<boolean> {
   if (await isServerRunning(model)) {
     log(`Reusing MLX server already running on port ${MLX_SERVER_PORT}`);
-    return;
+    return false;
   }
   let mlx = locateMLX();
   if (!mlx || !mlx.installed) {
@@ -90,4 +91,9 @@ export async function ensureMlxRunning(model: string): Promise<void> {
     log(`${p.message}${pct}`);
   });
   await warmupInference(model);
+  return true;
+}
+
+export function stopMlxServer(): void {
+  stopServer();
 }

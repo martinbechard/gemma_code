@@ -262,6 +262,14 @@ export default function Chat({ model, onSwitchModel }: Props) {
             ...last,
             content: last.content + chunk.text,
           };
+        } else if (chunk.type === "system_prompt") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            systemPrompts: [
+              ...(last.systemPrompts ?? []),
+              { label: chunk.label, content: chunk.content },
+            ],
+          };
         } else if (chunk.type === "tool_call") {
           const tc: ToolCall = { ...chunk.call, running: true };
           msgs[msgs.length - 1] = {

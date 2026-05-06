@@ -52,10 +52,22 @@ import {
 } from "./workspace";
 import type { ChatRequest, StreamChunk, ToolCall } from "../shared/types";
 import { setRuntimePaths } from "./runtimePaths";
-import { findNextPlan, parseVerifyResult } from "./plan/parser";
+import {
+  containsCompletePlan,
+  findNextPlan,
+  parseVerifyResult,
+} from "./plan/parser";
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 import { clearPlan, loadPlan, savePlan } from "./plan/planStore";
+import { buildPlanReviewPrompt } from "./plan/reviewPrompt";
+import { validatePlanForExecution } from "./plan/validation";
+import {
+  createPlanStepEvidence,
+  forcedVerifyFailureReason,
+  recordPlanToolEvidence,
+} from "./plan/evidence";
+import { killAllBackgroundTasks } from "./backgroundTasks";
 
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
@@ -380,6 +392,13 @@ async function handleRepairModel(model: string): Promise<void> {
 
 const MAX_TOOL_ROUNDS_CHAT = 6;
 const MAX_TOOL_ROUNDS_CODE = 40;
+const CODE_PLAN_NUDGE =
+  "Continue in planning mode. Use an action to inspect files if you need more context, or emit one complete <plan> with concrete implementation and verification steps. Do not write files before the plan.";
+const BUILD_ACTION_NUDGE =
+  "Good plan. Now start building - emit a write_file action with the first file immediately.";
+const INCOMPLETE_ACTION_NUDGE =
+  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
+const MAX_PLAN_REVIEW_ATTEMPTS = 2;
 
 function actionTarget(
   _name: string,
@@ -388,6 +407,7 @@ function actionTarget(
   if (typeof args.path === "string") return args.path;
   if (typeof args.query === "string") return String(args.query);
   if (typeof args.url === "string") return String(args.url);
+  if (typeof args.script === "string") return String(args.script);
   if (typeof args.command === "string")
     return String(args.command).slice(0, COMMAND_TARGET_MAX_CHARS);
   return undefined;
@@ -413,6 +433,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
   try {
     const baseMessages: MLXChatMessage[] = [];
 
+    let planExecutionSystemPrompt: string | null = null;
+    const emitSystemPrompt = (label: string, content: string): void => {
+      emit({ type: "system_prompt", label, content });
+    };
+
     if (req.mode === "code") {
       // Code mode with a user-chosen working directory bypasses the sandbox by
       // registering a workspace override before ensureWorkspace runs. Build mode
@@ -424,19 +449,36 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       const href = previewUrl(req.conversationId);
       // A user-supplied workingDir means we're editing an existing project
       // (Code mode); without it we're in the per-conversation sandbox (Build).
-      const codeMode = req.workingDir ? "code" : "build";
+      const codeMode = req.workingDir ? "plan" : "build";
+      const systemPrompt = codeSystemPrompt(wsPath, href, codeMode);
       baseMessages.push({
         role: "system",
-        content: codeSystemPrompt(wsPath, href, codeMode),
+        content: systemPrompt,
       });
+      emitSystemPrompt(
+        codeMode === "plan" ? "code plan" : "build",
+        systemPrompt,
+      );
+      planExecutionSystemPrompt = req.workingDir
+        ? codeSystemPrompt(wsPath, href, "execute")
+        : null;
     } else {
+      const systemPrompt = chatSystemPrompt(req.enableTools);
       baseMessages.push({
         role: "system",
-        content: chatSystemPrompt(req.enableTools),
+        content: systemPrompt,
       });
+      emitSystemPrompt("chat", systemPrompt);
     }
 
     for (const m of req.messages) {
+      if (
+        req.executePlan &&
+        m.role === "assistant" &&
+        containsCompletePlan(m.content)
+      ) {
+        continue;
+      }
       baseMessages.push({
         role: m.role as MLXChatMessage["role"],
         content: m.content,
@@ -467,6 +509,22 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
     let planState: PlanExecutionState | null = null;
     let awaitingVerify = false;
+    let pendingPlanReview = false;
+    let planReviewAttempts = 0;
+    let lastActionKey: string | null = null;
+    let repeatedActionCount = 0;
+    let stepEvidence = createPlanStepEvidence();
+
+    const usePlanExecutionPrompt = (): void => {
+      if (!planExecutionSystemPrompt || baseMessages[0]?.role !== "system") {
+        return;
+      }
+      baseMessages[0] = {
+        role: "system",
+        content: planExecutionSystemPrompt,
+      };
+      emitSystemPrompt("plan execution", planExecutionSystemPrompt);
+    };
 
     const drainPlanEvents = (): void => {
       if (!planState) return;
@@ -508,12 +566,16 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       }
       clearPlan(req.conversationId);
       planState = new PlanExecutionState(saved);
+      usePlanExecutionPrompt();
       drainPlanEvents();
       const next = planState.nextPrompt();
       if (!next) {
         emit({ type: "activity", activity: { kind: "idle" } });
         emit({ type: "done" });
         return;
+      }
+      if (next.kind === "step") {
+        stepEvidence = createPlanStepEvidence();
       }
       baseMessages.push({ role: "user", content: next.text });
       awaitingVerify = next.kind === "verify";
@@ -524,6 +586,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       let emittedIdx = 0;
       let firstToken = true;
       let executedAction = false;
+      let sawIncompleteAction = false;
       let lastActivityTs = 0;
       let pendingAction: { name: string; target?: string } | null = null;
 
@@ -683,6 +746,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             }
 
             if (found === "incomplete") {
+              sawIncompleteAction = true;
               // Action has started but not closed. Emit text up to the open tag.
               const openIdx = buffer.indexOf("<action", emittedIdx);
               if (openIdx > emittedIdx) {
@@ -725,6 +789,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
             let result: string;
             let hadError = false;
+            const actionKey = `${found.name}:${JSON.stringify(found.args)}`;
+            if (actionKey === lastActionKey) {
+              repeatedActionCount += 1;
+            } else {
+              lastActionKey = actionKey;
+              repeatedActionCount = 1;
+            }
             try {
               result = await runTool(found.name, found.args, ctx);
               emit({ type: "tool_result", id: call.id, result });
@@ -742,6 +813,18 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               role: "tool",
               content: `[${hadError ? "error" : "ok"}] ${found.name}: ${result}`,
             });
+            if (planState?.currentStepId) {
+              recordPlanToolEvidence(stepEvidence, found.name, result);
+            }
+            if (repeatedActionCount > 1) {
+              baseMessages.push({
+                role: "user",
+                content:
+                  `You repeated the same ${found.name} action ${repeatedActionCount} times. ` +
+                  "Use the tool result already provided and move to the next distinct action or emit a concrete <plan>. " +
+                  `Do not call ${found.name} with the same parameters again.`,
+              });
+            }
             executedAction = true;
             if (livePath) {
               send("file:streaming", {
@@ -774,6 +857,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         continue;
       }
 
+      if (sawIncompleteAction) {
+        baseMessages.push({ role: "user", content: INCOMPLETE_ACTION_NUDGE });
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+        continue;
+      }
+
       const flushBufferToUI = (): void => {
         if (emittedIdx < buffer.length) {
           emit({ type: "token", text: buffer.slice(emittedIdx) });
@@ -792,8 +881,18 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       // Verify-phase response handling: parse <verify result="..."/> from the
       // buffer and feed it to the state machine.
       if (planState && awaitingVerify) {
-        const vr = parseVerifyResult(buffer);
+        let vr = parseVerifyResult(buffer);
         if (vr) {
+          const forcedReason =
+            vr.result === "pass"
+              ? forcedVerifyFailureReason(
+                  planState.currentVerifyCriterion() ?? "",
+                  stepEvidence,
+                )
+              : null;
+          if (forcedReason) {
+            vr = { result: "fail", reason: forcedReason };
+          }
           flushBufferToUI();
           replaceBodyStripped();
           baseMessages.push({ role: "assistant", content: buffer });
@@ -810,6 +909,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             emit({ type: "activity", activity: { kind: "idle" } });
             emit({ type: "done" });
             return;
+          }
+          if (next.kind === "step") {
+            stepEvidence = createPlanStepEvidence();
           }
           baseMessages.push({ role: "user", content: next.text });
           awaitingVerify = next.kind === "verify";
@@ -834,7 +936,6 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       if (planFound && planFound !== "incomplete") {
         flushBufferToUI();
         replaceBodyStripped();
-        baseMessages.push({ role: "assistant", content: buffer });
         if (!planState) {
           if (planFound.steps.length === 0) {
             emit({ type: "activity", activity: { kind: "idle" } });
@@ -844,6 +945,40 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             return;
           }
+          if (!pendingPlanReview) {
+            pendingPlanReview = true;
+            planReviewAttempts = 1;
+            emit({
+              type: "set_assistant_content",
+              text: "Reviewing the proposed plan before saving it.",
+            });
+            baseMessages.push({
+              role: "user",
+              content: buildPlanReviewPrompt(planFound.raw),
+            });
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          const validation = validatePlanForExecution(planFound);
+          if (!validation.valid) {
+            baseMessages.push({ role: "assistant", content: buffer });
+            pendingPlanReview = false;
+            baseMessages.push({
+              role: "user",
+              content:
+                `The reviewed plan is not executable yet: ${validation.reason}\n\n` +
+                "Your next response must be exactly one action tag that inspects the project, such as list_files or read_file. Do not emit another <plan> until you have tool evidence for the exact file paths and commands the plan will name.",
+            });
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          pendingPlanReview = false;
           savePlan(req.conversationId, planFound.raw);
           emit({
             type: "plan_proposed",
@@ -860,6 +995,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         // Nested plan inside an active step: reject and re-prompt the same
         // step. The state machine is left untouched (still in step phase),
         // so nextPrompt() returns the same step text again.
+        usePlanExecutionPrompt();
         const corrective =
           `You emitted a <plan> while inside an active plan step. That is not allowed and the plan was discarded. ` +
           `Do the work for the current step directly using <action> tags, or write a brief plain-text summary if no tools are needed. ` +
@@ -871,8 +1007,32 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           emit({ type: "done" });
           return;
         }
+        if (next.kind === "step") {
+          stepEvidence = createPlanStepEvidence();
+        }
         baseMessages.push({ role: "user", content: next.text });
         awaitingVerify = next.kind === "verify";
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+        continue;
+      }
+
+      if (pendingPlanReview) {
+        flushBufferToUI();
+        baseMessages.push({ role: "assistant", content: buffer });
+        if (planReviewAttempts >= MAX_PLAN_REVIEW_ATTEMPTS) {
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({
+            type: "error",
+            error: "Plan review failed: no amended <plan> was returned.",
+          });
+          return;
+        }
+        planReviewAttempts += 1;
+        baseMessages.push({
+          role: "user",
+          content:
+            "The plan review response did not include one complete final <plan>. Explain the gap briefly, then emit one amended complete <plan> now.",
+        });
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }
@@ -896,6 +1056,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           emit({ type: "done" });
           return;
         }
+        if (next.kind === "step") {
+          stepEvidence = createPlanStepEvidence();
+        }
         baseMessages.push({ role: "user", content: next.text });
         awaitingVerify = next.kind === "verify";
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
@@ -908,8 +1071,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         baseMessages.push({ role: "assistant", content: buffer });
         baseMessages.push({
           role: "user",
-          content:
-            "Good plan. Now start building — emit a write_file action with the first file immediately.",
+          content: req.workingDir ? CODE_PLAN_NUDGE : BUILD_ACTION_NUDGE,
         });
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
@@ -1125,6 +1287,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  killAllBackgroundTasks();
   stopServer();
   stopWorkspaceServer();
 });

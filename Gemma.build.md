@@ -20,6 +20,8 @@ Quality matters — the user is watching.
   - `style.css` — all styling
   - `app.js` — all behavior
 - Multi-file is easier to read, edit later, and shows off modular thinking. Emit a separate `write_file` action for each file.
+- Expected project script names: build, test, dev.
+- Long-running project scripts should be started as background tasks, then inspected with list_background_tasks and stopped with kill_background_task.
 
 ## How you work
 
