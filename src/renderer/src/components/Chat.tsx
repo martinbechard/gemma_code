@@ -3,6 +3,7 @@ import {
   AVAILABLE_MODELS,
   type AgentMode,
   type ChatMessage,
+  type CodeSubmode,
   type ToolCall,
   type StreamChunk,
 } from "@shared/types";
@@ -11,7 +12,11 @@ import Composer from "./Composer";
 import Message from "./Message";
 import Sidebar from "./Sidebar";
 import Canvas from "./Canvas";
-import { STORAGE_KEY, isModeLocked } from "../lib/conversationStore";
+import {
+  STORAGE_KEY,
+  isModeLocked,
+  shouldDisplayConversationMessage,
+} from "../lib/conversationStore";
 
 interface Props {
   model: string;
@@ -32,11 +37,13 @@ interface Conversation {
   // the app can auto-load the right runtime when the conversation is reopened
   // and so switching conversations swaps the active model accordingly.
   model?: string;
+  codeSubmode?: CodeSubmode;
 }
 
 // "Build" and "Code" both map to AgentMode==='code' on the wire; the pill key
 // is the UI-level discriminant the renderer carries around.
 type PillKey = "chat" | "build" | "code";
+const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
 
 function pillKeyOf(c: Pick<Conversation, "mode" | "workingDir">): PillKey {
   if (c.mode === "chat") return "chat";
@@ -65,6 +72,7 @@ function saveConversations(cs: Conversation[]): void {
 function newConversation(
   mode: AgentMode = "code",
   workingDir?: string,
+  codeSubmode?: CodeSubmode,
 ): Conversation {
   return {
     id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -74,6 +82,7 @@ function newConversation(
     mode,
     canvasOpen: mode === "code",
     workingDir,
+    codeSubmode: workingDir ? (codeSubmode ?? DEFAULT_CODE_SUBMODE) : undefined,
   };
 }
 
@@ -86,6 +95,26 @@ function dirBasename(p: string): string {
   const s = p.replace(/[/\\]+$/, "");
   const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
   return i >= 0 ? s.slice(i + 1) : s;
+}
+
+function codeSubmodeOf(c: Conversation): CodeSubmode {
+  return c.workingDir
+    ? (c.codeSubmode ?? DEFAULT_CODE_SUBMODE)
+    : DEFAULT_CODE_SUBMODE;
+}
+
+function requestHistory(messages: ChatMessage[]): Array<{
+  role: Exclude<ChatMessage["role"], "harness"> | "user";
+  content: string;
+  toolCalls?: ToolCall[];
+}> {
+  return messages
+    .filter(shouldDisplayConversationMessage)
+    .map((m) => ({
+      role: m.role as Exclude<ChatMessage["role"], "harness"> | "user",
+      content: m.content,
+      toolCalls: m.toolCalls,
+    }));
 }
 
 export default function Chat({ model, onSwitchModel }: Props) {
@@ -113,8 +142,9 @@ export default function Chat({ model, onSwitchModel }: Props) {
   function createConversation(
     mode: AgentMode = "code",
     workingDir?: string,
+    codeSubmode?: CodeSubmode,
   ): void {
-    const c = newConversation(mode, workingDir);
+    const c = newConversation(mode, workingDir, codeSubmode);
     setConversations((cs) => [c, ...cs]);
     setActiveId(c.id);
   }
@@ -163,7 +193,14 @@ export default function Chat({ model, onSwitchModel }: Props) {
       mode: "code",
       workingDir: path,
       canvasOpen: true,
+      codeSubmode: c.codeSubmode ?? DEFAULT_CODE_SUBMODE,
     }));
+  }
+
+  function selectCodeSubmode(next: CodeSubmode): void {
+    if (activeConversation.workingDir) {
+      updateActive((c) => ({ ...c, codeSubmode: next }));
+    }
   }
 
   function toggleCanvas(): void {
@@ -210,7 +247,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
 
     updateActive((c) => {
       const title =
-        c.messages.length === 0
+        !c.messages.some((m) => m.role === "user")
           ? input.slice(0, 48) + (input.length > 48 ? "…" : "")
           : c.title;
       // Stamp the current global model on the conversation so it can be
@@ -223,11 +260,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
       };
     });
 
-    const history = [...conv.messages, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-      toolCalls: m.toolCalls,
-    }));
+    const history = requestHistory([...conv.messages, userMsg]);
 
     setStreaming(true);
     streamRef.current.abort = false;
@@ -241,6 +274,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           enableTools: true,
           mode: conv.mode,
           workingDir: conv.workingDir,
+          codeSubmode: conv.workingDir ? codeSubmodeOf(conv) : undefined,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -261,14 +295,6 @@ export default function Chat({ model, onSwitchModel }: Props) {
           msgs[msgs.length - 1] = {
             ...last,
             content: last.content + chunk.text,
-          };
-        } else if (chunk.type === "system_prompt") {
-          msgs[msgs.length - 1] = {
-            ...last,
-            systemPrompts: [
-              ...(last.systemPrompts ?? []),
-              { label: chunk.label, content: chunk.content },
-            ],
           };
         } else if (chunk.type === "tool_call") {
           const tc: ToolCall = { ...chunk.call, running: true };
@@ -392,11 +418,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
       ],
     }));
 
-    const history = conv.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-      toolCalls: m.toolCalls,
-    }));
+    const history = requestHistory(conv.messages);
 
     setStreaming(true);
     streamRef.current.abort = false;
@@ -410,6 +432,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           enableTools: true,
           mode: conv.mode,
           workingDir: conv.workingDir,
+          codeSubmode: conv.workingDir ? codeSubmodeOf(conv) : undefined,
           executePlan: true,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
@@ -447,6 +470,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           createConversation(
             activeConversation.mode,
             activeConversation.workingDir,
+            activeConversation.codeSubmode,
           )
         }
         onDelete={deleteConversation}
@@ -457,9 +481,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
             model={model}
             pillKey={pillKeyOf(activeConversation)}
             workingDir={activeConversation.workingDir}
+            codeSubmode={codeSubmodeOf(activeConversation)}
             canvasOpen={!!activeConversation.canvasOpen}
             modeLocked={modeLocked}
             onSelectMode={selectMode}
+            onSelectCodeSubmode={selectCodeSubmode}
             onToggleCanvas={toggleCanvas}
             onSwitchModel={onSwitchModel}
           />
@@ -554,18 +580,22 @@ function Header({
   model,
   pillKey,
   workingDir,
+  codeSubmode,
   canvasOpen,
   modeLocked,
   onSelectMode,
+  onSelectCodeSubmode,
   onToggleCanvas,
   onSwitchModel,
 }: {
   model: string;
   pillKey: PillKey;
   workingDir?: string;
+  codeSubmode: CodeSubmode;
   canvasOpen: boolean;
   modeLocked: boolean;
   onSelectMode: (next: PillKey) => void;
+  onSelectCodeSubmode: (next: CodeSubmode) => void;
   onToggleCanvas: () => void;
   onSwitchModel: (model: string) => void;
 }) {
@@ -627,6 +657,31 @@ function Header({
         </ModePill>
       </div>
       <div className="no-drag flex shrink-0 items-center justify-end gap-2">
+        {pillKey === "code" && workingDir && (
+          <label className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11.5px] text-ink-300">
+            <span className="text-ink-500">Mode</span>
+            <select
+              value={codeSubmode}
+              onChange={(e) =>
+                onSelectCodeSubmode(e.target.value as CodeSubmode)
+              }
+              className="bg-transparent text-ink-100 outline-none"
+            >
+              <option className="bg-[#1a1a1a]" value="discuss">
+                discuss
+              </option>
+              <option className="bg-[#1a1a1a]" value="plan">
+                plan
+              </option>
+              <option className="bg-[#1a1a1a]" value="execute">
+                execute
+              </option>
+              <option className="bg-[#1a1a1a]" value="auto">
+                auto
+              </option>
+            </select>
+          </label>
+        )}
         <div className="relative" ref={pickerRef}>
           <button
             onClick={() => setPickerOpen((o) => !o)}
@@ -790,7 +845,8 @@ function MessageList({
     }
   }, [messages]);
 
-  const empty = messages.length === 0;
+  const visibleMessages = messages.filter(shouldDisplayConversationMessage);
+  const empty = visibleMessages.length === 0;
 
   return (
     <div ref={ref} className="min-h-0 flex-1 overflow-y-auto">
@@ -798,7 +854,7 @@ function MessageList({
         <EmptyState mode={mode} />
       ) : (
         <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10">
-          {messages.map((m, i) => (
+          {visibleMessages.map((m, i) => (
             <div
               key={m.id}
               className="anim-float-in"
@@ -806,12 +862,12 @@ function MessageList({
             >
               <Message
                 message={m}
-                isLast={i === messages.length - 1}
-                streaming={streaming && i === messages.length - 1}
+                isLast={i === visibleMessages.length - 1}
+                streaming={streaming && i === visibleMessages.length - 1}
                 onRegenerate={
                   !streaming &&
                   m.role === "assistant" &&
-                  i === messages.length - 1
+                  i === visibleMessages.length - 1
                     ? onRegenerate
                     : undefined
                 }

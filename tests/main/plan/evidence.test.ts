@@ -31,6 +31,60 @@ describe("plan step evidence", () => {
     ).toContain("tool failure during step");
   });
 
+  it("does not treat successful file content containing error text as a tool failure", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      'return `Error fetching: ${(e as Error).message}`;',
+      { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason("src/main/tools.ts has been read.", evidence),
+    ).toBeNull();
+  });
+
+  it("blocks a verify pass when a required read path is missing", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(evidence, "read_file", "tools source", {
+      path: "src/main/tools.ts",
+    });
+
+    expect(
+      forcedVerifyFailureReason(
+        "src/main/tools.ts, Gemma.md, package.json, and tests/main/currentDatetimeTool.test.ts have been read.",
+        evidence,
+      ),
+    ).toContain(
+      "missing read_file evidence for: Gemma.md, package.json, tests/main/currentDatetimeTool.test.ts",
+    );
+  });
+
+  it("allows a verify pass when every required read path is present", () => {
+    const evidence = createPlanStepEvidence();
+
+    for (const path of [
+      "src/main/tools.ts",
+      "Gemma.md",
+      "package.json",
+      "tests/main/currentDatetimeTool.test.ts",
+    ]) {
+      recordPlanToolEvidence(evidence, "read_file", `content for ${path}`, {
+        path,
+      });
+    }
+
+    expect(
+      forcedVerifyFailureReason(
+        "src/main/tools.ts, Gemma.md, package.json, and tests/main/currentDatetimeTool.test.ts have been read.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
   it("blocks a verify pass after a required nonzero command", () => {
     const evidence = createPlanStepEvidence();
 

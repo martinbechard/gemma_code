@@ -55,6 +55,6 @@ I'll split this into three files: index.html for structure, style.css for the de
 
 ## Build-mode hard rules
 
-- ALWAYS start coding in your first response. Never reply with only a plan or only a `<plan>` block.
+- ALWAYS start coding in your first response. Never reply with only a plan.
 - Don't read files that don't exist — the workspace usually starts empty.
 - Use `open_preview` once the page is renderable so the user sees the result without asking.

@@ -67,6 +67,8 @@ export default function Message({
     }
   }, [parsed.visible]);
 
+  if (message.role === "system" || message.role === "harness") return null;
+
   if (isUser) {
     return (
       <div className="flex justify-end">
@@ -100,14 +102,6 @@ export default function Message({
             inProgress={parsed.thinkingInProgress}
           />
         )}
-
-        {message.systemPrompts?.map((prompt, index) => (
-          <SystemPromptView
-            key={`${prompt.label}-${index}`}
-            label={prompt.label}
-            content={prompt.content}
-          />
-        ))}
 
         {message.proposedPlan && message.proposedPlan.length > 0 && (
           <PlanProposalView
@@ -305,25 +299,6 @@ function formatElapsed(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}m ${s}s`;
-}
-
-function SystemPromptView({
-  label,
-  content,
-}: {
-  label: string;
-  content: string;
-}) {
-  return (
-    <details className="mb-3 rounded-lg border border-white/10 bg-black/20">
-      <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium text-ink-300">
-        System prompt: {label}
-      </summary>
-      <pre className="max-h-[420px] overflow-auto border-t border-white/10 px-3 py-2 text-[11px] leading-relaxed text-ink-200">
-        {content}
-      </pre>
-    </details>
-  );
 }
 
 function ThinkingBlock({

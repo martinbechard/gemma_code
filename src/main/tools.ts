@@ -701,11 +701,9 @@ function projectInstructionsBlock(
   mode?: PromptMode | PromptMode[],
   opts: ProjectInstructionOptions = {},
 ): string[] {
-  // Project instructions from Gemma.md (+ Gemma.{mode}.md) are appended last
-  // so they override earlier guidance when the user customizes the file.
   const md = loadProjectInstructions(mode, opts);
   if (!md) return [];
-  return ["", "PROJECT INSTRUCTIONS", "====================", md];
+  return ["", "MODE AND PROJECT INSTRUCTIONS", "=============================", md];
 }
 
 export function chatSystemPrompt(enableTools: boolean): string {
@@ -757,7 +755,18 @@ export function codeSystemPrompt(
   // structural prompt.
   return [
     "You are Gemma, a local coding agent running entirely on the user's Mac.",
-    `Date: ${now} (${day}). Workspace: ${workspacePath}. Preview: ${previewHref}`,
+    "",
+    "SESSION CONTEXT",
+    "===============",
+    `- Current date/time (UTC): ${now}`,
+    `- Current day: ${day}`,
+    `- Local timezone: ${tz()}`,
+    `- Workspace root: ${workspacePath}`,
+    `- Preview URL: ${previewHref}`,
+    `- Active prompt mode: ${codeMode}`,
+    ...projectInstructionsBlock(instructionModesForCodePrompt(codeMode), {
+      includeCommon: codeMode !== "execute",
+    }),
     "",
     "ACTION FORMAT — EXACT",
     '<action name="tool_name">',
@@ -780,9 +789,6 @@ export function codeSystemPrompt(
     "AVAILABLE TOOLS",
     "",
     renderToolHelp("code"),
-    ...projectInstructionsBlock(instructionModesForCodePrompt(codeMode), {
-      includeCommon: codeMode !== "execute",
-    }),
   ].join("\n");
 }
 

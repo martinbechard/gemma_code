@@ -33,6 +33,12 @@ describe("codeSystemPrompt", () => {
     expect(prompt).toContain("CODE_MARKER");
     expect(prompt).toContain("PLAN_MARKER");
     expect(prompt).not.toContain("EXECUTE_MARKER");
+    expect(prompt.indexOf("MODE AND PROJECT INSTRUCTIONS")).toBeLessThan(
+      prompt.indexOf("ACTION FORMAT"),
+    );
+    expect(prompt.indexOf("PLAN_MARKER")).toBeLessThan(
+      prompt.indexOf("ACTION FORMAT"),
+    );
   });
 
   it("loads code and execute instructions for plan execution mode", () => {
@@ -47,5 +53,21 @@ describe("codeSystemPrompt", () => {
     expect(prompt).toContain("CODE_MARKER");
     expect(prompt).toContain("EXECUTE_MARKER");
     expect(prompt).not.toContain("PLAN_MARKER");
+  });
+
+  it("starts code prompts with structured session context", () => {
+    writeGemma("Gemma.code.md", "CODE_MARKER");
+
+    const prompt = codeSystemPrompt("/workspace", "http://preview", "code");
+
+    expect(prompt).toContain("SESSION CONTEXT");
+    expect(prompt).toContain("- Current date/time (UTC):");
+    expect(prompt).toContain("- Local timezone:");
+    expect(prompt).toContain("- Workspace root: /workspace");
+    expect(prompt).toContain("- Preview URL: http://preview");
+    expect(prompt).toContain("- Active prompt mode: code");
+    expect(prompt.indexOf("SESSION CONTEXT")).toBeLessThan(
+      prompt.indexOf("CODE_MARKER"),
+    );
   });
 });

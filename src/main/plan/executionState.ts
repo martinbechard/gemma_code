@@ -1,4 +1,4 @@
-// Pure state machine driving a parsed <plan> through step / verify phases.
+// Pure state machine driving a parsed YAML plan through step / verify phases.
 // The agent loop calls `nextPrompt` to obtain the next synthetic-user turn,
 // then reports back via `finishStepBody` or `applyVerify`. Events are buffered
 // for the renderer and drained by the caller.
@@ -12,7 +12,7 @@ export type PlanEvent =
       id: string;
       parentId?: string;
       name?: string;
-      // For step nodes: the original <prompt> text from the plan, so the
+      // For step nodes: the original prompt text from the plan, so the
       // renderer can show what instructions the model gave itself for the step.
       prompt?: string;
       // For verify nodes: the original <verify> criterion text.
@@ -86,9 +86,10 @@ export class PlanExecutionState {
       }
       const header =
         `Execute step "${step.name}" now. Use <action> tags to do the work. ` +
-        `Do NOT emit a <plan> in this turn — you are already inside a plan and the host is driving each step. Any <plan> tag you emit here will be rejected and this step will be re-prompted unchanged. ` +
+        `Do NOT emit a YAML plan in this turn; you are already inside a plan and the host is driving each step. Any nested plan you emit here will be rejected and this step will be re-prompted unchanged. ` +
         `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
+        `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
         `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
         `When this step's work is done, write a brief plain-text summary and stop; the host will then ask you to verify.`;

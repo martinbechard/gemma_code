@@ -1,16 +1,4 @@
-// Parser for the <plan> protocol the model emits to drive multi-step work.
-//
-// Schema:
-//   <plan>
-//     <step name="...">
-//       <prompt>...</prompt>
-//       <verify>...</verify>
-//     </step>
-//     ...
-//   </plan>
-//
-// Steps missing required fields (name, prompt, verify) are silently skipped;
-// callers are free to reject a plan whose `steps` array ends up empty.
+import { parse } from "yaml";
 
 export interface ParsedStep {
   name: string;
@@ -29,72 +17,114 @@ export type VerifyResult =
   | { result: "pass" }
   | { result: "fail"; reason: string };
 
-const PLAN_OPEN_RE = /<plan\s*>/gi;
-const PLAN_CLOSE_RE = /<\/plan\s*>/i;
-const STEP_RE = /<step\s+([^>]*?)>([\s\S]*?)<\/step\s*>/gi;
-const NAME_RE = /name\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
-const PROMPT_RE = /<prompt>([\s\S]*?)<\/prompt>/i;
-const VERIFY_RE = /<verify>([\s\S]*?)<\/verify>/i;
+interface PlanYamlDocument {
+  plan?: {
+    steps?: unknown[];
+  };
+}
+
+const PLAN_KEY_RE = /^plan\s*:\s*(?:#.*)?$/gm;
+const VERIFY_TAG_RE = /<verify\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/verify\s*>)/i;
+const RESULT_RE = /result\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
+const REASON_RE = /reason\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
 
 export function findNextPlan(
   text: string,
   from = 0,
 ): ParsedPlan | "incomplete" | null {
-  PLAN_OPEN_RE.lastIndex = from;
-  const open = PLAN_OPEN_RE.exec(text);
-  if (!open) return null;
+  const start = findPlanStart(text, from);
+  if (start === null) return null;
 
-  const bodyStart = open.index + open[0].length;
-  const closeMatch = text.slice(bodyStart).match(PLAN_CLOSE_RE);
-  if (!closeMatch || closeMatch.index === undefined) return "incomplete";
+  const nextStart = findPlanStart(text, start + "plan:".length);
+  const planEnd = findPlanEnd(text, start);
+  const end = Math.min(nextStart ?? text.length, planEnd);
+  const raw = text.slice(start, end).trimEnd();
+  if (raw.length === 0) return "incomplete";
 
-  const closeIdx = bodyStart + closeMatch.index;
-  const body = text.slice(bodyStart, closeIdx);
-  const end = closeIdx + closeMatch[0].length;
+  let doc: unknown;
+  try {
+    doc = parse(raw);
+  } catch {
+    return "incomplete";
+  }
 
   return {
-    steps: parseSteps(body),
-    raw: text.slice(open.index, end),
-    start: open.index,
-    end,
+    steps: parseSteps(doc),
+    raw,
+    start,
+    end: start + raw.length,
   };
 }
 
 export function containsCompletePlan(text: string): boolean {
   const plan = findNextPlan(text);
-  return plan !== null && plan !== "incomplete";
+  return plan !== null && plan !== "incomplete" && plan.steps.length > 0;
 }
 
-function parseSteps(body: string): ParsedStep[] {
-  const out: ParsedStep[] = [];
-  STEP_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = STEP_RE.exec(body)) !== null) {
-    const attrs = m[1];
-    const inner = m[2];
+function findPlanStart(text: string, from: number): number | null {
+  PLAN_KEY_RE.lastIndex = from;
+  const match = PLAN_KEY_RE.exec(text);
+  return match ? match.index : null;
+}
 
-    const nameM = NAME_RE.exec(attrs);
-    const name = (nameM && (nameM[1] ?? nameM[2] ?? nameM[3]))?.trim();
-    if (!name) continue;
-
-    const promptM = PROMPT_RE.exec(inner);
-    if (!promptM) continue;
-    const prompt = promptM[1].trim();
-    if (!prompt) continue;
-
-    const verifyM = VERIFY_RE.exec(inner);
-    if (!verifyM) continue;
-    const verify = verifyM[1].trim();
-    if (!verify) continue;
-
-    out.push({ name, prompt, verify });
+function findPlanEnd(text: string, start: number): number {
+  const lines = text.slice(start).match(/[^\n]*(?:\n|$)/g) ?? [];
+  let offset = start;
+  let sawPlanLine = false;
+  for (const line of lines) {
+    if (line.length === 0) break;
+    if (!sawPlanLine) {
+      sawPlanLine = true;
+      offset += line.length;
+      continue;
+    }
+    if (line.trim().length > 0 && !/^\s/.test(line)) {
+      break;
+    }
+    offset += line.length;
   }
-  return out;
+  return offset;
 }
 
-const VERIFY_TAG_RE = /<verify\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/verify\s*>)/i;
-const RESULT_RE = /result\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
-const REASON_RE = /reason\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
+function parseSteps(doc: unknown): ParsedStep[] {
+  if (!isPlanYamlDocument(doc)) return [];
+  const steps = doc.plan?.steps;
+  if (!Array.isArray(steps)) return [];
+
+  const parsedSteps: ParsedStep[] = [];
+  for (const step of steps) {
+    if (!isRecord(step)) continue;
+    const name = stringField(step, "name");
+    const prompt = stringField(step, "prompt");
+    const verify = stringField(step, "verify");
+    if (!name || !prompt || !verify) continue;
+    parsedSteps.push({ name, prompt, verify });
+  }
+  return parsedSteps;
+}
+
+function isPlanYamlDocument(value: unknown): value is PlanYamlDocument {
+  if (!isRecord(value)) return false;
+  const plan = value.plan;
+  if (plan === undefined) return false;
+  if (!isRecord(plan)) return false;
+  const steps = plan.steps;
+  return steps === undefined || Array.isArray(steps);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? value : null;
+}
 
 export function parseVerifyResult(text: string): VerifyResult | null {
   const m = VERIFY_TAG_RE.exec(text);

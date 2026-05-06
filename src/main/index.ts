@@ -50,7 +50,12 @@ import {
   setWorkspaceOverride,
   clearWorkspaceOverride,
 } from "./workspace";
-import type { ChatRequest, StreamChunk, ToolCall } from "../shared/types";
+import type {
+  ChatRequest,
+  CodeSubmode,
+  StreamChunk,
+  ToolCall,
+} from "../shared/types";
 import { setRuntimePaths } from "./runtimePaths";
 import {
   containsCompletePlan,
@@ -392,13 +397,81 @@ async function handleRepairModel(model: string): Promise<void> {
 
 const MAX_TOOL_ROUNDS_CHAT = 6;
 const MAX_TOOL_ROUNDS_CODE = 40;
+const REPEATED_FAILED_EDIT_THRESHOLD = 2;
+const FAILED_EDIT_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Use an action to inspect files if you need more context, or emit one complete <plan> with concrete implementation and verification steps. Do not write files before the plan.";
+  "Continue in planning mode. Use an action to inspect files if you need more context, or emit one complete well-formed YAML plan with concrete implementation and verification steps. Do not write files before the plan.";
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
   "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
 const MAX_PLAN_REVIEW_ATTEMPTS = 2;
+
+function buildEditFailureRecoveryPrompt(path: string): string {
+  return [
+    "The edit_file action failed because old_string was not found.",
+    "Before retrying the edit, running tests, or verifying, reread the target file and use its exact current contents.",
+    "Your next response must be exactly this action tag and nothing else:",
+    `<action name="read_file">`,
+    `<path>${path}</path>`,
+    `</action>`,
+  ].join("\n");
+}
+
+function buildRepeatedEditFailureRecoveryPrompt(
+  path: string,
+  oldString: string,
+  attemptCount: number,
+): string {
+  const preview =
+    oldString.length > FAILED_EDIT_PREVIEW_CHARS
+      ? `${oldString.slice(0, FAILED_EDIT_PREVIEW_CHARS)}...`
+      : oldString;
+  return [
+    `The same edit_file old_string failed ${attemptCount} times for ${path}.`,
+    "That exact old_string is not in the current file. Do not use it again.",
+    "Use the latest read_file result for this path already in the conversation.",
+    "Your next response must be exactly one write_file action for this same path and nothing else.",
+    "The write_file content must preserve the current file content and apply the requested change.",
+    "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
+    "Do not retry this old_string:",
+    preview,
+  ].join("\n");
+}
+
+function buildPrematureVerifyPrompt(reason: string | null): string {
+  const reasonLine = reason
+    ? `The current step is not complete yet: ${reason}.`
+    : "The current step is not complete yet.";
+  return [
+    "You emitted a verify tag while executing a step body.",
+    "Only emit verify tags after the host sends a Verify request.",
+    reasonLine,
+    "Continue the current step now with the next required action tag, or write a blocker summary if you cannot proceed.",
+  ].join("\n");
+}
+
+function buildRepeatedRecoveryReadPrompt(path: string): string {
+  return [
+    `You are recovering from a failed edit_file action for ${path}.`,
+    "The file has already been reread and the tool result is already in the conversation.",
+    "Your next response must be exactly one write_file action for this same path and nothing else.",
+    "The write_file content must preserve the current file content and apply the requested change.",
+    "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
+  ].join("\n");
+}
+
+function buildFailedEditKey(
+  args: Record<string, unknown>,
+): { key: string; path: string; oldString: string } | null {
+  if (typeof args.path !== "string") return null;
+  if (typeof args.old_string !== "string") return null;
+  return {
+    key: `${args.path}\n${args.old_string}`,
+    path: args.path,
+    oldString: args.old_string,
+  };
+}
 
 function actionTarget(
   _name: string,
@@ -411,6 +484,79 @@ function actionTarget(
   if (typeof args.command === "string")
     return String(args.command).slice(0, COMMAND_TARGET_MAX_CHARS);
   return undefined;
+}
+
+type CodePromptMode = "code" | "build" | "plan" | "execute";
+
+interface ResolvedSystemPrompt {
+  label: string;
+  content: string;
+  workspacePath?: string;
+  previewHref?: string;
+}
+
+function promptModeForCodeSubmode(
+  codeSubmode: CodeSubmode | undefined,
+  hasWorkingDir: boolean,
+  executePlan?: boolean,
+): CodePromptMode {
+  if (!hasWorkingDir) return "build";
+  if (executePlan) return "execute";
+  switch (codeSubmode ?? "auto") {
+    case "discuss":
+      return "code";
+    case "plan":
+      return "plan";
+    case "execute":
+      return "execute";
+    case "auto":
+      return "plan";
+  }
+}
+
+function labelForCodePromptMode(
+  codePromptMode: CodePromptMode,
+  codeSubmode: CodeSubmode | undefined,
+  hasWorkingDir: boolean,
+  executePlan?: boolean,
+): string {
+  if (!hasWorkingDir) return "build";
+  if (executePlan) return "code execute";
+  if (codeSubmode === "auto" || !codeSubmode) return "code auto";
+  if (codePromptMode === "code") return "code discuss";
+  return `code ${codePromptMode}`;
+}
+
+async function resolveSystemPrompt(
+  req: ChatRequest,
+): Promise<ResolvedSystemPrompt> {
+  if (req.mode === "code") {
+    if (req.workingDir) {
+      setWorkspaceOverride(req.conversationId, req.workingDir);
+    }
+    const workspacePath = await ensureWorkspace(req.conversationId);
+    const previewHref = previewUrl(req.conversationId);
+    const codePromptMode = promptModeForCodeSubmode(
+      req.codeSubmode,
+      !!req.workingDir,
+      req.executePlan,
+    );
+    return {
+      label: labelForCodePromptMode(
+        codePromptMode,
+        req.codeSubmode,
+        !!req.workingDir,
+        req.executePlan,
+      ),
+      content: codeSystemPrompt(workspacePath, previewHref, codePromptMode),
+      workspacePath,
+      previewHref,
+    };
+  }
+  return {
+    label: "chat",
+    content: chatSystemPrompt(req.enableTools),
+  };
 }
 
 async function handleChat(req: ChatRequest, channel: string): Promise<void> {
@@ -434,42 +580,31 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     const baseMessages: MLXChatMessage[] = [];
 
     let planExecutionSystemPrompt: string | null = null;
-    const emitSystemPrompt = (label: string, content: string): void => {
-      emit({ type: "system_prompt", label, content });
+    const pushHarnessPrompt = (_label: string, content: string): void => {
+      baseMessages.push({ role: "user", content });
     };
 
-    if (req.mode === "code") {
-      // Code mode with a user-chosen working directory bypasses the sandbox by
-      // registering a workspace override before ensureWorkspace runs. Build mode
-      // (no workingDir) falls through to the per-conversation sandbox.
-      if (req.workingDir) {
-        setWorkspaceOverride(req.conversationId, req.workingDir);
-      }
-      const wsPath = await ensureWorkspace(req.conversationId);
-      const href = previewUrl(req.conversationId);
-      // A user-supplied workingDir means we're editing an existing project
-      // (Code mode); without it we're in the per-conversation sandbox (Build).
-      const codeMode = req.workingDir ? "plan" : "build";
-      const systemPrompt = codeSystemPrompt(wsPath, href, codeMode);
-      baseMessages.push({
-        role: "system",
-        content: systemPrompt,
-      });
-      emitSystemPrompt(
-        codeMode === "plan" ? "code plan" : "build",
-        systemPrompt,
-      );
-      planExecutionSystemPrompt = req.workingDir
-        ? codeSystemPrompt(wsPath, href, "execute")
+    const resolvedSystemPrompt = await resolveSystemPrompt(req);
+    baseMessages.push({
+      role: "system",
+      content: resolvedSystemPrompt.content,
+    });
+    planExecutionSystemPrompt =
+      req.mode === "code" &&
+      req.workingDir &&
+      resolvedSystemPrompt.workspacePath &&
+      resolvedSystemPrompt.previewHref
+        ? codeSystemPrompt(
+            resolvedSystemPrompt.workspacePath,
+            resolvedSystemPrompt.previewHref,
+            "execute",
+          )
         : null;
-    } else {
-      const systemPrompt = chatSystemPrompt(req.enableTools);
-      baseMessages.push({
-        role: "system",
-        content: systemPrompt,
-      });
-      emitSystemPrompt("chat", systemPrompt);
-    }
+    const codeSubmode = req.workingDir ? (req.codeSubmode ?? "auto") : null;
+    const topLevelPlanHarnessEnabled =
+      req.mode === "code" &&
+      !!req.workingDir &&
+      (codeSubmode === "plan" || codeSubmode === "auto");
 
     for (const m of req.messages) {
       if (
@@ -479,8 +614,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       ) {
         continue;
       }
+      if (m.role === "system") continue;
+      const messageRole = m.role === "harness" ? "user" : m.role;
       baseMessages.push({
-        role: m.role as MLXChatMessage["role"],
+        role: messageRole as MLXChatMessage["role"],
         content: m.content,
       });
       if (m.toolCalls) {
@@ -514,9 +651,25 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
     let stepEvidence = createPlanStepEvidence();
+    let stepEvidenceStepId: string | null = null;
+    const failedEditCounts = new Map<string, number>();
+    let pendingEditRecoveryPath: string | null = null;
+
+    const prepareStepEvidence = (prompt: {
+      kind: "step" | "verify";
+      stepId: string;
+    }): void => {
+      if (prompt.kind !== "step") return;
+      if (prompt.stepId === stepEvidenceStepId) return;
+      stepEvidence = createPlanStepEvidence();
+      stepEvidenceStepId = prompt.stepId;
+    };
 
     const usePlanExecutionPrompt = (): void => {
       if (!planExecutionSystemPrompt || baseMessages[0]?.role !== "system") {
+        return;
+      }
+      if (baseMessages[0].content === planExecutionSystemPrompt) {
         return;
       }
       baseMessages[0] = {
@@ -574,10 +727,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         emit({ type: "done" });
         return;
       }
-      if (next.kind === "step") {
-        stepEvidence = createPlanStepEvidence();
-      }
-      baseMessages.push({ role: "user", content: next.text });
+      prepareStepEvidence(next);
+      pushHarnessPrompt(
+        next.kind === "verify" ? "plan verify" : "plan step",
+        next.text,
+      );
       awaitingVerify = next.kind === "verify";
     }
 
@@ -814,16 +968,90 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               content: `[${hadError ? "error" : "ok"}] ${found.name}: ${result}`,
             });
             if (planState?.currentStepId) {
-              recordPlanToolEvidence(stepEvidence, found.name, result);
+              recordPlanToolEvidence(stepEvidence, found.name, result, found.args);
+            }
+            if (
+              found.name === "edit_file" &&
+              result.startsWith("Error editing") &&
+              result.includes("old_string not found") &&
+              typeof found.args.path === "string"
+            ) {
+              pendingEditRecoveryPath = found.args.path;
+              const failedEdit = buildFailedEditKey(found.args);
+              const failedEditAttempts = failedEdit
+                ? (failedEditCounts.get(failedEdit.key) ?? 0) + 1
+                : 1;
+              if (failedEdit) {
+                failedEditCounts.set(failedEdit.key, failedEditAttempts);
+              }
+              pushHarnessPrompt(
+                "edit recovery",
+                failedEdit &&
+                  failedEditAttempts >= REPEATED_FAILED_EDIT_THRESHOLD
+                  ? buildRepeatedEditFailureRecoveryPrompt(
+                      failedEdit.path,
+                      failedEdit.oldString,
+                      failedEditAttempts,
+                    )
+                  : buildEditFailureRecoveryPrompt(found.args.path),
+              );
+            }
+            if (found.name === "edit_file") {
+              const failedEdit = buildFailedEditKey(found.args);
+              if (failedEdit && !result.includes("old_string not found")) {
+                failedEditCounts.delete(failedEdit.key);
+              }
+              if (
+                typeof found.args.path === "string" &&
+                found.args.path === pendingEditRecoveryPath &&
+                !result.includes("old_string not found")
+              ) {
+                pendingEditRecoveryPath = null;
+              }
+            }
+            if (
+              found.name === "write_file" &&
+              typeof found.args.path === "string" &&
+              found.args.path === pendingEditRecoveryPath &&
+              !result.startsWith("Error")
+            ) {
+              pendingEditRecoveryPath = null;
             }
             if (repeatedActionCount > 1) {
-              baseMessages.push({
-                role: "user",
-                content:
-                  `You repeated the same ${found.name} action ${repeatedActionCount} times. ` +
-                  "Use the tool result already provided and move to the next distinct action or emit a concrete <plan>. " +
+              if (
+                found.name === "read_file" &&
+                typeof found.args.path === "string" &&
+                found.args.path === pendingEditRecoveryPath
+              ) {
+                pushHarnessPrompt(
+                  "edit recovery",
+                  buildRepeatedRecoveryReadPrompt(found.args.path),
+                );
+                executedAction = true;
+                if (livePath) {
+                  send("file:streaming", {
+                    conversationId: req.conversationId,
+                    path: livePath,
+                    content: lastEmittedContent,
+                    done: true,
+                  });
+                }
+                pendingAction = null;
+                livePath = null;
+                liveContentStart = -1;
+                lastEmittedContent = "";
+                emit({
+                  type: "activity",
+                  activity: { kind: "thinking", chars: 0 },
+                });
+                break streamLoop;
+              }
+              pushHarnessPrompt(
+                "repeated action",
+                `You repeated the same ${found.name} action ${repeatedActionCount} times. ` +
+                  "Use the tool result already provided and move to the next distinct action or emit a concrete YAML plan. " +
                   `Do not call ${found.name} with the same parameters again.`,
-              });
+              );
             }
             executedAction = true;
             if (livePath) {
@@ -858,7 +1086,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       }
 
       if (sawIncompleteAction) {
-        baseMessages.push({ role: "user", content: INCOMPLETE_ACTION_NUDGE });
+        pushHarnessPrompt("incomplete action", INCOMPLETE_ACTION_NUDGE);
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }
@@ -870,8 +1098,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         }
       };
 
-      // Plan / verify XML is rendered structurally by PlanView; replace the
-      // streamed body with a cleaned version so the raw tag text doesn't
+      // Plans and verify responses are rendered structurally by PlanView;
+      // replace the streamed body with a cleaned version so raw control text doesn't
       // appear twice in the chat.
       const replaceBodyStripped = (): void => {
         const cleaned = stripPlanArtifacts(buffer);
@@ -910,10 +1138,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             emit({ type: "done" });
             return;
           }
-          if (next.kind === "step") {
-            stepEvidence = createPlanStepEvidence();
-          }
-          baseMessages.push({ role: "user", content: next.text });
+          prepareStepEvidence(next);
+          pushHarnessPrompt(
+            next.kind === "verify" ? "plan verify" : "plan step",
+            next.text,
+          );
           awaitingVerify = next.kind === "verify";
           emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
           continue;
@@ -932,7 +1161,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       //     turn into a recursive loop where each sub-plan re-emits the same
       //     step prompt. Reject the plan and re-prompt the current step so
       //     the model does the work directly.
-      const planFound = findNextPlan(buffer);
+      const planFound =
+        planState || topLevelPlanHarnessEnabled ? findNextPlan(buffer) : null;
       if (planFound && planFound !== "incomplete") {
         flushBufferToUI();
         replaceBodyStripped();
@@ -952,10 +1182,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               type: "set_assistant_content",
               text: "Reviewing the proposed plan before saving it.",
             });
-            baseMessages.push({
-              role: "user",
-              content: buildPlanReviewPrompt(planFound.raw),
-            });
+            pushHarnessPrompt(
+              "plan review",
+              buildPlanReviewPrompt(planFound.raw),
+            );
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -966,12 +1196,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           if (!validation.valid) {
             baseMessages.push({ role: "assistant", content: buffer });
             pendingPlanReview = false;
-            baseMessages.push({
-              role: "user",
-              content:
-                `The reviewed plan is not executable yet: ${validation.reason}\n\n` +
-                "Your next response must be exactly one action tag that inspects the project, such as list_files or read_file. Do not emit another <plan> until you have tool evidence for the exact file paths and commands the plan will name.",
-            });
+            pushHarnessPrompt(
+              "plan validation",
+              `The reviewed plan is not executable yet: ${validation.reason}\n\n` +
+                "Your next response must be exactly one action tag that inspects the project, such as list_files or read_file. Do not emit another YAML plan until you have tool evidence for the exact file paths and commands the plan will name.",
+            );
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -997,20 +1226,21 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         // so nextPrompt() returns the same step text again.
         usePlanExecutionPrompt();
         const corrective =
-          `You emitted a <plan> while inside an active plan step. That is not allowed and the plan was discarded. ` +
+          `You emitted a YAML plan while inside an active plan step. That is not allowed and the plan was discarded. ` +
           `Do the work for the current step directly using <action> tags, or write a brief plain-text summary if no tools are needed. ` +
           `If the step is too large, do what you can and let verify fail with a reason describing what's left.`;
-        baseMessages.push({ role: "user", content: corrective });
+        pushHarnessPrompt("nested plan correction", corrective);
         const next = planState.nextPrompt();
         if (!next) {
           emit({ type: "activity", activity: { kind: "idle" } });
           emit({ type: "done" });
           return;
         }
-        if (next.kind === "step") {
-          stepEvidence = createPlanStepEvidence();
-        }
-        baseMessages.push({ role: "user", content: next.text });
+        prepareStepEvidence(next);
+        pushHarnessPrompt(
+          next.kind === "verify" ? "plan verify" : "plan step",
+          next.text,
+        );
         awaitingVerify = next.kind === "verify";
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
@@ -1023,16 +1253,15 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           emit({ type: "activity", activity: { kind: "idle" } });
           emit({
             type: "error",
-            error: "Plan review failed: no amended <plan> was returned.",
+            error: "Plan review failed: no amended YAML plan was returned.",
           });
           return;
         }
         planReviewAttempts += 1;
-        baseMessages.push({
-          role: "user",
-          content:
-            "The plan review response did not include one complete final <plan>. Explain the gap briefly, then emit one amended complete <plan> now.",
-        });
+        pushHarnessPrompt(
+          "plan review retry",
+          "The plan review response did not include one complete final YAML plan. Explain the gap briefly, then emit one amended complete YAML plan now.",
+        );
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }
@@ -1040,6 +1269,48 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       // No action, no plan, no verify pending: if a plan is active, the
       // current step's body has just finished.
       if (planState) {
+        const prematureVerify = parseVerifyResult(buffer);
+        if (prematureVerify) {
+          const forcedReason = forcedVerifyFailureReason(
+            planState.currentVerifyCriterion() ?? "",
+            stepEvidence,
+          );
+          flushBufferToUI();
+          replaceBodyStripped();
+          baseMessages.push({ role: "assistant", content: buffer });
+          if (!forcedReason) {
+            planState.finishStepBody();
+            drainPlanEvents();
+            if (planState.state !== "running") {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            const next = planState.nextPrompt();
+            if (!next) {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            prepareStepEvidence(next);
+            pushHarnessPrompt(
+              next.kind === "verify" ? "plan verify" : "plan step",
+              next.text,
+            );
+            awaitingVerify = next.kind === "verify";
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          pushHarnessPrompt(
+            "premature verify",
+            buildPrematureVerifyPrompt(forcedReason),
+          );
+          emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+          continue;
+        }
         flushBufferToUI();
         replaceBodyStripped();
         baseMessages.push({ role: "assistant", content: buffer });
@@ -1056,23 +1327,31 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           emit({ type: "done" });
           return;
         }
-        if (next.kind === "step") {
-          stepEvidence = createPlanStepEvidence();
-        }
-        baseMessages.push({ role: "user", content: next.text });
+        prepareStepEvidence(next);
+        pushHarnessPrompt(
+          next.kind === "verify" ? "plan verify" : "plan step",
+          next.text,
+        );
         awaitingVerify = next.kind === "verify";
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }
 
-      // Build mode round-0 fallback: nudge a non-plan narration toward action.
-      if (req.mode === "code" && round === 0 && buffer.trim().length > 0) {
+      // Build and planning fallback: nudge a round-0 narration toward the
+      // expected artifact for modes where plain discussion is not the goal.
+      const shouldNudgeCodeResponse =
+        req.mode === "code" &&
+        round === 0 &&
+        buffer.trim().length > 0 &&
+        (!req.workingDir ||
+          !["discuss", "execute"].includes(req.codeSubmode ?? "auto"));
+      if (shouldNudgeCodeResponse) {
         flushBufferToUI();
         baseMessages.push({ role: "assistant", content: buffer });
-        baseMessages.push({
-          role: "user",
-          content: req.workingDir ? CODE_PLAN_NUDGE : BUILD_ACTION_NUDGE,
-        });
+        pushHarnessPrompt(
+          "mode nudge",
+          req.workingDir ? CODE_PLAN_NUDGE : BUILD_ACTION_NUDGE,
+        );
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }

@@ -27,6 +27,14 @@ const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
     label: "prompt files needed",
     pattern: /\bprompt files? needed\b/i,
   },
+  {
+    label: "exampleTool.test.ts",
+    pattern: /\bexampleTool\.test\.ts\b/,
+  },
+  {
+    label: "requested_tool_name",
+    pattern: /\brequested_tool_name\b/,
+  },
 ];
 
 export function validatePlanForExecution(
@@ -71,6 +79,28 @@ export function validatePlanForExecution(
       valid: false,
       reason:
         "Plan must include grounding, test, implementation, and verification steps.",
+    };
+  }
+
+  if (!/\btests\/main\/[^\s<>]+\.test\.ts\b/.test(wholePlan)) {
+    return {
+      valid: false,
+      reason:
+        "Plan must name the exact tests/main test file path it will create or update.",
+    };
+  }
+
+  if (!/\b(?:pnpm|npm) test\b/.test(wholePlan)) {
+    return {
+      valid: false,
+      reason: "Plan must name the exact test command it will run.",
+    };
+  }
+
+  if (!/\b(?:pnpm|npm) run build\b/.test(wholePlan)) {
+    return {
+      valid: false,
+      reason: "Plan must name the exact build command it will run.",
     };
   }
 

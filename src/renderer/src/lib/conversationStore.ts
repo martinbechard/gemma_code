@@ -14,7 +14,13 @@ export interface PersistedConversationLite {
   mode: AgentMode;
   workingDir?: string;
   model?: string;
-  messages?: Array<unknown>;
+  messages?: Array<{ id?: string; role?: string }>;
+}
+
+export function shouldDisplayConversationMessage(message: {
+  role?: string;
+}): boolean {
+  return message.role !== "system" && message.role !== "harness";
 }
 
 // Returns the stamped model of the most-recent conversation in the persisted
@@ -39,7 +45,7 @@ export function isModeLocked(c: PersistedConversationLite): boolean {
   if (c.mode !== "code") return false;
   if (!c.workingDir) return false;
   const msgs = c.messages ?? [];
-  return msgs.length > 0;
+  return msgs.some(shouldDisplayConversationMessage);
 }
 
 // Reads the persisted conversation list from localStorage. Returns [] on

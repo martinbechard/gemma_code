@@ -1,5 +1,5 @@
 // Per-conversation persistence of a proposed plan. The harness writes the
-// plan XML here when the model emits one at the top level, then waits for the
+// plan YAML here when the model emits one at the top level, then waits for the
 // user to approve execution. On execute the file is parsed back into a
 // ParsedPlan and used to drive PlanExecutionState. The file survives app
 // crashes between propose and execute.
@@ -27,20 +27,20 @@ function assertSafeId(conversationId: string): void {
 
 export function pendingPlanPath(conversationId: string): string {
   assertSafeId(conversationId);
-  return join(plansDir(), `${conversationId}.xml`);
+  return join(plansDir(), `${conversationId}.yaml`);
 }
 
-export function savePlan(conversationId: string, planXml: string): void {
+export function savePlan(conversationId: string, planYaml: string): void {
   const dir = plansDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(pendingPlanPath(conversationId), planXml, "utf8");
+  writeFileSync(pendingPlanPath(conversationId), planYaml, "utf8");
 }
 
 export function loadPlan(conversationId: string): ParsedPlan | null {
   const p = pendingPlanPath(conversationId);
   if (!existsSync(p)) return null;
-  const xml = readFileSync(p, "utf8");
-  const parsed = findNextPlan(xml);
+  const yaml = readFileSync(p, "utf8");
+  const parsed = findNextPlan(yaml);
   if (!parsed || parsed === "incomplete") return null;
   if (parsed.steps.length === 0) return null;
   return parsed;

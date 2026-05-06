@@ -42,17 +42,14 @@ export interface ToolCall {
   result?: string;
   error?: string;
   running?: boolean;
-  // When the tool ran inside a <plan> step, this is the id of the step node
+  // When the tool ran inside a plan step, this is the id of the step node
   // (matches PlanNode.id). The renderer groups calls under their step.
   parentStepId?: string;
 }
 
-export interface SystemPromptSnapshot {
-  label: string;
-  content: string;
-}
+export type Role = "user" | "assistant" | "system" | "tool" | "harness";
 
-export type Role = "user" | "assistant" | "system" | "tool";
+export type CodeSubmode = "discuss" | "plan" | "execute" | "auto";
 
 export interface PlanNode {
   id: string;
@@ -60,7 +57,7 @@ export interface PlanNode {
   parentId?: string;
   name?: string;
   status: "running" | "ok" | "failed";
-  // For step nodes: the original <prompt> text from the plan.
+  // For step nodes: the original prompt text from the plan.
   prompt?: string;
   // For verify nodes: the original <verify> criterion text.
   criterion?: string;
@@ -73,9 +70,8 @@ export interface ChatMessage {
   role: Role;
   content: string;
   toolCalls?: ToolCall[];
-  systemPrompts?: SystemPromptSnapshot[];
   planNodes?: PlanNode[];
-  // When the assistant emitted a top-level <plan> on this turn, the parsed
+  // When the assistant emitted a top-level YAML plan on this turn, the parsed
   // steps are surfaced here so the renderer can show the proposal alongside
   // an Execute Plan button.
   proposedPlan?: ProposedStep[];
@@ -100,6 +96,7 @@ export interface ChatRequest {
   // of the per-conversation sandbox. Distinguishes "Build" (sandbox) from
   // "Code" (user-chosen working directory) without changing AgentMode.
   workingDir?: string;
+  codeSubmode?: CodeSubmode;
   // When set, the harness skips streaming a fresh assistant turn and instead
   // loads a previously-proposed plan for this conversation, building a
   // PlanExecutionState and entering the standard step/verify loop.
@@ -140,7 +137,6 @@ export type PlanNodeStatus = "ok" | "failed";
 
 export type StreamChunk =
   | { type: "token"; text: string }
-  | { type: "system_prompt"; label: string; content: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; id: string; result?: string; error?: string }
   | { type: "activity"; activity: AgentActivity }
@@ -161,10 +157,10 @@ export type StreamChunk =
       reason?: string;
     }
   // Replaces the current assistant message body. Used after a round whose
-  // buffer contained a <plan> or <verify> block — the structured PlanView
-  // already covers it, so the raw XML body text is stripped from the chat.
+  // buffer contained a plan or verify response; the structured PlanView
+  // already covers it, so the raw control text is stripped from the chat.
   | { type: "set_assistant_content"; text: string }
-  // The model proposed a top-level plan. The harness has saved the XML to
+  // The model proposed a top-level plan. The harness has saved the YAML to
   // disk and is waiting for the user to approve execution; the renderer
   // shows the proposal and an Execute Plan affordance that fires
   // window.api.executePlan(conversationId).

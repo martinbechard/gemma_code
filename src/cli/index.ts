@@ -2,7 +2,8 @@
 // Usage:
 //   npm run cli -- chat "your prompt"
 //   npm run cli -- code "build a landing page for ..."
-//   npm run cli -- execute-plan --plan plan.xml "your original prompt"
+//   npm run cli -- plan "add a tool"
+//   npm run cli -- execute-plan --plan plan.yaml "your original prompt"
 //   npm run cli -- continue --conversation .gemma-cli/conversations/cli-123.json "recap"
 //   npm run cli -- setup
 //   npm run cli -- status
@@ -10,7 +11,7 @@
 // Set RUN_BASH=1 to allow the run_bash tool. Default is disabled for safety.
 // Override the model with --model <hf-id>. Defaults to gemma-4-e2b.
 // Pass --worktree to run the agent inside an isolated git worktree at
-// .worktrees/<conversationId> on a fresh branch (chat/code only).
+// .worktrees/<conversationId> on a fresh branch.
 
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
@@ -37,6 +38,7 @@ function printUsage(): void {
       "  cli status [--model <hf-id>]",
       "  cli chat [--model <hf-id>] [--worktree] <prompt>",
       "  cli code [--model <hf-id>] [--worktree] <prompt>",
+      "  cli plan [--model <hf-id>] [--worktree] <prompt>",
       "  cli execute-plan [--model <hf-id>] [--worktree] --plan <file> <prompt>",
       "  cli continue [--model <hf-id>] --conversation <file> <prompt>",
       "",
@@ -82,6 +84,16 @@ async function main(): Promise<void> {
         worktree: args.worktree,
       });
       return;
+    case "plan":
+      await runChat({
+        mode: "code",
+        model: args.model,
+        prompt: args.prompt,
+        enableBash: args.enableBash,
+        worktree: args.worktree,
+        planOnly: true,
+      });
+      return;
     case "execute-plan":
       await runChat({
         mode: "code",
@@ -89,7 +101,7 @@ async function main(): Promise<void> {
         prompt: args.prompt,
         enableBash: args.enableBash,
         worktree: args.worktree,
-        initialPlanXml: readFileSync(args.planPath!, "utf8"),
+        initialPlanYaml: readFileSync(args.planPath!, "utf8"),
       });
       return;
     case "continue":

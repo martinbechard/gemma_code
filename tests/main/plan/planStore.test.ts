@@ -21,19 +21,20 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const samplePlanXml = `<plan>
-  <step name="explore">
-    <prompt>list the workspace</prompt>
-    <verify>workspace listed</verify>
-  </step>
-</plan>`;
+const samplePlanYaml = [
+  "plan:",
+  "  steps:",
+  "    - name: explore",
+  "      prompt: list the workspace",
+  "      verify: workspace listed",
+].join("\n");
 
 describe("planStore", () => {
   it("savePlan creates the file at the expected per-conversation path", () => {
-    savePlan("conv-1", samplePlanXml);
+    savePlan("conv-1", samplePlanYaml);
     const p = pendingPlanPath("conv-1");
     expect(p.startsWith(join(dir, "plans"))).toBe(true);
-    expect(p.endsWith("conv-1.xml")).toBe(true);
+    expect(p.endsWith("conv-1.yaml")).toBe(true);
     expect(existsSync(p)).toBe(true);
   });
 
@@ -42,7 +43,7 @@ describe("planStore", () => {
   });
 
   it("loadPlan returns the parsed plan after savePlan", () => {
-    savePlan("c", samplePlanXml);
+    savePlan("c", samplePlanYaml);
     const loaded = loadPlan("c");
     expect(loaded).not.toBeNull();
     expect(loaded!.steps.length).toBe(1);
@@ -52,25 +53,26 @@ describe("planStore", () => {
   });
 
   it("loadPlan returns null when the saved file is malformed", () => {
-    savePlan("c", "<plan><step>bad</step></plan>");
+    savePlan("c", "plan:\n  steps:\n    - prompt: missing name");
     expect(loadPlan("c")).toBeNull();
   });
 
   it("savePlan overwrites a previous proposal for the same conversation", () => {
-    savePlan("c", samplePlanXml);
-    const second = `<plan>
-  <step name="other">
-    <prompt>p2</prompt>
-    <verify>v2</verify>
-  </step>
-</plan>`;
+    savePlan("c", samplePlanYaml);
+    const second = [
+      "plan:",
+      "  steps:",
+      "    - name: other",
+      "      prompt: p2",
+      "      verify: v2",
+    ].join("\n");
     savePlan("c", second);
     const loaded = loadPlan("c");
     expect(loaded!.steps[0].name).toBe("other");
   });
 
   it("clearPlan removes the file; subsequent loadPlan returns null", () => {
-    savePlan("c", samplePlanXml);
+    savePlan("c", samplePlanYaml);
     clearPlan("c");
     expect(loadPlan("c")).toBeNull();
     expect(existsSync(pendingPlanPath("c"))).toBe(false);
@@ -81,10 +83,12 @@ describe("planStore", () => {
   });
 
   it("plan paths for distinct conversations are isolated", () => {
-    savePlan("a", samplePlanXml);
+    savePlan("a", samplePlanYaml);
     savePlan(
       "b",
-      `<plan><step name="x"><prompt>p</prompt><verify>v</verify></step></plan>`,
+      ["plan:", "  steps:", "    - name: x", "      prompt: p", "      verify: v"].join(
+        "\n",
+      ),
     );
     expect(loadPlan("a")!.steps[0].name).toBe("explore");
     expect(loadPlan("b")!.steps[0].name).toBe("x");
@@ -94,8 +98,8 @@ describe("planStore", () => {
   });
 
   it("rejects conversationIds containing path separators", () => {
-    expect(() => savePlan("../escape", samplePlanXml)).toThrow();
-    expect(() => savePlan("a/b", samplePlanXml)).toThrow();
+    expect(() => savePlan("../escape", samplePlanYaml)).toThrow();
+    expect(() => savePlan("a/b", samplePlanYaml)).toThrow();
     expect(() => loadPlan("../escape")).toThrow();
     expect(() => clearPlan("../escape")).toThrow();
   });

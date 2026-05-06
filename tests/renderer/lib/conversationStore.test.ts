@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   pickStartupModel,
   isModeLocked,
+  shouldDisplayConversationMessage,
   type PersistedConversationLite,
 } from "../../../src/renderer/src/lib/conversationStore";
 
@@ -78,6 +81,21 @@ describe("isModeLocked", () => {
     ).toBe(false);
   });
 
+  it("ignores visible prompt messages when deciding whether Code is locked", () => {
+    expect(
+      isModeLocked(
+        conv({
+          mode: "code",
+          workingDir: "/tmp/proj",
+          messages: [
+            { id: "s1", role: "system" },
+            { id: "h1", role: "harness" },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("returns true once a Code conversation has at least one message", () => {
     expect(
       isModeLocked(
@@ -88,5 +106,25 @@ describe("isModeLocked", () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("prompt display helpers", () => {
+  it("hides system and harness prompt messages from the conversation", () => {
+    expect(shouldDisplayConversationMessage({ role: "system" })).toBe(false);
+    expect(shouldDisplayConversationMessage({ role: "harness" })).toBe(false);
+    expect(shouldDisplayConversationMessage({ role: "user" })).toBe(true);
+    expect(shouldDisplayConversationMessage({ role: "assistant" })).toBe(true);
+  });
+
+  it("does not keep a live prompt-loaded marker in UI or CLI source", () => {
+    for (const path of [
+      "src/renderer/src/components/Chat.tsx",
+      "src/shared/types.ts",
+      "src/cli/agent.ts",
+    ]) {
+      const source = readFileSync(join(process.cwd(), path), "utf8");
+      expect(source).not.toContain("Loaded: Gemma project instructions");
+    }
   });
 });

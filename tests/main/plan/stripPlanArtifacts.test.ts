@@ -2,21 +2,32 @@ import { describe, it, expect } from "vitest";
 import { stripPlanArtifacts } from "../../../src/main/plan/stripPlanArtifacts";
 
 describe("stripPlanArtifacts", () => {
-  it("returns text unchanged when no plan/verify tags are present", () => {
+  it("returns text unchanged when no plan YAML or verify tags are present", () => {
     expect(stripPlanArtifacts("hello world")).toBe("hello world");
     expect(stripPlanArtifacts("")).toBe("");
   });
 
-  it("removes a single <plan>...</plan> block including inner step bodies", () => {
-    const input =
-      "intro\n<plan><step name=\"a\"><prompt>do x</prompt><verify>x is done</verify></step></plan>\noutro";
-    expect(stripPlanArtifacts(input)).toBe("intro\n\noutro");
+  it("removes a YAML plan block", () => {
+    const input = [
+      "intro",
+      "plan:",
+      "  steps:",
+      "    - name: a",
+      "      prompt: do x",
+      "      verify: x is done",
+    ].join("\n");
+    expect(stripPlanArtifacts(input)).toBe("intro");
   });
 
-  it("removes multiple plan blocks", () => {
-    const input =
-      "<plan><step name=\"a\"><prompt>p</prompt><verify>v</verify></step></plan>middle<plan><step name=\"b\"><prompt>p2</prompt><verify>v2</verify></step></plan>";
-    expect(stripPlanArtifacts(input)).toBe("middle");
+  it("removes a response that is only a YAML plan", () => {
+    const input = [
+      "plan:",
+      "  steps:",
+      "    - name: a",
+      "      prompt: p",
+      "      verify: v",
+    ].join("\n");
+    expect(stripPlanArtifacts(input)).toBe("");
   });
 
   it("removes self-closing <verify .../> tags", () => {
@@ -29,20 +40,8 @@ describe("stripPlanArtifacts", () => {
     expect(stripPlanArtifacts(input)).toBe("pre  post");
   });
 
-  it("collapses runs of blank lines left after stripping", () => {
-    const input =
-      "line1\n\n<plan><step name=\"a\"><prompt>p</prompt><verify>v</verify></step></plan>\n\nline2";
-    expect(stripPlanArtifacts(input)).toBe("line1\n\nline2");
-  });
-
-  it("trims leading/trailing whitespace left after stripping", () => {
-    const input =
-      "<plan><step name=\"a\"><prompt>p</prompt><verify>v</verify></step></plan>";
-    expect(stripPlanArtifacts(input)).toBe("");
-  });
-
-  it("leaves an unterminated <plan> tag in place (incomplete stream)", () => {
-    const input = "narrative <plan><step name=\"a\"><prompt>p";
+  it("leaves malformed plan YAML in place", () => {
+    const input = "narrative\nplan:\n  steps:\n    - name:";
     expect(stripPlanArtifacts(input)).toBe(input);
   });
 });

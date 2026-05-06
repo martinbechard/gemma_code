@@ -20,15 +20,6 @@ export interface PromptMeta {
   model: string;
 }
 
-export function formatSystemPromptDisplay(label: string, content: string): string {
-  return [
-    `SYSTEM PROMPT: ${label}`,
-    "=".repeat(80),
-    content,
-    "=".repeat(80),
-  ].join("\n");
-}
-
 export function debugPromptPath(): string {
   return join(userDataDir(), "debug", "last-system-prompt.txt");
 }

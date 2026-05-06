@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { parseCliArgs } from "../../src/cli/args";
 
 describe("parseCliArgs", () => {
+  it("parses plan with worktree and prompt", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "plan",
+      "--worktree",
+      "build the tool plan",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "plan",
+      worktree: true,
+      prompt: "build the tool plan",
+    });
+  });
+
   it("parses execute-plan with a plan file and prompt", () => {
     const parsed = parseCliArgs([
       "node",
@@ -9,14 +25,14 @@ describe("parseCliArgs", () => {
       "execute-plan",
       "--worktree",
       "--plan",
-      "plan.xml",
+      "plan.yaml",
       "build the tool",
     ]);
 
     expect(parsed).toMatchObject({
       command: "execute-plan",
       worktree: true,
-      planPath: "plan.xml",
+      planPath: "plan.yaml",
       prompt: "build the tool",
     });
   });
@@ -42,5 +58,11 @@ describe("parseCliArgs", () => {
     expect(() =>
       parseCliArgs(["node", "cli", "execute-plan", "build the tool"]),
     ).toThrow("plan file required");
+  });
+
+  it("rejects plan without a prompt", () => {
+    expect(() => parseCliArgs(["node", "cli", "plan"])).toThrow(
+      "prompt required",
+    );
   });
 });

@@ -37,10 +37,11 @@ describe("PlanExecutionState — single step happy path", () => {
     const p1 = s.nextPrompt();
     expect(p1?.kind).toBe("step");
     expect(p1?.text).toContain("do explore");
-    expect(p1?.text).toMatch(/do not emit a <plan>/i);
+    expect(p1?.text).toMatch(/do not emit a YAML plan/i);
     // Grounding reminder: every step prompt nudges the model to read
     // the canonical file before adding host-project code.
     expect(p1?.text).toMatch(/read.*canonical/i);
+    expect(p1?.text).toMatch(/multiple files to read/i);
     expect(p1?.text).toMatch(/gather.*evidence/i);
     expect(p1?.text).toMatch(/required write, edit, or command action fails/i);
 
