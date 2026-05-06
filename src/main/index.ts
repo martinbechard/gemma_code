@@ -65,8 +65,13 @@ import {
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 import { clearPlan, loadPlan, savePlan } from "./plan/planStore";
-import { buildPlanReviewPrompt } from "./plan/reviewPrompt";
 import { validatePlanForExecution } from "./plan/validation";
+import {
+  PLAN_ASSEMBLY_DONE_TEXT,
+  applyPlanAssemblyResponse,
+  createPlanAssemblyState,
+  type PlanAssemblyState,
+} from "./plan/assembly";
 import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
@@ -400,12 +405,11 @@ const MAX_TOOL_ROUNDS_CODE = 40;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Use an action to inspect files if you need more context, or emit one complete well-formed YAML plan with concrete implementation and verification steps. Do not write files before the plan.";
+  "Continue in planning mode. Use an action to inspect files if you need more context, emit exactly one YAML plan step, or reply exactly no plan + no action when there are no more steps. Do not write files before the assembled plan is approved.";
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
   "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
-const MAX_PLAN_REVIEW_ATTEMPTS = 2;
 
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
@@ -650,8 +654,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
     let planState: PlanExecutionState | null = null;
     let awaitingVerify = false;
-    let pendingPlanReview = false;
-    let planReviewAttempts = 0;
+    let planAssemblyState: PlanAssemblyState | null = topLevelPlanHarnessEnabled
+      ? createPlanAssemblyState()
+      : null;
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
     let stepEvidence = createPlanStepEvidence();
@@ -1159,51 +1164,68 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       }
 
       // Look for a plan in the buffer. Two paths:
-      //   - top-level (no active planState): persist the plan and stop, so
-      //     the user can review and approve before any step executes.
+      //   - top-level (no active planState): accept exactly one step, keep
+      //     asking for the next step, then save the assembled plan only after
+      //     the model emits the done sentinel.
       //   - inside an active planState: nested plans are not allowed; they
       //     turn into a recursive loop where each sub-plan re-emits the same
       //     step prompt. Reject the plan and re-prompt the current step so
       //     the model does the work directly.
       const planFound =
         planState || topLevelPlanHarnessEnabled ? findNextPlan(buffer) : null;
-      if (planFound && planFound !== "incomplete") {
+      const planAssemblyDone =
+        !planState &&
+        !!planAssemblyState &&
+        buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT;
+      if ((planFound && planFound !== "incomplete") || planAssemblyDone) {
         flushBufferToUI();
-        replaceBodyStripped();
+        if (planAssemblyDone) {
+          emit({ type: "set_assistant_content", text: "" });
+        } else {
+          replaceBodyStripped();
+        }
         if (!planState) {
-          if (planFound.steps.length === 0) {
+          if (!planAssemblyState) {
             emit({ type: "activity", activity: { kind: "idle" } });
             emit({
               type: "error",
-              error: "Plan rejected: no valid steps",
+              error: "Plan assembly is not active for this conversation.",
             });
             return;
           }
-          if (!pendingPlanReview) {
-            pendingPlanReview = true;
-            planReviewAttempts = 1;
-            emit({
-              type: "set_assistant_content",
-              text: "Reviewing the proposed plan before saving it.",
-            });
-            pushHarnessPrompt(
-              "plan review",
-              buildPlanReviewPrompt(planFound.raw),
-            );
+          const assembled = applyPlanAssemblyResponse(planAssemblyState, buffer);
+          planAssemblyState = assembled.state;
+          if (assembled.kind === "accepted") {
+            baseMessages.push({ role: "assistant", content: buffer });
+            pushHarnessPrompt("plan assembly", assembled.nextPrompt);
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
             });
             continue;
           }
-          const validation = validatePlanForExecution(planFound);
+          if (assembled.kind === "rejected") {
+            baseMessages.push({ role: "assistant", content: buffer });
+            pushHarnessPrompt("plan assembly retry", assembled.retryPrompt);
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          const validation = validatePlanForExecution(assembled.plan);
           if (!validation.valid) {
             baseMessages.push({ role: "assistant", content: buffer });
-            pendingPlanReview = false;
             pushHarnessPrompt(
-              "plan validation",
-              `The reviewed plan is not executable yet: ${validation.reason}\n\n` +
-                "Your next response must be exactly one action tag that inspects the project, such as list_files or read_file. Do not emit another YAML plan until you have tool evidence for the exact file paths and commands the plan will name.",
+              "plan assembly validation",
+              [
+                "The assembled plan is not executable yet: " +
+                  validation.reason,
+                "",
+                "Return exactly one additional YAML plan step that fixes this gap, with name, prompt, and verify string fields.",
+                "If the plan is complete after that step, wait for the next prompt and then reply exactly: " +
+                  PLAN_ASSEMBLY_DONE_TEXT,
+              ].join("\n"),
             );
             emit({
               type: "activity",
@@ -1211,11 +1233,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             continue;
           }
-          pendingPlanReview = false;
-          savePlan(req.conversationId, planFound.raw);
+          savePlan(req.conversationId, assembled.plan.raw);
           emit({
             type: "plan_proposed",
-            steps: planFound.steps.map((s) => ({
+            steps: assembled.plan.steps.map((s) => ({
               name: s.name,
               prompt: s.prompt,
               verify: s.verify,
@@ -1246,26 +1267,6 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           next.text,
         );
         awaitingVerify = next.kind === "verify";
-        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
-        continue;
-      }
-
-      if (pendingPlanReview) {
-        flushBufferToUI();
-        baseMessages.push({ role: "assistant", content: buffer });
-        if (planReviewAttempts >= MAX_PLAN_REVIEW_ATTEMPTS) {
-          emit({ type: "activity", activity: { kind: "idle" } });
-          emit({
-            type: "error",
-            error: "Plan review failed: no amended YAML plan was returned.",
-          });
-          return;
-        }
-        planReviewAttempts += 1;
-        pushHarnessPrompt(
-          "plan review retry",
-          "The plan review response did not include one complete final YAML plan. Explain the gap briefly, then emit one amended complete YAML plan now.",
-        );
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }

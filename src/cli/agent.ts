@@ -24,8 +24,13 @@ import {
 } from "../main/plan/parser";
 import { PlanExecutionState } from "../main/plan/executionState";
 import { saveLastPrompt } from "../main/debugPrompt";
-import { buildPlanReviewPrompt } from "../main/plan/reviewPrompt";
 import { validatePlanForExecution } from "../main/plan/validation";
+import {
+  PLAN_ASSEMBLY_DONE_TEXT,
+  applyPlanAssemblyResponse,
+  createPlanAssemblyState,
+  type PlanAssemblyState,
+} from "../main/plan/assembly";
 import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
@@ -42,12 +47,11 @@ const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
 const MAX_NESTED_PLAN_REJECTIONS = 3;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Your next response must be exactly one action tag that inspects the project. For a host-project tool change, list_files alone is not enough: inspect src/main/tools.ts, Gemma.md, package.json, and the exact tests/main test file you will name. Do not emit a YAML plan until tool results show the exact source files, test paths, documentation files, and verification commands the plan will name. Do not write files before the plan.";
+  "Continue in planning mode. Use an action to inspect files if you need more context, emit exactly one YAML plan step, or reply exactly no plan + no action when there are no more steps. Do not write files before the assembled plan is approved.";
 const PLAN_ONLY_CONTINUE_NUDGE =
-  "Continue in plan-only mode. Do not emit a plan if your only evidence is list_files or a source-file read. For a host-project tool change, you need tool evidence for src/main/tools.ts, Gemma.md, package.json, and the exact tests/main test file you will create or update. If any of those are missing, emit exactly one more inspection action, preferably a focused read_file or run_bash search for tests/main tool tests. Once those exact paths and commands are known, emit exactly one complete executable YAML plan. Do not write files, do not emit verify tags, and do not stop without a plan.";
+  "Continue in plan-only mode. Emit exactly one YAML plan step, or reply exactly no plan + no action when there are no more steps. Do not write files, do not emit verify tags, and do not stop with plain prose.";
 const INCOMPLETE_ACTION_NUDGE =
   "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
-const MAX_PLAN_REVIEW_ATTEMPTS = 2;
 const MAX_PLAN_ONLY_NUDGES = 3;
 const MAX_CODE_NO_PROGRESS_NUDGES = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
@@ -207,26 +211,6 @@ function findMissingHostToolInspectionEvidence(
   return missing;
 }
 
-function findMissingPlanEvidence(
-  opts: AgentRunOptions,
-  evidence: PlanInspectionEvidence,
-  plan: ParsedPlan,
-): string[] {
-  if (opts.mode !== "code") return [];
-  const actionCount =
-    Number(evidence.listedFiles) +
-    evidence.readPaths.size +
-    evidence.bashCommands.length;
-  if (actionCount === 0) {
-    return ["at least one inspection action before emitting a plan"];
-  }
-
-  const planText = `${opts.prompt}\n${plan.raw}`;
-  if (!isHostToolRequest(planText)) return [];
-
-  return findMissingHostToolInspectionEvidence(evidence);
-}
-
 function findUninspectedPlanTestPaths(
   plan: ParsedPlan,
   evidence: PlanInspectionEvidence,
@@ -275,15 +259,6 @@ function buildInspectionActionForMissing(missingEvidence: string[]): string[] {
   ];
 }
 
-function buildPlanEvidencePrompt(missingEvidence: string[]): string {
-  return [
-    `The plan was emitted before enough planning evidence was gathered. Missing evidence: ${missingEvidence.join(", ")}.`,
-    "",
-    "Do not emit a plan yet. Your next response must be exactly this action tag and nothing else:",
-    ...buildInspectionActionForMissing(missingEvidence),
-  ].join("\n");
-}
-
 export function buildRepeatedActionPrompt(
   opts: AgentRunOptions,
   evidence: PlanInspectionEvidence,
@@ -302,7 +277,7 @@ export function buildRepeatedActionPrompt(
       ...buildInspectionActionForMissing(missingEvidence),
     ].join("\n");
   }
-  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action or emit a concrete YAML plan. Do not call ${actionName} with the same parameters again.`;
+  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action, emit exactly one YAML plan step, or reply exactly ${PLAN_ASSEMBLY_DONE_TEXT}. Do not call ${actionName} with the same parameters again.`;
 }
 
 export function buildCodeNoProgressPrompt(
@@ -324,9 +299,10 @@ export function buildCodeNoProgressPrompt(
   if (opts.mode === "code" && isHostToolRequest(opts.prompt)) {
     return [
       "All required host-project tool inspection evidence has been gathered.",
-      "Do not use tools. Emit exactly one complete well-formed YAML plan now.",
-      "The YAML plan must have top-level plan.steps, and every step must have string name, prompt, and verify fields.",
-      "The plan must include grounding, test, implementation, and verification steps with exact file paths and exact commands.",
+      "Do not use tools. Emit exactly one well-formed YAML plan step now.",
+      "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
+      "When there are no more steps, wait for the next prompt and reply exactly: " +
+        PLAN_ASSEMBLY_DONE_TEXT,
     ].join("\n");
   }
   return CODE_PLAN_NUDGE;
@@ -354,13 +330,14 @@ export function buildPlanAmendmentPrompt(
         ]
       : [];
   return [
-    `The reviewed plan is not executable yet: ${reason}`,
+    `The assembled plan is not executable yet: ${reason}`,
     ...testPathGuidance,
     ...toolNameGuidance,
     "",
-    "Do not use tools. Emit exactly one amended complete well-formed YAML plan now.",
-    "The YAML plan must have top-level plan.steps, and every step must have string name, prompt, and verify fields.",
-    "The plan must include grounding, test, implementation, and verification steps with exact file paths and exact commands.",
+    "Do not use tools. Emit exactly one additional well-formed YAML plan step now.",
+    "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
+    "When there are no more steps, wait for the next prompt and reply exactly: " +
+      PLAN_ASSEMBLY_DONE_TEXT,
   ].join("\n");
 }
 
@@ -602,8 +579,8 @@ async function runAgentLoop(
   let planState: PlanExecutionState | null = null;
   let awaitingVerify = false;
   let nestedPlanRejections = 0;
-  let pendingPlanReview = false;
-  let planReviewAttempts = 0;
+  let planAssemblyState: PlanAssemblyState | null =
+    opts.mode === "code" && !initialPlan ? createPlanAssemblyState() : null;
   let lastActionKey: string | null = null;
   let repeatedActionCount = 0;
   let planOnlyNudges = 0;
@@ -875,7 +852,11 @@ async function runAgentLoop(
     }
 
     const planFound = findNextPlan(buffer);
-    if (planFound && planFound !== "incomplete") {
+    const planAssemblyDone =
+      !planState &&
+      !!planAssemblyState &&
+      buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT;
+    if ((planFound && planFound !== "incomplete") || planAssemblyDone) {
       try {
         if (planState) {
           nestedPlanRejections += 1;
@@ -892,66 +873,46 @@ async function runAgentLoop(
             "You emitted a YAML plan while inside an active plan step. That is not allowed and the plan was discarded. Do the work for the current step directly using <action> tags, or write a brief plain-text summary if no tools are needed. If the step is too large, do what you can and let verify fail with a reason describing what's left.",
           );
         } else {
-          if (!pendingPlanReview) {
-            const missingEvidence = findMissingPlanEvidence(
-              opts,
-              planInspectionEvidence,
-              planFound,
-            );
-            if (missingEvidence.length > 0) {
-              messages.push({ role: "assistant", content: buffer });
-              pushHarnessPrompt(
-                messages,
-                "plan rejected - inspect first",
-                buildPlanEvidencePrompt(missingEvidence),
-              );
-              continue;
-            }
-            pendingPlanReview = true;
-            planReviewAttempts = 1;
-            meta("reviewing proposed plan before execution");
+          if (!planAssemblyState) {
+            meta("done - plan assembly is not active");
+            return;
+          }
+          const assembled = applyPlanAssemblyResponse(
+            planAssemblyState,
+            buffer,
+          );
+          planAssemblyState = assembled.state;
+          messages.push({ role: "assistant", content: buffer });
+          if (assembled.kind === "accepted") {
+            pushHarnessPrompt(messages, "plan assembly", assembled.nextPrompt);
+            continue;
+          }
+          if (assembled.kind === "rejected") {
             pushHarnessPrompt(
               messages,
-              "plan review",
-              buildPlanReviewPrompt(planFound.raw),
+              "plan assembly retry",
+              assembled.retryPrompt,
             );
             continue;
           }
-          const validation = validatePlanForExecution(planFound);
+          const validation = validatePlanForExecution(assembled.plan);
           if (!validation.valid) {
-            messages.push({ role: "assistant", content: buffer });
-            pendingPlanReview = false;
-            const missingEvidence = findMissingPlanEvidence(
-              opts,
-              planInspectionEvidence,
-              planFound,
-            );
-            if (missingEvidence.length === 0) {
-              pushHarnessPrompt(
-                messages,
-                "plan rejected - amend yaml",
-                buildPlanAmendmentPrompt(
-                  validation.reason,
-                  [...planInspectionEvidence.testPaths],
-                  findRequestedToolNames(opts.prompt),
-                ),
-              );
-              continue;
-            }
             pushHarnessPrompt(
               messages,
-              "plan rejected - gather context",
-              `The reviewed plan is not executable yet: ${validation.reason}\n\nYour next response must be exactly one action tag that gathers the missing concrete evidence. For host-project tool plans, do not call list_files again if it already ran; inspect src/main/tools.ts, Gemma.md, package.json, and the exact tests/main file you will create or update. If you need to discover that test file, use a focused run_bash search such as rg --files tests/main | rg "Tool|tools|Datetime|ProjectScript|codeSystemPrompt". Do not emit another YAML plan until the plan can name exact file paths and commands.`,
+              "plan assembly validation",
+              buildPlanAmendmentPrompt(
+                validation.reason,
+                [...planInspectionEvidence.testPaths],
+                findRequestedToolNames(opts.prompt),
+              ),
             );
             continue;
           }
           const uninspectedPlanTestPaths = findUninspectedPlanTestPaths(
-            planFound,
+            assembled.plan,
             planInspectionEvidence,
           );
           if (uninspectedPlanTestPaths.length > 0) {
-            messages.push({ role: "assistant", content: buffer });
-            pendingPlanReview = false;
             pushHarnessPrompt(
               messages,
               "plan rejected - amend yaml",
@@ -965,10 +926,8 @@ async function runAgentLoop(
           }
           const missingRequestedToolNames = findRequestedToolNames(
             opts.prompt,
-          ).filter((name) => !planFound.raw.includes(name));
+          ).filter((name) => !assembled.plan.raw.includes(name));
           if (missingRequestedToolNames.length > 0) {
-            messages.push({ role: "assistant", content: buffer });
-            pendingPlanReview = false;
             pushHarnessPrompt(
               messages,
               "plan rejected - amend yaml",
@@ -980,17 +939,22 @@ async function runAgentLoop(
             );
             continue;
           }
-          pendingPlanReview = false;
-          messages.push({ role: "assistant", content: buffer });
+          meta("assembled plan ready");
+          out(`\n${assembled.plan.raw}\n`);
+          messages.push({ role: "assistant", content: assembled.plan.raw });
           if (opts.planOnly) {
-            meta("done — reviewed plan ready");
+            meta("done — assembled plan ready");
             return;
           }
-          planState = new PlanExecutionState(planFound);
+          planState = new PlanExecutionState(assembled.plan);
           usePlanExecutionPrompt();
         }
       } catch (e) {
         meta(`plan rejected: ${(e as Error).message}`);
+        return;
+      }
+      if (!planState) {
+        meta("done - plan assembly response handled");
         return;
       }
       logPlanEvents();
@@ -1002,21 +966,6 @@ async function runAgentLoop(
       prepareStepEvidence(next);
       pushHarnessPrompt(messages, next.kind, next.text);
       awaitingVerify = next.kind === "verify";
-      continue;
-    }
-
-    if (pendingPlanReview) {
-      messages.push({ role: "assistant", content: buffer });
-      if (planReviewAttempts >= MAX_PLAN_REVIEW_ATTEMPTS) {
-        meta("done - plan review did not return a complete plan");
-        return;
-      }
-      planReviewAttempts += 1;
-      pushHarnessPrompt(
-        messages,
-        "plan review retry",
-        "The plan review response did not include one complete final YAML plan. Explain the gap briefly, then emit one amended complete YAML plan now.",
-      );
       continue;
     }
 

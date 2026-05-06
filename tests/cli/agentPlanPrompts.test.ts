@@ -56,7 +56,7 @@ describe("buildRepeatedActionPrompt", () => {
     expect(prompt).toContain("src/main/tools.ts");
     expect(prompt).toContain("<action name=\"read_file\">");
     expect(prompt).toContain("<path>src/main/tools.ts</path>");
-    expect(prompt).not.toContain("emit a concrete YAML plan");
+    expect(prompt).not.toContain("emit exactly one YAML plan step");
   });
 
   it("falls back to a generic nudge when no host-tool evidence is missing", () => {
@@ -77,7 +77,7 @@ describe("buildRepeatedActionPrompt", () => {
       2,
     );
 
-    expect(prompt).toContain("emit a concrete YAML plan");
+    expect(prompt).toContain("emit exactly one YAML plan step");
     expect(prompt).not.toContain("Your next response must be exactly this action tag");
   });
 
@@ -150,20 +150,20 @@ describe("buildCodeNoProgressPrompt", () => {
 
     const prompt = buildCodeNoProgressPrompt(hostToolOpts, evidence);
 
-    expect(prompt).toContain("Emit exactly one complete well-formed YAML plan");
+    expect(prompt).toContain("Emit exactly one well-formed YAML plan step");
     expect(prompt).toContain("Do not use tools");
     expect(prompt).not.toContain("<action");
   });
 });
 
 describe("buildPlanAmendmentPrompt", () => {
-  it("asks for a corrected complete YAML plan without more tools", () => {
+  it("asks for one additional YAML plan step without more tools", () => {
     const prompt = buildPlanAmendmentPrompt(
       "Plan must include grounding, test, implementation, and verification steps.",
     );
 
     expect(prompt).toContain("Do not use tools");
-    expect(prompt).toContain("amended complete well-formed YAML plan");
+    expect(prompt).toContain("one additional well-formed YAML plan step");
     expect(prompt).toContain("name, prompt, and verify");
   });
 
