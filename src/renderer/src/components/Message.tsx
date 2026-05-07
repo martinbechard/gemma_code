@@ -51,6 +51,7 @@ export default function Message({
   onExecutePlan,
 }: Props) {
   const isUser = message.role === "user";
+  const isHarness = message.role === "harness";
   const parsed = useMemo(
     () => parseThinking(message.content),
     [message.content],
@@ -67,7 +68,22 @@ export default function Message({
     }
   }, [parsed.visible]);
 
-  if (message.role === "system" || message.role === "harness") return null;
+  if (message.role === "system") return null;
+
+  if (isHarness) {
+    return (
+      <div className="flex justify-start">
+        <div className="selectable max-w-[86%] rounded-2xl rounded-bl-md border border-amber-300/20 bg-amber-300/[0.07] px-4 py-2.5 text-[13px] leading-relaxed text-amber-50">
+          {message.harnessLabel && (
+            <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wide text-amber-200/70">
+              Harness / {message.harnessLabel}
+            </div>
+          )}
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        </div>
+      </div>
+    );
+  }
 
   if (isUser) {
     return (
@@ -562,8 +578,7 @@ function PlanRow({
     ? toolCalls.filter((tc) => tc.parentStepId === node.id)
     : [];
   const expandable =
-    (isStep &&
-      (!!node.prompt || stepCalls.length > 0 || children.length > 0)) ||
+    (isStep && !!node.prompt) ||
     (isVerify && (!!node.criterion || !!node.reason));
   const [open, setOpen] = useState(running);
 
@@ -614,6 +629,7 @@ function PlanRow({
   );
 
   const bodyPad = (depth + 1) * 14;
+  const showDetails = !expandable || open;
 
   return (
     <>
@@ -634,7 +650,7 @@ function PlanRow({
           {headerInner}
         </div>
       )}
-      {(!expandable || open) && (
+      {showDetails && (
         <>
           {isStep && node.prompt && (
             <div style={{ paddingLeft: bodyPad }} className="my-1">
@@ -674,23 +690,24 @@ function PlanRow({
               </div>
             </div>
           )}
-          {stepCalls.length > 0 && (
-            <div style={{ paddingLeft: bodyPad }} className="my-1">
-              {stepCalls.map((tc) => (
-                <ToolCallView key={tc.id} call={tc} />
-              ))}
-            </div>
-          )}
-          {children.map((c) => (
-            <PlanRow
-              key={c.node.id}
-              tree={c}
-              depth={depth + 1}
-              toolCalls={toolCalls}
-            />
-          ))}
         </>
       )}
+      {/* Tool calls stay outside showDetails so repeated actions remain separate timeline bubbles. */}
+      {stepCalls.length > 0 && (
+        <div style={{ paddingLeft: bodyPad }} className="my-1">
+          {stepCalls.map((tc) => (
+            <ToolCallView key={tc.id} call={tc} />
+          ))}
+        </div>
+      )}
+      {children.map((c) => (
+        <PlanRow
+          key={c.node.id}
+          tree={c}
+          depth={depth + 1}
+          toolCalls={toolCalls}
+        />
+      ))}
     </>
   );
 }

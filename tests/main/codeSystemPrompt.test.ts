@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { setRuntimePaths } from "../../src/main/runtimePaths";
+import { EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES } from "../../src/main/plan/validation";
 import { codeSystemPrompt } from "../../src/main/tools";
 
 let dir = "";
@@ -51,10 +52,49 @@ describe("codeSystemPrompt", () => {
     expect(planPrompt).toContain(
       "exactly one YAML plan containing exactly one step",
     );
-    expect(planPrompt).toContain("no plan + no action");
+    expect(planPrompt).toContain("Do not emit action tags");
+    expect(planPrompt).toContain("Do not add stop, conclude, cleanup");
+    expect(planPrompt).not.toContain("no plan + no action");
     expect(planPrompt).not.toContain(
       "Emit one complete YAML plan covering the work end to end",
     );
+  });
+
+  it("states the concrete executable-plan validation gates in plan mode", () => {
+    const planPrompt = readFileSync(
+      join(process.cwd(), "Gemma.plan.md"),
+      "utf8",
+    );
+
+    expect(planPrompt).toContain(
+      "At least four accepted steps are required before execution: grounding, test, implementation, and verification.",
+    );
+    expect(planPrompt).toContain(
+      "Step names are not fixed, but the step name, prompt, or verify text must include the words the validator looks for.",
+    );
+    expect(planPrompt).toContain("ground, read, inspect, or list");
+    expect(planPrompt).toContain("test or spec");
+    expect(planPrompt).toContain("implement, edit, add, or update");
+    expect(planPrompt).toContain("verify, build, pnpm, npm, or run");
+    expect(planPrompt).toContain(
+      "The assembled plan must name one exact tests/main test file path that ends in .test.ts.",
+    );
+    expect(planPrompt).toContain(
+      "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
+    );
+    expect(planPrompt).toContain(
+      "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
+    );
+    expect(planPrompt).toContain(
+      "Do not use placeholder names such as exampleTool.test.ts or requested_tool_name.",
+    );
+    expect(planPrompt).toContain(
+      "relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed",
+    );
+    expect(planPrompt).toContain("Keep requested get_current_ tool names exactly.");
+    for (const line of EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES) {
+      expect(planPrompt).toContain(line);
+    }
   });
 
   it("keeps common plan instructions aligned with iterative assembly", () => {
@@ -62,7 +102,8 @@ describe("codeSystemPrompt", () => {
 
     expect(commonPrompt).toContain("you do not write the whole plan at once");
     expect(commonPrompt).toContain("host accumulates accepted steps");
-    expect(commonPrompt).toContain("no plan + no action");
+    expect(commonPrompt).toContain("response contains no YAML plan and no action");
+    expect(commonPrompt).not.toContain("reply exactly");
   });
 
   it("loads code and plan instructions for code planning mode", () => {
@@ -73,16 +114,15 @@ describe("codeSystemPrompt", () => {
 
     const prompt = codeSystemPrompt("/workspace", "http://preview", "plan");
 
-    expect(prompt).toContain("COMMON_MARKER");
+    expect(prompt).not.toContain("COMMON_MARKER");
     expect(prompt).toContain("CODE_MARKER");
     expect(prompt).toContain("PLAN_MARKER");
     expect(prompt).not.toContain("EXECUTE_MARKER");
     expect(prompt.indexOf("MODE AND PROJECT INSTRUCTIONS")).toBeLessThan(
-      prompt.indexOf("ACTION FORMAT"),
+      prompt.indexOf("PLAN_MARKER"),
     );
-    expect(prompt.indexOf("PLAN_MARKER")).toBeLessThan(
-      prompt.indexOf("ACTION FORMAT"),
-    );
+    expect(prompt).not.toContain("ACTION FORMAT");
+    expect(prompt).not.toContain("AVAILABLE TOOLS");
   });
 
   it("loads code and execute instructions for plan execution mode", () => {

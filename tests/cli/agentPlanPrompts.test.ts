@@ -11,8 +11,14 @@ import {
   findPlanTestPaths,
   findRequestedToolNames,
   recordPlanInspectionEvidence,
+  shouldHandlePlanAssemblyBuffer,
   type AgentRunOptions,
 } from "../../src/cli/agent";
+import {
+  applyPlanAssemblyResponse,
+  createPlanAssemblyState,
+} from "../../src/main/plan/assembly";
+import { EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES } from "../../src/main/plan/validation";
 
 const hostToolOpts: AgentRunOptions = {
   mode: "code",
@@ -167,6 +173,16 @@ describe("buildPlanAmendmentPrompt", () => {
     expect(prompt).toContain("name, prompt, and verify");
   });
 
+  it("includes the executable-plan validation gates when amending a rejected plan", () => {
+    const prompt = buildPlanAmendmentPrompt(
+      "Plan must name the exact tests/main test file path it will create or update.",
+    );
+
+    for (const line of EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES) {
+      expect(prompt).toContain(line);
+    }
+  });
+
   it("names the inspected test path when amending a bad test path", () => {
     const prompt = buildPlanAmendmentPrompt(
       "Plan must name the exact tests/main test file path it will create or update.",
@@ -190,6 +206,42 @@ describe("buildPlanAmendmentPrompt", () => {
       "Keep the requested tool name exactly: get_current_working_directory.",
     );
     expect(prompt).toContain("Do not replace it with a different tool name");
+  });
+});
+
+describe("shouldHandlePlanAssemblyBuffer", () => {
+  it("handles non-YAML done answers after an accepted planning fragment", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "plan:",
+        "  steps:",
+        "    - name: explore",
+        "      prompt: Read src/main/tools.ts.",
+        "      verify: src/main/tools.ts has been read.",
+      ].join("\n"),
+    );
+    if (first.kind !== "accepted") throw new Error("expected accepted step");
+
+    expect(
+      shouldHandlePlanAssemblyBuffer({
+        planStateActive: false,
+        planAssemblyState: first.state,
+        planFound: null,
+        buffer: "That is all.",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not handle non-YAML answers before any planning fragment", () => {
+    expect(
+      shouldHandlePlanAssemblyBuffer({
+        planStateActive: false,
+        planAssemblyState: createPlanAssemblyState(),
+        planFound: null,
+        buffer: "I need more context.",
+      }),
+    ).toBe(false);
   });
 });
 

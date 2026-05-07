@@ -3,6 +3,7 @@
 //   npm run cli -- chat "your prompt"
 //   npm run cli -- code "build a landing page for ..."
 //   npm run cli -- plan "add a tool"
+//   npm run cli -- plan-ask-done "add a tool"
 //   npm run cli -- execute-plan --plan plan.yaml "your original prompt"
 //   npm run cli -- continue --conversation .gemma-cli/conversations/cli-123.json "recap"
 //   npm run cli -- setup
@@ -39,6 +40,7 @@ function printUsage(): void {
       "  cli chat [--model <hf-id>] [--worktree] <prompt>",
       "  cli code [--model <hf-id>] [--worktree] <prompt>",
       "  cli plan [--model <hf-id>] [--worktree] <prompt>",
+      "  cli plan-ask-done [--model <hf-id>] [--worktree] <prompt>",
       "  cli execute-plan [--model <hf-id>] [--worktree] --plan <file> <prompt>",
       "  cli continue [--model <hf-id>] --conversation <file> <prompt>",
       "",
@@ -92,6 +94,17 @@ async function main(): Promise<void> {
         enableBash: args.enableBash,
         worktree: args.worktree,
         planOnly: true,
+      });
+      return;
+    case "plan-ask-done":
+      await runChat({
+        mode: "code",
+        model: args.model,
+        prompt: args.prompt,
+        enableBash: args.enableBash,
+        worktree: args.worktree,
+        planOnly: true,
+        planCompletionMode: "model-done",
       });
       return;
     case "execute-plan":

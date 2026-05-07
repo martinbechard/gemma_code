@@ -46,7 +46,6 @@ import {
   previewUrl,
   listTree,
   workspaceDir,
-  wsWriteFile,
   setWorkspaceOverride,
   clearWorkspaceOverride,
 } from "./workspace";
@@ -65,11 +64,16 @@ import {
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 import { clearPlan, loadPlan, savePlan } from "./plan/planStore";
-import { validatePlanForExecution } from "./plan/validation";
+import {
+  EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+  validatePlanForExecution,
+} from "./plan/validation";
 import {
   PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
+  buildPlanAssemblyInitialPrompt,
   createPlanAssemblyState,
+  finalizeExecutablePlanAssembly,
   type PlanAssemblyState,
 } from "./plan/assembly";
 import {
@@ -81,6 +85,7 @@ import { killAllBackgroundTasks } from "./backgroundTasks";
 
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
+const LIVE_WRITE_PREVIEW_THROTTLE_MS = 450;
 const MODEL_DOWNLOAD_PROGRESS_POLL_MS = 1000;
 const MODEL_DOWNLOAD_COMPLETE_PROGRESS = 1;
 const MODEL_DOWNLOAD_MAX_WAIT_MS = 60 * 60 * 1000;
@@ -405,7 +410,12 @@ const MAX_TOOL_ROUNDS_CODE = 40;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Use an action to inspect files if you need more context, emit exactly one YAML plan step, or reply exactly no plan + no action when there are no more steps. Do not write files before the assembled plan is approved.";
+  "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
+const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
+  "The previous response did not answer the prompt-writing question with a YAML plan fragment.",
+  "Answer in YAML only, with no explanation.",
+  "Return exactly one plan.steps item with name, prompt, and verify string fields.",
+].join("\n");
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
@@ -613,16 +623,33 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       req.mode === "code" &&
       !!req.workingDir &&
       (codeSubmode === "plan" || codeSubmode === "auto");
+    const planningTaskMessageIndex =
+      topLevelPlanHarnessEnabled && !req.executePlan
+        ? req.messages.map((message) => message.role).lastIndexOf("user")
+        : -1;
+    const planningTask =
+      planningTaskMessageIndex >= 0
+        ? req.messages[planningTaskMessageIndex]?.content.trim()
+        : "";
+    const pushPlanningHarnessPrompt = (
+      label: string,
+      content: string,
+    ): void => {
+      emit({ type: "harness_message", label, content, phase: "planning" });
+      pushHarnessPrompt(label, content);
+    };
 
-    for (const m of req.messages) {
+    for (const [messageIndex, m] of req.messages.entries()) {
       if (
         req.executePlan &&
         m.role === "assistant" &&
-        containsCompletePlan(m.content)
+        (containsCompletePlan(m.content) ||
+          m.content.trim() === PLAN_ASSEMBLY_DONE_TEXT)
       ) {
         continue;
       }
       if (m.role === "system") continue;
+      if (messageIndex === planningTaskMessageIndex) continue;
       const messageRole = m.role === "harness" ? "user" : m.role;
       baseMessages.push({
         role: messageRole as MLXChatMessage["role"],
@@ -638,6 +665,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
         }
       }
+    }
+    if (planningTask) {
+      pushPlanningHarnessPrompt(
+        "planning prompt",
+        buildPlanAssemblyInitialPrompt(planningTask),
+      );
     }
 
     const ctx: ToolContext = {
@@ -753,14 +786,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       let lastActivityTs = 0;
       let pendingAction: { name: string; target?: string } | null = null;
 
-      // Live-write state for write_file streaming
+      // Live-preview state for write_file streaming. The workspace is mutated
+      // only by the final visible write_file tool call.
       let livePath: string | null = null;
       let liveContentStart = -1;
-      let lastLiveWrite = 0;
-      let livePending: Promise<unknown> | null = null;
+      let lastLivePreview = 0;
       let lastEmittedContent = "";
-      const writeLivePartial = (): void => {
-        if (!livePath || liveContentStart < 0 || livePending) return;
+      const emitLivePreview = (): void => {
+        if (!livePath || liveContentStart < 0) return;
         let partial = buffer.slice(liveContentStart);
         if (partial.startsWith("\n")) partial = partial.slice(1);
         const closeIdx = partial.indexOf("</content>");
@@ -775,16 +808,6 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             done: false,
           });
         }
-        livePending = wsWriteFile(req.conversationId, livePath, cleaned)
-          .then(() => {
-            send("workspace:changed", { conversationId: req.conversationId });
-          })
-          .catch(() => {
-            /* tolerate partial write failures */
-          })
-          .finally(() => {
-            livePending = null;
-          });
       };
 
       const emitActivity = (): void => {
@@ -864,7 +887,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             if (t) pendingAction.target = t;
           }
 
-          // Live write_file streaming — create/update the file as <content> grows
+          // Stream a preview as <content> grows. Do not touch disk until the
+          // parsed write_file action is executed and shown in the timeline.
           if (
             pendingAction?.name === "write_file" &&
             pendingAction.target &&
@@ -878,9 +902,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
           if (livePath && liveContentStart >= 0) {
             const now = Date.now();
-            if (now - lastLiveWrite > 450) {
-              lastLiveWrite = now;
-              writeLivePartial();
+            if (now - lastLivePreview > LIVE_WRITE_PREVIEW_THROTTLE_MS) {
+              lastLivePreview = now;
+              emitLivePreview();
             }
           }
 
@@ -1063,6 +1087,17 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               );
             }
             executedAction = true;
+            if (
+              found.name === "write_file" &&
+              typeof found.args.path === "string" &&
+              typeof found.args.content === "string"
+            ) {
+              livePath = found.args.path;
+              lastEmittedContent = cleanFileContent(
+                found.args.content,
+                found.args.path,
+              );
+            }
             if (livePath) {
               send("file:streaming", {
                 conversationId: req.conversationId,
@@ -1177,11 +1212,19 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         !planState &&
         !!planAssemblyState &&
         buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT;
-      if ((planFound && planFound !== "incomplete") || planAssemblyDone) {
+      const planAssemblyStopped =
+        !planState &&
+        !!planAssemblyState &&
+        planAssemblyState.steps.length > 0 &&
+        planFound === null &&
+        buffer.trim().length > 0;
+      if (
+        (planFound && planFound !== "incomplete") ||
+        planAssemblyDone ||
+        planAssemblyStopped
+      ) {
         flushBufferToUI();
-        if (planAssemblyDone) {
-          emit({ type: "set_assistant_content", text: "" });
-        } else {
+        if (planState) {
           replaceBodyStripped();
         }
         if (!planState) {
@@ -1196,8 +1239,24 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           const assembled = applyPlanAssemblyResponse(planAssemblyState, buffer);
           planAssemblyState = assembled.state;
           if (assembled.kind === "accepted") {
+            const executablePlan = finalizeExecutablePlanAssembly(assembled.state);
+            if (executablePlan) {
+              baseMessages.push({ role: "assistant", content: buffer });
+              savePlan(req.conversationId, executablePlan.raw);
+              emit({
+                type: "plan_proposed",
+                steps: executablePlan.steps.map((s) => ({
+                  name: s.name,
+                  prompt: s.prompt,
+                  verify: s.verify,
+                })),
+              });
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
             baseMessages.push({ role: "assistant", content: buffer });
-            pushHarnessPrompt("plan assembly", assembled.nextPrompt);
+            pushPlanningHarnessPrompt("plan assembly", assembled.nextPrompt);
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -1206,7 +1265,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
           if (assembled.kind === "rejected") {
             baseMessages.push({ role: "assistant", content: buffer });
-            pushHarnessPrompt("plan assembly retry", assembled.retryPrompt);
+            pushPlanningHarnessPrompt(
+              "plan assembly retry",
+              assembled.retryPrompt,
+            );
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -1215,18 +1277,19 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
           const validation = validatePlanForExecution(assembled.plan);
           if (!validation.valid) {
+            const validationPrompt = [
+              "The assembled plan is not executable yet: " +
+                validation.reason,
+              "",
+              "Executable-plan validation gates:",
+              ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+              "",
+              "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
+              "Do not describe rewriting, correcting, or ensuring a previous step.",
+              "The new step's prompt and verify fields must contain the exact missing command or file path text.",
+            ].join("\n");
             baseMessages.push({ role: "assistant", content: buffer });
-            pushHarnessPrompt(
-              "plan assembly validation",
-              [
-                "The assembled plan is not executable yet: " +
-                  validation.reason,
-                "",
-                "Return exactly one additional YAML plan step that fixes this gap, with name, prompt, and verify string fields.",
-                "If the plan is complete after that step, wait for the next prompt and then reply exactly: " +
-                  PLAN_ASSEMBLY_DONE_TEXT,
-              ].join("\n"),
-            );
+            pushPlanningHarnessPrompt("plan assembly validation", validationPrompt);
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -1353,10 +1416,17 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       if (shouldNudgeCodeResponse) {
         flushBufferToUI();
         baseMessages.push({ role: "assistant", content: buffer });
-        pushHarnessPrompt(
-          "mode nudge",
-          req.workingDir ? CODE_PLAN_NUDGE : BUILD_ACTION_NUDGE,
-        );
+        if (topLevelPlanHarnessEnabled) {
+          pushPlanningHarnessPrompt(
+            "planning retry",
+            PLAN_ASSEMBLY_NO_PROGRESS_PROMPT,
+          );
+        } else {
+          pushHarnessPrompt(
+            "mode nudge",
+            req.workingDir ? CODE_PLAN_NUDGE : BUILD_ACTION_NUDGE,
+          );
+        }
         emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
         continue;
       }

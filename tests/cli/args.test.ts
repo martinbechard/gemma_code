@@ -18,6 +18,22 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses plan-ask-done with worktree and prompt", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "plan-ask-done",
+      "--worktree",
+      "build the tool plan",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "plan-ask-done",
+      worktree: true,
+      prompt: "build the tool plan",
+    });
+  });
+
   it("parses execute-plan with a plan file and prompt", () => {
     const parsed = parseCliArgs([
       "node",

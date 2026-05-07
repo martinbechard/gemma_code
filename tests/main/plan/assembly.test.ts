@@ -3,7 +3,9 @@ import {
   PLAN_ASSEMBLY_DONE_TEXT,
   PLAN_ASSEMBLY_NEXT_PROMPT,
   applyPlanAssemblyResponse,
+  buildPlanAssemblyInitialPrompt,
   createPlanAssemblyState,
+  finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
 } from "../../../src/main/plan/assembly";
 import { validatePlanForExecution } from "../../../src/main/plan/validation";
@@ -41,6 +43,26 @@ const verifyStep = [
 ].join("\n");
 
 describe("iterative plan assembly", () => {
+  it("builds the initial expert prompt around the user's task", () => {
+    const prompt = buildPlanAssemblyInitialPrompt(
+      "create a new LLM tool to retrieve the current working directory",
+    );
+
+    expect(prompt).toBe(
+      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+    );
+  });
+
+  it("does not wrap an already formatted expert prompt", () => {
+    const prompt = buildPlanAssemblyInitialPrompt(
+      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory in this project. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+    );
+
+    expect(prompt).toBe(
+      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory in this project. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+    );
+  });
+
   it("accepts one step and asks for the next prompt", () => {
     const state = createPlanAssemblyState();
     const result = applyPlanAssemblyResponse(state, exploreStep);
@@ -55,9 +77,13 @@ describe("iterative plan assembly", () => {
       },
     ]);
     expect(result.nextPrompt).toBe(PLAN_ASSEMBLY_NEXT_PROMPT);
+    expect(result.nextPrompt).toBe(
+      "What should I tell the agent next? Are we done? in YAML only no extra explanations, just the prompt?",
+    );
+    expect(result.nextPrompt).not.toContain(PLAN_ASSEMBLY_DONE_TEXT);
   });
 
-  it("assembles accepted steps when the model returns the done sentinel", () => {
+  it("assembles accepted steps when the model stops returning YAML", () => {
     const first = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
       exploreStep,
@@ -69,7 +95,7 @@ describe("iterative plan assembly", () => {
 
     const done = applyPlanAssemblyResponse(
       second.state,
-      PLAN_ASSEMBLY_DONE_TEXT,
+      "That is all the agent needs.",
     );
 
     expect(done.kind).toBe("finished");
@@ -119,6 +145,17 @@ describe("iterative plan assembly", () => {
     expect(result.reason).toContain("at least one step");
   });
 
+  it("rejects a non-plan response before any steps were accepted", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      "I need more context first.",
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.reason).toContain("exactly one YAML plan step");
+  });
+
   it("rejects duplicate step names", () => {
     const first = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
@@ -154,6 +191,31 @@ describe("iterative plan assembly", () => {
     if (done.kind !== "finished") throw new Error("expected finished plan");
 
     expect(validatePlanForExecution(done.plan)).toEqual({ valid: true });
+  });
+
+  it("finalizes an executable plan as soon as accepted fragments validate", () => {
+    let result = applyPlanAssemblyResponse(createPlanAssemblyState(), exploreStep);
+    if (result.kind !== "accepted") throw new Error("expected explore step");
+    expect(finalizeExecutablePlanAssembly(result.state)).toBeNull();
+
+    result = applyPlanAssemblyResponse(result.state, testStep);
+    if (result.kind !== "accepted") throw new Error("expected test step");
+    expect(finalizeExecutablePlanAssembly(result.state)).toBeNull();
+
+    result = applyPlanAssemblyResponse(result.state, implementStep);
+    if (result.kind !== "accepted") throw new Error("expected implement step");
+    expect(finalizeExecutablePlanAssembly(result.state)).toBeNull();
+
+    result = applyPlanAssemblyResponse(result.state, verifyStep);
+    if (result.kind !== "accepted") throw new Error("expected verify step");
+
+    const executablePlan = finalizeExecutablePlanAssembly(result.state);
+    expect(executablePlan?.steps.map((step) => step.name)).toEqual([
+      "explore",
+      "test",
+      "implement",
+      "verify",
+    ]);
   });
 
   it("rejects placeholder wording before it can be saved", () => {

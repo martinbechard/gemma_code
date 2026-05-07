@@ -1,14 +1,16 @@
 import { stringify } from "yaml";
 import { findNextPlan, type ParsedPlan, type ParsedStep } from "./parser";
-import { validatePlanStepText } from "./validation";
+import { validatePlanForExecution, validatePlanStepText } from "./validation";
 
 const MAX_PLAN_ASSEMBLY_STEPS = 16;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "no plan + no action";
+const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
+  "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: ";
+const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
+  " What should I start by telling the agent? in YAML only no extra explanations, just the prompt?";
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
-  "What should I tell the agent next? in YAML only no extra explanations, just the prompt?",
-  "",
-  "If there is no next prompt, reply exactly: " + PLAN_ASSEMBLY_DONE_TEXT,
+  "What should I tell the agent next? Are we done? in YAML only no extra explanations, just the prompt?",
 ].join("\n");
 
 export interface PlanAssemblyState {
@@ -37,6 +39,24 @@ export function createPlanAssemblyState(): PlanAssemblyState {
   return { steps: [] };
 }
 
+export function buildPlanAssemblyInitialPrompt(task: string): string {
+  const trimmedTask = task.trim();
+  if (
+    trimmedTask.startsWith(PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX) &&
+    trimmedTask.endsWith(PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX.trimStart())
+  ) {
+    return trimmedTask;
+  }
+  const taskSentence = /[.!?]$/.test(trimmedTask)
+    ? trimmedTask
+    : trimmedTask + ".";
+  return (
+    PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX +
+    taskSentence +
+    PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX
+  );
+}
+
 export function applyPlanAssemblyResponse(
   state: PlanAssemblyState,
   response: string,
@@ -58,11 +78,13 @@ export function applyPlanAssemblyResponse(
     return rejected(state, "The response contains incomplete YAML.");
   }
   if (!parsed) {
+    const plan = finalizePlanAssembly(state);
+    if (plan) {
+      return { kind: "finished", state, plan };
+    }
     return rejected(
       state,
-      "The response must contain exactly one YAML plan step or exactly " +
-        PLAN_ASSEMBLY_DONE_TEXT +
-        ".",
+      "The response must contain exactly one YAML plan step.",
     );
   }
   if (parsed.steps.length !== 1) {
@@ -111,6 +133,15 @@ export function finalizePlanAssembly(
   };
 }
 
+export function finalizeExecutablePlanAssembly(
+  state: PlanAssemblyState,
+): ParsedPlan | null {
+  const plan = finalizePlanAssembly(state);
+  if (!plan) return null;
+  const validation = validatePlanForExecution(plan);
+  return validation.valid ? plan : null;
+}
+
 function rejected(
   state: PlanAssemblyState,
   reason: string,
@@ -123,7 +154,6 @@ function rejected(
       "The previous planning response was rejected: " + reason,
       "",
       "Return exactly one YAML plan containing one step, with name, prompt, and verify string fields.",
-      "If the plan is complete, reply exactly: " + PLAN_ASSEMBLY_DONE_TEXT,
     ].join("\n"),
   };
 }

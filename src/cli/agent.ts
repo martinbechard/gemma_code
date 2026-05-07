@@ -24,11 +24,15 @@ import {
 } from "../main/plan/parser";
 import { PlanExecutionState } from "../main/plan/executionState";
 import { saveLastPrompt } from "../main/debugPrompt";
-import { validatePlanForExecution } from "../main/plan/validation";
+import {
+  EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+  validatePlanForExecution,
+} from "../main/plan/validation";
 import {
   PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
   createPlanAssemblyState,
+  finalizeExecutablePlanAssembly,
   type PlanAssemblyState,
 } from "../main/plan/assembly";
 import {
@@ -40,16 +44,15 @@ import { killBackgroundTasksForConversation } from "../main/backgroundTasks";
 import {
   loadCliConversation,
   saveCliConversation,
-  type CliConversationSnapshot,
 } from "./conversation";
 
 const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
 const MAX_NESTED_PLAN_REJECTIONS = 3;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Use an action to inspect files if you need more context, emit exactly one YAML plan step, or reply exactly no plan + no action when there are no more steps. Do not write files before the assembled plan is approved.";
+  "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ONLY_CONTINUE_NUDGE =
-  "Continue in plan-only mode. Emit exactly one YAML plan step, or reply exactly no plan + no action when there are no more steps. Do not write files, do not emit verify tags, and do not stop with plain prose.";
+  "Continue in plan-only mode. Emit exactly one YAML plan step when another executable instruction is needed. Do not write files, do not emit verify tags, and do not stop with plain prose until the plan has enough concrete steps.";
 const INCOMPLETE_ACTION_NUDGE =
   "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
 const MAX_PLAN_ONLY_NUDGES = 3;
@@ -61,6 +64,8 @@ const HOST_TOOL_CANONICAL_PATHS = [
   "Gemma.md",
   "package.json",
 ] as const;
+type PlanCompletionMode = "executable" | "model-done";
+type AssembledPlanHandlingResult = "retry" | "done" | "started";
 
 export interface AgentRunOptions {
   mode: "chat" | "code";
@@ -71,6 +76,7 @@ export interface AgentRunOptions {
   initialPlanYaml?: string;
   harnessMode?: "active" | "passive";
   planOnly?: boolean;
+  planCompletionMode?: PlanCompletionMode;
 }
 
 export interface ContinueRunOptions {
@@ -85,6 +91,13 @@ interface PlanInspectionEvidence {
   readPaths: Set<string>;
   bashCommands: string[];
   testPaths: Set<string>;
+}
+
+interface PlanAssemblyBufferCheck {
+  planStateActive: boolean;
+  planAssemblyState: PlanAssemblyState | null;
+  planFound: ParsedPlan | "incomplete" | null;
+  buffer: string;
 }
 
 const TOOL_ERROR_RESULT_RE =
@@ -198,10 +211,24 @@ export function findPlanTestPaths(text: string): string[] {
   ];
 }
 
+export function shouldHandlePlanAssemblyBuffer(
+  check: PlanAssemblyBufferCheck,
+): boolean {
+  if (check.planFound && check.planFound !== "incomplete") return true;
+  if (check.planStateActive) return false;
+  if (!check.planAssemblyState) return false;
+  if (check.buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT) return true;
+  return (
+    check.planAssemblyState.steps.length > 0 &&
+    check.planFound === null &&
+    check.buffer.trim().length > 0
+  );
+}
+
 function findMissingHostToolInspectionEvidence(
   evidence: PlanInspectionEvidence,
 ): string[] {
-  const missing = HOST_TOOL_CANONICAL_PATHS.filter(
+  const missing: string[] = HOST_TOOL_CANONICAL_PATHS.filter(
     (path) => !hasInspectedPath(evidence, path),
   );
   const hasTestEvidence = evidence.testPaths.size > 0;
@@ -277,7 +304,7 @@ export function buildRepeatedActionPrompt(
       ...buildInspectionActionForMissing(missingEvidence),
     ].join("\n");
   }
-  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action, emit exactly one YAML plan step, or reply exactly ${PLAN_ASSEMBLY_DONE_TEXT}. Do not call ${actionName} with the same parameters again.`;
+  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action, or emit exactly one YAML plan step. Do not call ${actionName} with the same parameters again.`;
 }
 
 export function buildCodeNoProgressPrompt(
@@ -301,8 +328,7 @@ export function buildCodeNoProgressPrompt(
       "All required host-project tool inspection evidence has been gathered.",
       "Do not use tools. Emit exactly one well-formed YAML plan step now.",
       "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
-      "When there are no more steps, wait for the next prompt and reply exactly: " +
-        PLAN_ASSEMBLY_DONE_TEXT,
+      "When there are no more steps, stop without emitting another YAML plan.",
     ].join("\n");
   }
   return CODE_PLAN_NUDGE;
@@ -334,10 +360,12 @@ export function buildPlanAmendmentPrompt(
     ...testPathGuidance,
     ...toolNameGuidance,
     "",
+    "Executable-plan validation gates:",
+    ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+    "",
     "Do not use tools. Emit exactly one additional well-formed YAML plan step now.",
     "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
-    "When there are no more steps, wait for the next prompt and reply exactly: " +
-      PLAN_ASSEMBLY_DONE_TEXT,
+    "When there are no more steps, stop without emitting another YAML plan.",
   ].join("\n");
 }
 
@@ -624,6 +652,65 @@ async function runAgentLoop(
     meta("system prompt: plan execution");
   };
 
+  const handleAssembledPlan = (
+    plan: ParsedPlan,
+  ): AssembledPlanHandlingResult => {
+    const validation = validatePlanForExecution(plan);
+    if (!validation.valid) {
+      pushHarnessPrompt(
+        messages,
+        "plan assembly validation",
+        buildPlanAmendmentPrompt(
+          validation.reason,
+          [...planInspectionEvidence.testPaths],
+          findRequestedToolNames(opts.prompt),
+        ),
+      );
+      return "retry";
+    }
+    const uninspectedPlanTestPaths = findUninspectedPlanTestPaths(
+      plan,
+      planInspectionEvidence,
+    );
+    if (uninspectedPlanTestPaths.length > 0) {
+      pushHarnessPrompt(
+        messages,
+        "plan rejected - amend yaml",
+        buildPlanAmendmentPrompt(
+          `Plan names test paths that were not inspected: ${uninspectedPlanTestPaths.join(", ")}.`,
+          [...planInspectionEvidence.testPaths],
+          findRequestedToolNames(opts.prompt),
+        ),
+      );
+      return "retry";
+    }
+    const missingRequestedToolNames = findRequestedToolNames(opts.prompt).filter(
+      (name) => !plan.raw.includes(name),
+    );
+    if (missingRequestedToolNames.length > 0) {
+      pushHarnessPrompt(
+        messages,
+        "plan rejected - amend yaml",
+        buildPlanAmendmentPrompt(
+          `Plan switched away from the requested tool name: ${missingRequestedToolNames.join(", ")}.`,
+          [...planInspectionEvidence.testPaths],
+          missingRequestedToolNames,
+        ),
+      );
+      return "retry";
+    }
+    meta("assembled plan ready");
+    out(`\n${plan.raw}\n`);
+    messages.push({ role: "assistant", content: plan.raw });
+    if (opts.planOnly) {
+      meta("done — assembled plan ready");
+      return "done";
+    }
+    planState = new PlanExecutionState(plan);
+    usePlanExecutionPrompt();
+    return "started";
+  };
+
   const harnessMode = opts.harnessMode ?? "active";
 
   if (initialPlan) {
@@ -676,7 +763,7 @@ async function runAgentLoop(
       continue;
     }
 
-    if (action && action !== "incomplete") {
+    if (action) {
       const actionKey = `${action.name}:${JSON.stringify(action.args)}`;
       if (actionKey === lastActionKey) {
         repeatedActionCount += 1;
@@ -852,11 +939,14 @@ async function runAgentLoop(
     }
 
     const planFound = findNextPlan(buffer);
-    const planAssemblyDone =
-      !planState &&
-      !!planAssemblyState &&
-      buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT;
-    if ((planFound && planFound !== "incomplete") || planAssemblyDone) {
+    if (
+      shouldHandlePlanAssemblyBuffer({
+        planStateActive: !!planState,
+        planAssemblyState,
+        planFound,
+        buffer,
+      })
+    ) {
       try {
         if (planState) {
           nestedPlanRejections += 1;
@@ -884,70 +974,38 @@ async function runAgentLoop(
           planAssemblyState = assembled.state;
           messages.push({ role: "assistant", content: buffer });
           if (assembled.kind === "accepted") {
-            pushHarnessPrompt(messages, "plan assembly", assembled.nextPrompt);
-            continue;
-          }
-          if (assembled.kind === "rejected") {
+            if (opts.planCompletionMode !== "model-done") {
+              const executablePlan = finalizeExecutablePlanAssembly(
+                assembled.state,
+              );
+              if (executablePlan) {
+                const handling = handleAssembledPlan(executablePlan);
+                if (handling === "retry") continue;
+                if (handling === "done") return;
+              } else {
+                pushHarnessPrompt(
+                  messages,
+                  "plan assembly",
+                  assembled.nextPrompt,
+                );
+                continue;
+              }
+            } else {
+              pushHarnessPrompt(messages, "plan assembly", assembled.nextPrompt);
+              continue;
+            }
+          } else if (assembled.kind === "rejected") {
             pushHarnessPrompt(
               messages,
               "plan assembly retry",
               assembled.retryPrompt,
             );
             continue;
+          } else {
+            const handling = handleAssembledPlan(assembled.plan);
+            if (handling === "retry") continue;
+            if (handling === "done") return;
           }
-          const validation = validatePlanForExecution(assembled.plan);
-          if (!validation.valid) {
-            pushHarnessPrompt(
-              messages,
-              "plan assembly validation",
-              buildPlanAmendmentPrompt(
-                validation.reason,
-                [...planInspectionEvidence.testPaths],
-                findRequestedToolNames(opts.prompt),
-              ),
-            );
-            continue;
-          }
-          const uninspectedPlanTestPaths = findUninspectedPlanTestPaths(
-            assembled.plan,
-            planInspectionEvidence,
-          );
-          if (uninspectedPlanTestPaths.length > 0) {
-            pushHarnessPrompt(
-              messages,
-              "plan rejected - amend yaml",
-              buildPlanAmendmentPrompt(
-                `Plan names test paths that were not inspected: ${uninspectedPlanTestPaths.join(", ")}.`,
-                [...planInspectionEvidence.testPaths],
-                findRequestedToolNames(opts.prompt),
-              ),
-            );
-            continue;
-          }
-          const missingRequestedToolNames = findRequestedToolNames(
-            opts.prompt,
-          ).filter((name) => !assembled.plan.raw.includes(name));
-          if (missingRequestedToolNames.length > 0) {
-            pushHarnessPrompt(
-              messages,
-              "plan rejected - amend yaml",
-              buildPlanAmendmentPrompt(
-                `Plan switched away from the requested tool name: ${missingRequestedToolNames.join(", ")}.`,
-                [...planInspectionEvidence.testPaths],
-                missingRequestedToolNames,
-              ),
-            );
-            continue;
-          }
-          meta("assembled plan ready");
-          out(`\n${assembled.plan.raw}\n`);
-          messages.push({ role: "assistant", content: assembled.plan.raw });
-          if (opts.planOnly) {
-            meta("done — assembled plan ready");
-            return;
-          }
-          planState = new PlanExecutionState(assembled.plan);
-          usePlanExecutionPrompt();
         }
       } catch (e) {
         meta(`plan rejected: ${(e as Error).message}`);

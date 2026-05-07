@@ -218,6 +218,17 @@ async function getCurrentDatetime(
   ].join("\n");
 }
 
+async function getCurrentWorkingDirectory(
+  _args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const workspacePath = await ensureWorkspace(ctx.conversationId);
+  return [
+    `Workspace root: ${workspacePath}`,
+    `Process cwd: ${process.cwd()}`,
+  ].join("\n");
+}
+
 async function writeFile(
   args: Record<string, unknown>,
   ctx: ToolContext,
@@ -510,6 +521,15 @@ export const TOOLS: Record<string, ToolSpec> = {
     mode: "both",
     run: getCurrentDatetime,
   },
+  get_current_working_directory: {
+    name: "get_current_working_directory",
+    description:
+      "Return the active workspace root and the app process current working directory.",
+    params: [],
+    example: '<action name="get_current_working_directory"></action>',
+    mode: "code",
+    run: getCurrentWorkingDirectory,
+  },
   write_file: {
     name: "write_file",
     description:
@@ -753,7 +773,7 @@ export function codeSystemPrompt(
   // Behavioral guidance lives in mode-specific Gemma addenda so planning and
   // plan execution can use different instructions without rebuilding this
   // structural prompt.
-  return [
+  const promptParts = [
     "You are Gemma, a local coding agent running entirely on the user's Mac.",
     "",
     "SESSION CONTEXT",
@@ -765,8 +785,14 @@ export function codeSystemPrompt(
     `- Preview URL: ${previewHref}`,
     `- Active prompt mode: ${codeMode}`,
     ...projectInstructionsBlock(instructionModesForCodePrompt(codeMode), {
-      includeCommon: codeMode !== "execute",
+      includeCommon: codeMode !== "execute" && codeMode !== "plan",
     }),
+  ];
+
+  if (codeMode === "plan") return promptParts.join("\n");
+
+  return [
+    ...promptParts,
     "",
     "ACTION FORMAT — EXACT",
     '<action name="tool_name">',

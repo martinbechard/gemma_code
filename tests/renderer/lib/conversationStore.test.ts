@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  buildMessageRenderItems,
   pickStartupModel,
   isModeLocked,
   hasSystemPromptSnapshot,
   shouldDisplayConversationMessage,
+  shouldSendConversationMessage,
   type PersistedConversationLite,
 } from "../../../src/renderer/src/lib/conversationStore";
 
@@ -111,11 +113,57 @@ describe("isModeLocked", () => {
 });
 
 describe("prompt display helpers", () => {
-  it("hides system and harness prompt messages from the conversation", () => {
+  it("shows harness prompt messages while keeping system messages hidden", () => {
     expect(shouldDisplayConversationMessage({ role: "system" })).toBe(false);
-    expect(shouldDisplayConversationMessage({ role: "harness" })).toBe(false);
+    expect(shouldDisplayConversationMessage({ role: "harness" })).toBe(true);
     expect(shouldDisplayConversationMessage({ role: "user" })).toBe(true);
     expect(shouldDisplayConversationMessage({ role: "assistant" })).toBe(true);
+  });
+
+  it("keeps harness prompt messages out of model request history", () => {
+    expect(shouldSendConversationMessage({ role: "system" })).toBe(false);
+    expect(shouldSendConversationMessage({ role: "harness" })).toBe(false);
+    expect(shouldSendConversationMessage({ role: "user" })).toBe(true);
+    expect(shouldSendConversationMessage({ role: "assistant" })).toBe(true);
+  });
+
+  it("renders planning messages normally when auto execution is not collapsing", () => {
+    const items = buildMessageRenderItems(
+      [
+        message("u1", "user", "planning"),
+        message("h1", "harness", "planning"),
+        message("a1", "assistant", "planning"),
+      ],
+      false,
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "message",
+      "message",
+      "message",
+    ]);
+  });
+
+  it("collapses planning before execution and inserts a separator", () => {
+    const items = buildMessageRenderItems(
+      [
+        message("u1", "user", "planning"),
+        message("h1", "harness", "planning"),
+        message("a1", "assistant", "planning"),
+        message("a2", "assistant", "execution"),
+      ],
+      true,
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "planning-summary",
+      "execution-separator",
+      "message",
+    ]);
+    expect(items[0]).toMatchObject({
+      kind: "planning-summary",
+      messages: [{ id: "u1" }, { id: "h1" }, { id: "a1" }],
+    });
   });
 
   it("does not keep a live prompt-loaded marker in UI or CLI source", () => {
@@ -151,6 +199,17 @@ describe("prompt display helpers", () => {
     ).toContain("hasSystemPromptSnapshot");
   });
 
+  it("keeps plan-step tool calls visible outside collapsed prompt details", () => {
+    const messageSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Message.tsx"),
+      "utf8",
+    );
+
+    expect(messageSource).toContain(
+      "Tool calls stay outside showDetails so repeated actions remain separate timeline bubbles.",
+    );
+  });
+
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {
     expect(
       hasSystemPromptSnapshot(
@@ -174,3 +233,17 @@ describe("prompt display helpers", () => {
     ).toBe(true);
   });
 });
+
+function message(
+  id: string,
+  role: "user" | "assistant" | "harness",
+  phase?: "planning" | "execution",
+) {
+  return {
+    id,
+    role,
+    content: id,
+    createdAt: 1,
+    phase,
+  };
+}

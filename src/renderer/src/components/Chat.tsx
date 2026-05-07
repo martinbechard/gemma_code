@@ -14,9 +14,10 @@ import Sidebar from "./Sidebar";
 import Canvas from "./Canvas";
 import {
   STORAGE_KEY,
+  buildMessageRenderItems,
   hasSystemPromptSnapshot,
   isModeLocked,
-  shouldDisplayConversationMessage,
+  shouldSendConversationMessage,
 } from "../lib/conversationStore";
 
 interface Props {
@@ -110,7 +111,7 @@ function requestHistory(messages: ChatMessage[]): Array<{
   toolCalls?: ToolCall[];
 }> {
   return messages
-    .filter(shouldDisplayConversationMessage)
+    .filter(shouldSendConversationMessage)
     .map((m) => ({
       role: m.role as Exclude<ChatMessage["role"], "harness"> | "user",
       content: m.content,
@@ -229,12 +230,18 @@ export default function Chat({ model, onSwitchModel }: Props) {
     if (!input.trim() || streaming) return;
 
     const conv = conversations.find((c) => c.id === activeId)!;
+    const codeSubmode = codeSubmodeOf(conv);
+    const phase =
+      conv.workingDir && (codeSubmode === "plan" || codeSubmode === "auto")
+        ? "planning"
+        : undefined;
 
     const userMsg: ChatMessage = {
       id: newId("m"),
       role: "user",
       content: input,
       createdAt: Date.now(),
+      phase,
     };
     const assistantMsg: ChatMessage = {
       id: newId("m"),
@@ -244,6 +251,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
       model,
       toolCalls: [],
       activity: { kind: "thinking" },
+      phase,
     };
 
     updateActive((c) => {
@@ -275,7 +283,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           enableTools: true,
           mode: conv.mode,
           workingDir: conv.workingDir,
-          codeSubmode: conv.workingDir ? codeSubmodeOf(conv) : undefined,
+          codeSubmode: conv.workingDir ? codeSubmode : undefined,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -347,6 +355,27 @@ export default function Chat({ model, onSwitchModel }: Props) {
           msgs[msgs.length - 1] = { ...last, planNodes: nodes };
         } else if (chunk.type === "set_assistant_content") {
           msgs[msgs.length - 1] = { ...last, content: chunk.text };
+        } else if (chunk.type === "harness_message") {
+          const harnessMsg: ChatMessage = {
+            id: newId("m"),
+            role: "harness",
+            content: chunk.content,
+            createdAt: Date.now(),
+            model,
+            phase: chunk.phase,
+            harnessLabel: chunk.label,
+          };
+          const nextAssistantMsg: ChatMessage = {
+            id: newId("m"),
+            role: "assistant",
+            content: "",
+            createdAt: Date.now(),
+            model,
+            toolCalls: [],
+            activity: { kind: "thinking" },
+            phase: chunk.phase,
+          };
+          msgs.push(harnessMsg, nextAssistantMsg);
         } else if (chunk.type === "plan_proposed") {
           msgs[msgs.length - 1] = {
             ...last,
@@ -414,6 +443,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
       model,
       toolCalls: [],
       activity: { kind: "thinking" },
+      phase: "execution",
     };
 
     updateActive((c) => ({
@@ -501,6 +531,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
             messages={activeConversation.messages}
             streaming={streaming}
             mode={activeConversation.mode}
+            codeSubmode={codeSubmodeOf(activeConversation)}
             onRegenerate={handleRegenerate}
             onExecutePlan={handleExecutePlan}
           />
@@ -824,12 +855,14 @@ function MessageList({
   messages,
   streaming,
   mode,
+  codeSubmode,
   onRegenerate,
   onExecutePlan,
 }: {
   messages: ChatMessage[];
   streaming: boolean;
   mode: AgentMode;
+  codeSubmode: CodeSubmode;
   onRegenerate: () => void;
   onExecutePlan: (messageId: string) => void;
 }) {
@@ -853,8 +886,8 @@ function MessageList({
     }
   }, [messages]);
 
-  const visibleMessages = messages.filter(shouldDisplayConversationMessage);
-  const empty = visibleMessages.length === 0;
+  const renderItems = buildMessageRenderItems(messages, codeSubmode === "auto");
+  const empty = renderItems.length === 0;
 
   return (
     <div ref={ref} className="min-h-0 flex-1 overflow-y-auto">
@@ -862,33 +895,66 @@ function MessageList({
         <EmptyState mode={mode} />
       ) : (
         <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10">
-          {visibleMessages.map((m, i) => (
-            <div
-              key={m.id}
-              className="anim-float-in"
-              style={{ animationDelay: `${Math.min(i * 30, 150)}ms` }}
-            >
-              <Message
-                message={m}
-                isLast={i === visibleMessages.length - 1}
-                streaming={streaming && i === visibleMessages.length - 1}
-                onRegenerate={
-                  !streaming &&
-                  m.role === "assistant" &&
-                  i === visibleMessages.length - 1
-                    ? onRegenerate
-                    : undefined
-                }
-                onExecutePlan={
-                  !streaming && m.role === "assistant" && !!m.proposedPlan
-                    ? () => onExecutePlan(m.id)
-                    : undefined
-                }
-              />
-            </div>
-          ))}
+          {renderItems.map((item, i) => {
+            if (item.kind === "planning-summary") {
+              return <PlanningSummary key={item.id} messages={item.messages} />;
+            }
+            if (item.kind === "execution-separator") {
+              return <ExecutionSeparator key={item.id} />;
+            }
+
+            const m = item.message;
+            const isLast = i === renderItems.length - 1;
+            return (
+              <div
+                key={m.id}
+                className="anim-float-in"
+                style={{ animationDelay: `${Math.min(i * 30, 150)}ms` }}
+              >
+                <Message
+                  message={m}
+                  isLast={isLast}
+                  streaming={streaming && isLast}
+                  onRegenerate={
+                    !streaming && m.role === "assistant" && isLast
+                      ? onRegenerate
+                      : undefined
+                  }
+                  onExecutePlan={
+                    !streaming && m.role === "assistant" && !!m.proposedPlan
+                      ? () => onExecutePlan(m.id)
+                      : undefined
+                  }
+                />
+              </div>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+function PlanningSummary({ messages }: { messages: ChatMessage[] }) {
+  const assistantCount = messages.filter(
+    (message) => message.role === "assistant",
+  ).length;
+  return (
+    <div className="flex justify-center">
+      <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11.5px] text-ink-300">
+        Planning collapsed after execution started / {messages.length} messages /{" "}
+        {assistantCount} model responses
+      </div>
+    </div>
+  );
+}
+
+function ExecutionSeparator() {
+  return (
+    <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-500">
+      <div className="h-px flex-1 border-t border-dotted border-white/20" />
+      <span>Execution started</span>
+      <div className="h-px flex-1 border-t border-dotted border-white/20" />
     </div>
   );
 }

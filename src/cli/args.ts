@@ -2,6 +2,7 @@ export type CliCommand =
   | "chat"
   | "code"
   | "plan"
+  | "plan-ask-done"
   | "execute-plan"
   | "continue"
   | "setup"
@@ -45,8 +46,15 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   }
 
   const prompt = remaining.join(" ").trim();
-  if (command === "chat" || command === "code" || command === "plan") {
-    if (!prompt) throw new Error("prompt required for chat/code/plan commands");
+  if (
+    command === "chat" ||
+    command === "code" ||
+    command === "plan" ||
+    command === "plan-ask-done"
+  ) {
+    if (!prompt) {
+      throw new Error("prompt required for chat/code/plan/plan-ask-done commands");
+    }
   }
   if (command === "execute-plan") {
     if (!planPath) throw new Error("plan file required for execute-plan");
@@ -61,9 +69,12 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
     command !== "chat" &&
     command !== "code" &&
     command !== "plan" &&
+    command !== "plan-ask-done" &&
     command !== "execute-plan"
   ) {
-    throw new Error("--worktree only applies to chat/code/plan/execute-plan commands");
+    throw new Error(
+      "--worktree only applies to chat/code/plan/plan-ask-done/execute-plan commands",
+    );
   }
 
   return {
@@ -82,6 +93,7 @@ function parseCommand(value: string): CliCommand {
     value === "chat" ||
     value === "code" ||
     value === "plan" ||
+    value === "plan-ask-done" ||
     value === "execute-plan" ||
     value === "continue" ||
     value === "setup" ||

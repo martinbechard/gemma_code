@@ -9,6 +9,17 @@ interface PlaceholderPattern {
   pattern: RegExp;
 }
 
+export const EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES = [
+  "At least four accepted steps are required before execution: grounding, test, implementation, and verification.",
+  "Step names are not fixed, but the step name, prompt, or verify text must include the words the validator looks for. The assembled plan must contain a grounding word such as ground, read, inspect, or list; a testing word such as test or spec; an implementation word such as implement, edit, add, or update; and a verification word such as verify, build, pnpm, npm, or run.",
+  "The assembled plan must name one exact tests/main test file path that ends in .test.ts.",
+  "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
+  "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
+  "Keep requested get_current_ tool names exactly.",
+  "Do not use placeholder names such as exampleTool.test.ts or requested_tool_name.",
+  "Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.",
+] as const;
+
 const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
   { label: "relevant tests", pattern: /\brelevant tests?\b/i },
   { label: "relevant files", pattern: /\brelevant files?\b/i },

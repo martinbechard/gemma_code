@@ -55,6 +55,7 @@ export interface SystemPromptSnapshot {
 export type Role = "user" | "assistant" | "system" | "tool" | "harness";
 
 export type CodeSubmode = "discuss" | "plan" | "execute" | "auto";
+export type ConversationPhase = "planning" | "execution";
 
 export interface PlanNode {
   id: string;
@@ -74,6 +75,8 @@ export interface ChatMessage {
   id: string;
   role: Role;
   content: string;
+  phase?: ConversationPhase;
+  harnessLabel?: string;
   toolCalls?: ToolCall[];
   systemPrompts?: SystemPromptSnapshot[];
   planNodes?: PlanNode[];
@@ -167,6 +170,12 @@ export type StreamChunk =
   // buffer contained a plan or verify response; the structured PlanView
   // already covers it, so the raw control text is stripped from the chat.
   | { type: "set_assistant_content"; text: string }
+  | {
+      type: "harness_message";
+      label: string;
+      content: string;
+      phase?: ConversationPhase;
+    }
   // The model proposed a top-level plan. The harness has saved the YAML to
   // disk and is waiting for the user to approve execution; the renderer
   // shows the proposal and an Execute Plan affordance that fires
