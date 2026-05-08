@@ -199,21 +199,30 @@ export interface ModelInfo {
 }
 
 const MLX_GEMMA_4_E2B_REPO = "mlx-community/gemma-4-e2b-it-4bit";
-const GEMMA_4_E2B_BYTES = 1_500_000_000;
+const GEMMA_4_E2B_BYTES = 3_580_765_126;
+const MLX_GEMMA_4_E4B_REPO = "mlx-community/gemma-4-e4b-it-4bit";
+const GEMMA_4_E4B_BYTES = 5_216_992_212;
 const MLX_GEMMA_3_TEXT_4B_REPO = "mlx-community/gemma-3-text-4b-it-4bit";
 const GEMMA_3_TEXT_4B_BYTES = 3_200_000_000;
 
-// Gemma 4 E2B works once the bundled mlx-lm patch is applied (see
+// Gemma 4 works once the bundled mlx-lm patch is applied (see
 // resources/mlx-patches/) and the server is launched with
 // enable_thinking=false (see startServer in main/mlx.ts).
 export const AVAILABLE_MODELS: ModelInfo[] = [
   {
+    name: MLX_GEMMA_4_E4B_REPO,
+    label: "Gemma 4 E4B",
+    size: "5.2 GB",
+    sizeBytes: GEMMA_4_E4B_BYTES,
+    description: "Larger local model. Runs best on 16GB+ Macs.",
+    recommended: true,
+  },
+  {
     name: MLX_GEMMA_4_E2B_REPO,
     label: "Gemma 4 E2B",
-    size: "1.5 GB",
+    size: "3.6 GB",
     sizeBytes: GEMMA_4_E2B_BYTES,
     description: "Edge-sized. Fast & lightweight. Runs on 8GB+ Macs.",
-    recommended: true,
   },
   {
     name: MLX_GEMMA_3_TEXT_4B_REPO,
@@ -224,4 +233,4 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   },
 ];
 
-export const DEFAULT_MODEL = MLX_GEMMA_4_E2B_REPO;
+export const DEFAULT_MODEL = MLX_GEMMA_4_E4B_REPO;
