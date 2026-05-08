@@ -90,8 +90,9 @@ export class PlanExecutionState {
         `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
         `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
+        `If this step says to add something only if missing or avoid editing when it is already present, and the latest file evidence shows it is already present, summarize that evidence and do not edit the file. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
-        `If this step names an exact command with arguments, such as pnpm test tests/main/someTool.test.ts, run that exact command with run_bash; do not substitute run_project_script. ` +
+        `If this step names an exact command, such as pnpm test tests/main/someTool.test.ts or pnpm run build, run that exact command with run_bash; do not substitute run_project_script. ` +
         `Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet; preserve the current file content if a full-file rewrite is necessary. ` +
         `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
         `When this step's work is done, write a brief plain-text summary and stop; the host will then ask you to verify.`;

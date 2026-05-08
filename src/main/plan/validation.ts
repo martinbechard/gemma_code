@@ -173,8 +173,10 @@ function validateStepCommandText(step: ParsedStep): PlanValidationResult {
   ) {
     const testPaths = extractTestFilePaths(stepText);
     if (testPaths.length > 0) {
-      const focusedTestCommandPaths = extractFocusedTestCommandPaths(stepText);
-      if (!sameStringSet(testPaths, focusedTestCommandPaths)) {
+      if (
+        !sameStringSet(testPaths, extractFocusedTestCommandPaths(step.prompt)) ||
+        !sameStringSet(testPaths, extractFocusedTestCommandPaths(step.verify))
+      ) {
         return { valid: false, reason: TEST_ARTIFACT_COMMAND_REASON };
       }
     }

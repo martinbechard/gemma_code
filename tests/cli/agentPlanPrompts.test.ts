@@ -208,6 +208,11 @@ describe("buildPlanAmendmentPrompt", () => {
       "Keep the requested tool name exactly: get_current_working_directory.",
     );
     expect(prompt).toContain("Do not replace it with a different tool name");
+    expect(prompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+    expect(prompt).toContain(
+      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+    expect(prompt).toContain("pnpm run build");
   });
 
   it("requires exact missing commands in both prompt and verify fields", () => {

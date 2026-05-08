@@ -25,6 +25,9 @@ const PROJECT_SCRIPT_ALLOWED_NAMES = ["build", "test", "dev"] as const;
 const PROJECT_SCRIPT_MANAGERS = ["npm", "pnpm"] as const;
 const DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES = 1_000;
 const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
+const DESTRUCTIVE_EDIT_MIN_OLD_STRING_CHARS = 20;
+const DESTRUCTIVE_EDIT_MIN_NEW_STRING_CHARS = 200;
+const DESTRUCTIVE_EDIT_MAX_NEW_TO_OLD_RATIO = 10;
 const PROTECTED_OVERWRITE_PATH_RE =
   /^(?:src|tests)\/|^Gemma(?:\.[A-Za-z]+)?\.md$|^package\.json$/;
 
@@ -345,6 +348,8 @@ async function editFile(
   const replaceAll = args.replace_all === true || args.replace_all === "true";
   if (!path) return "Error: missing <path>";
   if (!oldStr) return "Error: missing <old_string>";
+  const destructiveEditError = detectDestructiveEdit(path, oldStr, newStr);
+  if (destructiveEditError) return destructiveEditError;
   try {
     const r = await wsEditFile(
       ctx.conversationId,
@@ -358,6 +363,29 @@ async function editFile(
   } catch (e) {
     return `Error editing ${path}: ${(e as Error).message}`;
   }
+}
+
+function detectDestructiveEdit(
+  path: string,
+  oldString: string,
+  newString: string,
+): string | null {
+  if (!PROTECTED_OVERWRITE_PATH_RE.test(path)) return null;
+  const trimmedOldString = oldString.trim();
+  const unsafeGenericOldString =
+    trimmedOldString === "undefined" || trimmedOldString === "null";
+  const unsafeExpansion =
+    trimmedOldString.length < DESTRUCTIVE_EDIT_MIN_OLD_STRING_CHARS &&
+    newString.length >= DESTRUCTIVE_EDIT_MIN_NEW_STRING_CHARS &&
+    newString.length >
+      Math.max(trimmedOldString.length, 1) *
+        DESTRUCTIVE_EDIT_MAX_NEW_TO_OLD_RATIO;
+  if (!unsafeGenericOldString && !unsafeExpansion) return null;
+  return [
+    `Error editing ${path}: unsafe edit blocked.`,
+    "The old_string is too generic for a protected project file.",
+    "Read the target file and use an exact surrounding snippet from the current file.",
+  ].join(" ");
 }
 
 async function listFiles(

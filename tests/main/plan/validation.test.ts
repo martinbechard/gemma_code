@@ -299,6 +299,47 @@ describe("validatePlanForExecution", () => {
     });
   });
 
+  it("rejects test-changing steps that put the focused command only in verify", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "ground",
+          prompt:
+            "Read src/main/tools.ts and tests/main/currentWorkingDirectoryTool.test.ts.",
+          verify:
+            "src/main/tools.ts and tests/main/currentWorkingDirectoryTool.test.ts have been read.",
+        },
+        {
+          name: "test",
+          prompt:
+            "Update tests/main/currentWorkingDirectoryTool.test.ts to cover get_current_working_directory.",
+          verify:
+            "tests/main/currentWorkingDirectoryTool.test.ts covers get_current_working_directory, and pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
+        },
+        {
+          name: "implement",
+          prompt:
+            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
+          verify:
+            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+        },
+        {
+          name: "verify",
+          prompt:
+            "Run pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build.",
+          verify:
+            "pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build pass.",
+        },
+      ]),
+    );
+
+    expect(result).toEqual({
+      valid: false,
+      reason:
+        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    });
+  });
+
   it("rejects command steps whose verify text omits the exact focused test command", () => {
     const result = validatePlanForExecution(
       parsedPlan([

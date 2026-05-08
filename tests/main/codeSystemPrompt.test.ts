@@ -75,6 +75,12 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain(
       "use run_bash with that exact command",
     );
+    expect(executePrompt).toContain(
+      "including pnpm test, pnpm test tests/main/someTool.test.ts, or pnpm run build",
+    );
+    expect(executePrompt).toContain(
+      "Do not replace exact commands with run_project_script",
+    );
     expect(executePrompt).toContain("preserve the current file content");
   });
 

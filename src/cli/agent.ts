@@ -33,17 +33,24 @@ import {
   applyPlanAssemblyResponse,
   buildFallbackPlanForTask,
   buildPlanAssemblyInitialPrompt,
+  buildRequestedToolPlanningGuidance,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
   findRequestedToolNames,
   isPlanAssemblyDoneResponse,
+  missingKnownHostToolGroundingReason,
+  unsafeKnownHostToolImplementationReason,
   type PlanAssemblyState,
 } from "../main/plan/assembly";
 import {
   buildIncompleteStepPrompt,
   createPlanStepEvidence,
   forcedVerifyFailureReason,
+  hasGuardedAlreadyPresentEvidence,
+  hasSuccessfulRequiredCommandEvidence,
+  isContradictedBySuccessfulEvidence,
+  isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
@@ -66,7 +73,7 @@ const CODE_PLAN_NUDGE =
 const PLAN_ONLY_CONTINUE_NUDGE =
   "Continue in plan-only mode. Emit exactly one YAML plan step when another executable instruction is needed. Do not write files, do not emit verify tags, and do not stop with plain prose until the plan has enough concrete steps.";
 const INCOMPLETE_ACTION_NUDGE =
-  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
+  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed. Do not emit a verify tag about the malformed response.";
 const MAX_PLAN_ONLY_NUDGES = 3;
 const MAX_CODE_NO_PROGRESS_NUDGES = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
@@ -363,10 +370,17 @@ export function buildPlanAmendmentPrompt(
           "Do not replace it with a different tool name.",
         ]
       : [];
+  const requestedToolPlanningGuidance =
+    buildRequestedToolPlanningGuidance(exactToolNames).trim();
+  const exactHostToolGuidance =
+    requestedToolPlanningGuidance.length > 0
+      ? ["", requestedToolPlanningGuidance]
+      : [];
   return [
     `The assembled plan is not executable yet: ${reason}`,
     ...testPathGuidance,
     ...toolNameGuidance,
+    ...exactHostToolGuidance,
     "",
     "Executable-plan validation gates:",
     ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
@@ -495,7 +509,7 @@ export async function runChat(opts: AgentRunOptions): Promise<void> {
     messages.push({
       role: "user",
       content:
-        opts.mode === "code" && opts.planOnly
+        opts.mode === "code" && !opts.initialPlanYaml
           ? buildPlanAssemblyInitialPrompt(opts.prompt)
           : opts.prompt,
     });
@@ -696,6 +710,37 @@ async function runAgentLoop(
       );
       return "retry";
     }
+    const requestedToolNames = findRequestedToolNames(opts.prompt);
+    const missingGroundingReason = missingKnownHostToolGroundingReason(
+      plan,
+      requestedToolNames,
+    );
+    if (missingGroundingReason) {
+      pushHarnessPrompt(
+        messages,
+        "plan rejected - amend yaml",
+        buildPlanAmendmentPrompt(
+          missingGroundingReason,
+          [...planInspectionEvidence.testPaths],
+          requestedToolNames,
+        ),
+      );
+      return "retry";
+    }
+    const unsafeImplementationReason =
+      unsafeKnownHostToolImplementationReason(plan, requestedToolNames);
+    if (unsafeImplementationReason) {
+      pushHarnessPrompt(
+        messages,
+        "plan rejected - amend yaml",
+        buildPlanAmendmentPrompt(
+          unsafeImplementationReason,
+          [...planInspectionEvidence.testPaths],
+          requestedToolNames,
+        ),
+      );
+      return "retry";
+    }
     const uninspectedPlanTestPaths =
       planInspectionEvidence.testPaths.size > 0
         ? findUninspectedPlanTestPaths(plan, planInspectionEvidence)
@@ -707,12 +752,12 @@ async function runAgentLoop(
         buildPlanAmendmentPrompt(
           `Plan names test paths that were not inspected: ${uninspectedPlanTestPaths.join(", ")}.`,
           [...planInspectionEvidence.testPaths],
-          findRequestedToolNames(opts.prompt),
+          requestedToolNames,
         ),
       );
       return "retry";
     }
-    const missingRequestedToolNames = findRequestedToolNames(opts.prompt).filter(
+    const missingRequestedToolNames = requestedToolNames.filter(
       (name) => !plan.raw.includes(name),
     );
     if (missingRequestedToolNames.length > 0) {
@@ -835,6 +880,54 @@ async function runAgentLoop(
         continue;
       }
 
+      if (planState?.currentStepId && !awaitingVerify && action.name === "verify") {
+        const criterion = planState.currentStepEvidenceCriterion() ?? "";
+        const forcedReason = forcedVerifyFailureReason(criterion, stepEvidence);
+        const resultText =
+          typeof action.args.result === "string"
+            ? action.args.result.toLowerCase()
+            : "";
+        const reason =
+          typeof action.args.reason === "string"
+            ? action.args.reason
+            : undefined;
+        if (resultText === "fail" && forcedReason) {
+          pushHarnessPrompt(
+            messages,
+            "step incomplete",
+            buildIncompleteStepPrompt(forcedReason),
+          );
+          continue;
+        }
+        if (
+          resultText === "fail" &&
+          reason &&
+          !isContradictedBySuccessfulEvidence(reason, criterion, stepEvidence)
+        ) {
+          meta(`step attempt failed: ${reason}`);
+          const outcome = planState.failCurrentStepAttempt(reason);
+          logPlanEvents();
+          awaitingVerify = false;
+          resetStepAttemptTracking();
+          if (outcome === "abort" || planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+        } else {
+          planState.finishStepBody();
+          logPlanEvents();
+        }
+        const next = planState.nextPrompt();
+        if (!next) {
+          meta("done — plan complete");
+          return;
+        }
+        prepareStepEvidence(next);
+        pushHarnessPrompt(messages, next.kind, next.text);
+        awaitingVerify = next.kind === "verify";
+        continue;
+      }
+
       meta(`tool: ${action.name}`);
       for (const [k, v] of Object.entries(action.args)) {
         const preview = String(v).slice(0, 80).replace(/\n/g, "\\n");
@@ -871,6 +964,56 @@ async function runAgentLoop(
       });
       if (planState?.currentStepId) {
         recordPlanToolEvidence(stepEvidence, action.name, result, action.args);
+      }
+      if (
+        planState?.currentStepId &&
+        !awaitingVerify &&
+        hasGuardedAlreadyPresentEvidence(
+          planState.currentStepEvidenceCriterion() ?? "",
+          stepEvidence,
+        )
+      ) {
+        meta("guarded existing implementation detected; advancing to verify");
+        planState.finishStepBody();
+        logPlanEvents();
+        if (planState.state !== "running") {
+          meta(`done — plan ${planState.state}`);
+          return;
+        }
+        const next = planState.nextPrompt();
+        if (!next) {
+          meta("done — plan complete");
+          return;
+        }
+        prepareStepEvidence(next);
+        pushHarnessPrompt(messages, next.kind, next.text);
+        awaitingVerify = next.kind === "verify";
+        continue;
+      }
+      if (
+        planState?.currentStepId &&
+        !awaitingVerify &&
+        hasSuccessfulRequiredCommandEvidence(
+          planState.currentVerifyCriterion() ?? "",
+          stepEvidence,
+        )
+      ) {
+        meta("required command evidence satisfied; advancing to verify");
+        planState.finishStepBody();
+        logPlanEvents();
+        if (planState.state !== "running") {
+          meta(`done — plan ${planState.state}`);
+          return;
+        }
+        const next = planState.nextPrompt();
+        if (!next) {
+          meta("done — plan complete");
+          return;
+        }
+        prepareStepEvidence(next);
+        pushHarnessPrompt(messages, next.kind, next.text);
+        awaitingVerify = next.kind === "verify";
+        continue;
       }
       codeNoProgressNudges = 0;
       planOnlyNudges = 0;
@@ -941,7 +1084,7 @@ async function runAgentLoop(
             ? repeatedActionForcedFailureReason({
                 actionName: action.name,
                 repeatedActionCount,
-                criterion: planState.currentVerifyCriterion() ?? "",
+                criterion: planState.currentStepEvidenceCriterion() ?? "",
                 evidence: stepEvidence,
               })
             : null;
@@ -987,16 +1130,31 @@ async function runAgentLoop(
         meta("done — verify response missing or malformed");
         return;
       }
-      const forcedReason =
-        vr.result === "pass"
-          ? forcedVerifyFailureReason(
-              planState.currentVerifyCriterion() ?? "",
-              stepEvidence,
-            )
-          : null;
-      if (forcedReason) {
+      const forcedReason = forcedVerifyFailureReason(
+        planState.currentVerifyCriterion() ?? "",
+        stepEvidence,
+      );
+      if (vr.result === "pass" && forcedReason) {
         meta(`verify pass overridden: ${forcedReason}`);
         vr = { result: "fail", reason: forcedReason };
+      }
+      if (
+        vr.result === "fail" &&
+        isMalformedActionSelfReport(vr.reason)
+      ) {
+        vr = forcedReason
+          ? { result: "fail", reason: forcedReason }
+          : { result: "pass" };
+      }
+      if (
+        vr.result === "fail" &&
+        isContradictedBySuccessfulEvidence(
+          vr.reason,
+          planState.currentVerifyCriterion() ?? "",
+          stepEvidence,
+        )
+      ) {
+        vr = { result: "pass" };
       }
       messages.push({ role: "assistant", content: buffer });
       const outcome = planState.applyVerify(vr);
@@ -1052,6 +1210,7 @@ async function runAgentLoop(
           const assembled = applyPlanAssemblyResponse(
             planAssemblyState,
             buffer,
+            opts.prompt,
           );
           planAssemblyState = assembled.state;
           messages.push({ role: "assistant", content: buffer });
@@ -1093,12 +1252,26 @@ async function runAgentLoop(
               continue;
             }
           } else if (assembled.kind === "rejected") {
+            planAssemblyValidationRetries += 1;
+            const fallbackPlan =
+              planAssemblyValidationRetries >=
+              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                ? buildFallbackPlanForTask(opts.prompt)
+                : null;
+            if (fallbackPlan) {
+              meta("using fallback host-tool plan after repeated assembly rejections");
+              const handling = handleAssembledPlan(fallbackPlan);
+              planAssemblyValidationActive = handling === "retry";
+              if (handling === "retry") continue;
+              if (handling === "done") return;
+            } else {
             pushHarnessPrompt(
               messages,
               "plan assembly retry",
               assembled.retryPrompt,
             );
             continue;
+            }
           } else {
             const handling = handleAssembledPlanWithFallback(assembled.plan);
             planAssemblyValidationActive = handling === "retry";
@@ -1129,10 +1302,60 @@ async function runAgentLoop(
     if (planState) {
       const prematureVerify = parseVerifyResult(buffer);
       if (prematureVerify) {
-        const forcedReason = forcedVerifyFailureReason(
-          planState.currentStepEvidenceCriterion() ?? "",
-          stepEvidence,
-        );
+        const criterion = planState.currentStepEvidenceCriterion() ?? "";
+        const forcedReason = forcedVerifyFailureReason(criterion, stepEvidence);
+        if (
+          prematureVerify.result === "fail" &&
+          isMalformedActionSelfReport(prematureVerify.reason)
+        ) {
+          if (forcedReason) {
+            pushHarnessPrompt(
+              messages,
+              "step incomplete",
+              buildIncompleteStepPrompt(forcedReason),
+            );
+            continue;
+          }
+          planState.finishStepBody();
+          logPlanEvents();
+          if (planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            meta("done — plan complete");
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(messages, next.kind, next.text);
+          awaitingVerify = next.kind === "verify";
+          continue;
+        }
+        if (
+          prematureVerify.result === "fail" &&
+          isContradictedBySuccessfulEvidence(
+            prematureVerify.reason,
+            criterion,
+            stepEvidence,
+          )
+        ) {
+          planState.finishStepBody();
+          logPlanEvents();
+          if (planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            meta("done — plan complete");
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(messages, next.kind, next.text);
+          awaitingVerify = next.kind === "verify";
+          continue;
+        }
         messages.push({ role: "assistant", content: buffer });
         if (prematureVerify.result === "fail") {
           const failureReason =

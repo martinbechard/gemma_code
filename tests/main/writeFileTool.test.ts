@@ -81,3 +81,33 @@ describe("write_file tool", () => {
     expect(result).toContain("Wrote tests/main/newTool.test.ts");
   });
 });
+
+describe("edit_file tool", () => {
+  it("blocks generic old strings that expand into large snippets in protected files", async () => {
+    createWorkspace();
+    writeWorkspaceFile(
+      "src/main/tools.ts",
+      LARGE_SOURCE_TEXT + "\nconst value = undefined;\n",
+    );
+
+    const result = await runTool(
+      "edit_file",
+      {
+        path: "src/main/tools.ts",
+        old_string: "undefined",
+        new_string: [
+          "export const get_current_working_directory = {",
+          "  name: 'get_current_working_directory',",
+          "  description: 'wrong shape',",
+          "};",
+        ].join("\n").repeat(8),
+      },
+      { conversationId: TEST_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("unsafe edit blocked");
+    expect(readFileSync(join(workspace, "src/main/tools.ts"), "utf8")).toBe(
+      LARGE_SOURCE_TEXT + "\nconst value = undefined;\n",
+    );
+  });
+});

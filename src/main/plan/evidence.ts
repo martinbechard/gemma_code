@@ -1,6 +1,8 @@
 export interface PlanStepEvidence {
   actionCount: number;
   readPaths: Set<string>;
+  listedPaths: Set<string>;
+  readResults: Map<string, string>;
   commandRuns: CommandRunEvidence[];
   toolFailures: string[];
   recoverableEditFailures: Map<string, string>;
@@ -27,6 +29,8 @@ const COMMAND_EXIT_RE = /\bexit=(?:0|[1-9]\d*|killed)\b/;
 const FAILED_EXIT_RE = /\bexit=(?:[1-9]\d*|killed)\b/;
 const FOCUSED_TEST_COMMAND_RE =
   /\b(?:pnpm|npm)\s+test\s+tests\/main\/[A-Za-z0-9_./-]+\.test\.ts\b/g;
+const BARE_TEST_COMMAND_RE =
+  /\b(?:pnpm|npm)\s+test\b(?!\s+tests\/main\/[A-Za-z0-9_./-]+\.test\.ts)/g;
 const BUILD_COMMAND_RE = /\b(?:pnpm|npm)\s+run\s+build\b/g;
 const PATH_RE =
   /\b(?:src|tests)\/[A-Za-z0-9_./-]+\b|\bGemma(?:\.[A-Za-z]+)?\.md\b|\bpackage\.json\b/g;
@@ -42,11 +46,18 @@ const READ_ACTION_REQUIREMENT_RE =
   /\b(?:read|list|listed|retrieve|retrieved|contents?)\b/i;
 const COMMAND_CRITERION_RE =
   /\b(?:command|pnpm|npm)\b|\b(?:build|built)\b[\s\S]*\b(?:exit(?:ed)?\s*0|pass|passes|passed|green|succeeds|successful|successfully|executed)\b|\b(?:test|tests|suite)\b[\s\S]*\b(?:exit(?:ed)?\s*0|pass|passes|passed|green|succeeds|successful|successfully|fail|fails|failed|failing)\b/i;
+const MALFORMED_ACTION_SELF_REPORT_RE =
+  /\bprevious\s+action\s+tag\b[\s\S]*\b(?:not\s+properly\s+closed|did\s+not\s+close|not\s+closed|malformed)\b/i;
+const GUARDED_ALREADY_PRESENT_RE =
+  /\b(?:only\s+if\s+missing|already\s+present|avoid\s+editing|do\s+not\s+edit)\b/i;
+const GET_CURRENT_TOOL_RE = /\bget_current_[a-z0-9_]+\b/g;
 
 export function createPlanStepEvidence(): PlanStepEvidence {
   return {
     actionCount: 0,
     readPaths: new Set(),
+    listedPaths: new Set(),
+    readResults: new Map(),
     commandRuns: [],
     toolFailures: [],
     recoverableEditFailures: new Map(),
@@ -57,6 +68,67 @@ export function createPlanStepEvidence(): PlanStepEvidence {
 
 export function isRecoverableEditFailureResult(result: string): boolean {
   return RECOVERABLE_EDIT_FAILURE_RE.test(result.trimStart());
+}
+
+export function isMalformedActionSelfReport(reason: string | undefined): boolean {
+  return typeof reason === "string" && MALFORMED_ACTION_SELF_REPORT_RE.test(reason);
+}
+
+export function isContradictedBySuccessfulEvidence(
+  reason: string | undefined,
+  criterion: string,
+  evidence: PlanStepEvidence,
+): boolean {
+  if (typeof reason !== "string" || reason.length === 0) return false;
+  if (!/\b(?:did not|failed|failure|not return|not execute)\b/i.test(reason)) {
+    return false;
+  }
+  if (forcedVerifyFailureReason(criterion, evidence)) return false;
+  if (
+    /\b(?:run_bash|command|test|build|execution error|missing file evidence)\b/i.test(
+      reason,
+    ) &&
+    hasSuccessfulRequiredCommandEvidence(criterion, evidence)
+  ) {
+    return true;
+  }
+  return extractRequiredCommands(criterion).some(
+    (command) =>
+      reason.includes(command) && hasSuccessfulCommand(evidence, command),
+  );
+}
+
+export function hasSuccessfulRequiredCommandEvidence(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): boolean {
+  const requiredCommands = extractRequiredCommands(criterion);
+  return (
+    requiredCommands.length > 0 &&
+    requiredCommands.every((command) => hasSuccessfulCommand(evidence, command))
+  );
+}
+
+export function hasGuardedAlreadyPresentEvidence(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): boolean {
+  if (!GUARDED_ALREADY_PRESENT_RE.test(criterion)) return false;
+  const toolNames = [
+    ...new Set([...criterion.matchAll(GET_CURRENT_TOOL_RE)].map((match) => match[0])),
+  ];
+  if (toolNames.length === 0) return false;
+  const paths = extractCriterionPaths(criterion).filter(
+    (path) => path === "src/main/tools.ts" || path === "Gemma.md",
+  );
+  if (paths.length === 0) return false;
+  return paths.every((path) => {
+    const content = evidence.readResults.get(path);
+    return (
+      typeof content === "string" &&
+      toolNames.every((toolName) => content.includes(toolName))
+    );
+  });
 }
 
 export function recordPlanToolEvidence(
@@ -99,6 +171,16 @@ export function recordPlanToolEvidence(
     !TOOL_ERROR_RE.test(trimmedResult)
   ) {
     evidence.readPaths.add(path);
+    evidence.readResults.set(path, result);
+  }
+
+  if (
+    toolName === "list_files" &&
+    typeof path === "string" &&
+    path.length > 0 &&
+    !TOOL_ERROR_RE.test(trimmedResult)
+  ) {
+    evidence.listedPaths.add(path);
   }
 
   if (isCommandTool(toolName) && COMMAND_EXIT_RE.test(result)) {
@@ -140,10 +222,10 @@ export function forcedVerifyFailureReason(
     READ_ACTION_REQUIREMENT_RE.test(criterion)
   ) {
     const missingReadPaths = extractCriterionPaths(criterion).filter(
-      (path) => !evidence.readPaths.has(path),
+      (path) => !evidence.readPaths.has(path) && !evidence.listedPaths.has(path),
     );
     if (missingReadPaths.length > 0) {
-      return `missing read_file evidence for: ${missingReadPaths.join(", ")}`;
+      return `missing file evidence for: ${missingReadPaths.join(", ")}`;
     }
   }
 
@@ -235,6 +317,9 @@ function commandFromAction(
 function extractRequiredCommands(criterion: string): string[] {
   const commands = new Set<string>();
   for (const match of criterion.matchAll(FOCUSED_TEST_COMMAND_RE)) {
+    commands.add(normalizeCommand(match[0]));
+  }
+  for (const match of criterion.matchAll(BARE_TEST_COMMAND_RE)) {
     commands.add(normalizeCommand(match[0]));
   }
   for (const match of criterion.matchAll(BUILD_COMMAND_RE)) {

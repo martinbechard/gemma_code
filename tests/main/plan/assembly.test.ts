@@ -9,6 +9,8 @@ import {
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
   findRequestedToolNames,
+  missingKnownHostToolGroundingReason,
+  unsafeKnownHostToolImplementationReason,
 } from "../../../src/main/plan/assembly";
 import { validatePlanForExecution } from "../../../src/main/plan/validation";
 
@@ -44,14 +46,31 @@ const verifyStep = [
   "      verify: npm test tests/main/plan/assembly.test.ts, npm test, and npm run build pass.",
 ].join("\n");
 
+const currentWorkingDirectoryTestStep = [
+  "plan:",
+  "  steps:",
+  "    - name: test",
+  "      prompt: Read tests/main/currentWorkingDirectoryTool.test.ts, add or update coverage only if missing, then run pnpm test tests/main/currentWorkingDirectoryTool.test.ts.",
+  "      verify: tests/main/currentWorkingDirectoryTool.test.ts covers get_current_working_directory, and pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
+].join("\n");
+
 describe("iterative plan assembly", () => {
   it("builds the initial expert prompt around the user's task", () => {
     const prompt = buildPlanAssemblyInitialPrompt(
       "create a new LLM tool to retrieve the current working directory",
     );
 
-    expect(prompt).toBe(
-      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory. Use the exact tool name get_current_working_directory in every implementation, test, and verification step. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+    expect(prompt).toContain(
+      "Our task: create a new LLM tool to retrieve the current working directory.",
+    );
+    expect(prompt).toContain("get_current_working_directory");
+    expect(prompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+    expect(prompt).toContain(
+      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+    expect(prompt).toContain("pnpm run build");
+    expect(prompt).toContain(
+      "Do not return plan: done until the accepted plan has unique grounding, test, implementation, and verification steps.",
     );
   });
 
@@ -72,7 +91,9 @@ describe("iterative plan assembly", () => {
     if (!plan) return;
     expect(plan.raw).toContain("get_current_working_directory");
     expect(plan.raw).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
-    expect(plan.steps[1]?.prompt).toContain("preserve its existing Vitest style");
+    expect(plan.steps[1]?.prompt).toContain(
+      "do not edit tests/main/currentWorkingDirectoryTool.test.ts if that coverage is already present",
+    );
     expect(plan.steps[2]?.name).toBe("confirm_implementation");
     expect(plan.steps[2]?.prompt).toContain(
       "confirm the get_current_working_directory implementation",
@@ -82,6 +103,105 @@ describe("iterative plan assembly", () => {
       "First use run_bash with exactly pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
     );
     expect(validatePlanForExecution(plan)).toEqual({ valid: true });
+  });
+
+  it("flags unsafe known host-tool implementation steps", () => {
+    const reason = unsafeKnownHostToolImplementationReason(
+      {
+        steps: [
+          {
+            name: "implement",
+            prompt:
+              "Implement get_current_working_directory in src/main/tools.ts.",
+            verify:
+              "src/main/tools.ts contains get_current_working_directory.",
+          },
+        ],
+        raw: "",
+        start: 0,
+        end: 0,
+      },
+      ["get_current_working_directory"],
+    );
+
+    expect(reason).toContain(
+      "Implementation step for get_current_working_directory must tell the agent to read src/main/tools.ts",
+    );
+  });
+
+  it("flags known host-tool plans missing exact grounding files", () => {
+    const reason = missingKnownHostToolGroundingReason(
+      {
+        steps: [
+          {
+            name: "explore",
+            prompt: "List src/main and src/cli, then read agent.ts.",
+            verify: "src/main and src/cli have been listed.",
+          },
+        ],
+        raw: "List src/main and src/cli, then read agent.ts.",
+        start: 0,
+        end: 0,
+      },
+      ["get_current_working_directory"],
+    );
+
+    expect(reason).toContain(
+      "Known host-tool plan for get_current_working_directory must ground on exact files",
+    );
+    expect(reason).toContain("src/main/tools.ts");
+    expect(reason).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+  });
+
+  it("allows guarded known host-tool implementation steps", () => {
+    const reason = unsafeKnownHostToolImplementationReason(
+      {
+        steps: [
+          {
+            name: "confirm_implementation",
+            prompt:
+              "Read src/main/tools.ts and Gemma.md, add get_current_working_directory only if missing, and avoid editing those files if get_current_working_directory is already present.",
+            verify:
+              "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+          },
+        ],
+        raw: "",
+        start: 0,
+        end: 0,
+      },
+      ["get_current_working_directory"],
+    );
+
+    expect(reason).toBeNull();
+  });
+
+  it("flags known host-tool implementation steps after build verification", () => {
+    const reason = unsafeKnownHostToolImplementationReason(
+      {
+        steps: [
+          {
+            name: "verify",
+            prompt: "Run pnpm run build.",
+            verify: "pnpm run build passes.",
+          },
+          {
+            name: "implement",
+            prompt:
+              "Read src/main/tools.ts and Gemma.md, add get_current_working_directory only if missing, and avoid editing those files if get_current_working_directory is already present.",
+            verify:
+              "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+          },
+        ],
+        raw: "",
+        start: 0,
+        end: 0,
+      },
+      ["get_current_working_directory"],
+    );
+
+    expect(reason).toContain(
+      "Implementation step for get_current_working_directory must come before final verification",
+    );
   });
 
   it("does not wrap an already formatted expert prompt", () => {
@@ -107,11 +227,59 @@ describe("iterative plan assembly", () => {
         verify: "src/main/plan has been listed and parser.ts has been read.",
       },
     ]);
-    expect(result.nextPrompt).toBe(PLAN_ASSEMBLY_NEXT_PROMPT);
-    expect(result.nextPrompt).toBe(
-      "What should I tell the agent next? If the plan is complete, reply exactly with plan: done. YAML only, no extra explanations.",
+    expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_NEXT_PROMPT);
+    expect(result.nextPrompt).toContain(
+      "Continue the same plan with exactly one additional YAML step.",
+    );
+    expect(result.nextPrompt).toContain(
+      "Return plan: done only after the accepted steps visibly include grounding, test, implementation, the exact focused test command, and the exact build command.",
     );
     expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_DONE_TEXT);
+  });
+
+  it("keeps known host-tool facts in the next-step prompt", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.nextPrompt).toContain("Accepted steps so far: explore.");
+    expect(result.nextPrompt).toContain("get_current_working_directory");
+    expect(result.nextPrompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+    expect(result.nextPrompt).toContain(
+      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+    expect(result.nextPrompt).toContain("pnpm run build");
+    expect(result.nextPrompt).toContain(
+      "Next missing requirement: emit the test step for get_current_working_directory.",
+    );
+  });
+
+  it("does not mistake host-tool test coverage work for implementation", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const second = applyPlanAssemblyResponse(
+      first.state,
+      currentWorkingDirectoryTestStep,
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+
+    expect(second.kind).toBe("accepted");
+    if (second.kind !== "accepted") return;
+    expect(second.nextPrompt).toContain(
+      "Next missing requirement: emit the implementation step for get_current_working_directory.",
+    );
+    expect(second.nextPrompt).not.toContain(
+      "Next missing requirement: emit the verification or build step for get_current_working_directory.",
+    );
   });
 
   it("assembles accepted steps when the model returns plan done", () => {
@@ -255,6 +423,31 @@ describe("iterative plan assembly", () => {
     );
     expect(duplicate.retryPrompt).toContain(
       'The rejected name "implement" is already used.',
+    );
+  });
+
+  it("keeps known host-tool facts in rejected-step retry prompts", () => {
+    const rejected = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "plan:",
+        "  steps:",
+        "    - name: test",
+        "      prompt: Write tests/main/currentWorkingDirectoryTool.test.ts for get_current_working_directory.",
+        "      verify: tests/main/currentWorkingDirectoryTool.test.ts covers get_current_working_directory.",
+      ].join("\n"),
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+
+    expect(rejected.kind).toBe("rejected");
+    if (rejected.kind !== "rejected") return;
+    expect(rejected.retryPrompt).toContain("get_current_working_directory");
+    expect(rejected.retryPrompt).toContain(
+      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+    expect(rejected.retryPrompt).toContain("pnpm run build");
+    expect(rejected.retryPrompt).toContain(
+      "Next missing requirement: emit the test step for get_current_working_directory.",
     );
   });
 

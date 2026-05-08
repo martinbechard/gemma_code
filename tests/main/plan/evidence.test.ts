@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
+  hasGuardedAlreadyPresentEvidence,
+  hasSuccessfulRequiredCommandEvidence,
+  isContradictedBySuccessfulEvidence,
+  isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
@@ -42,6 +46,79 @@ describe("plan step evidence", () => {
     expect(
       isRecoverableEditFailureResult(
         "Error editing src/main/tools.ts: old_string not found in src/main/tools.ts",
+      ),
+    ).toBe(true);
+  });
+
+  it("recognizes stale malformed-action self reports", () => {
+    expect(
+      isMalformedActionSelfReport("Previous action tag was not properly closed"),
+    ).toBe(true);
+    expect(isMalformedActionSelfReport("focused test failed")).toBe(false);
+  });
+
+  it("detects guarded existing tool evidence after reading required files", () => {
+    const evidence = createPlanStepEvidence();
+    const criterion = [
+      "Read src/main/tools.ts and Gemma.md, add get_current_working_directory only if missing,",
+      "and avoid editing those files if get_current_working_directory is already present.",
+    ].join(" ");
+
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "export const tools = { get_current_working_directory: {} };",
+      { path: "src/main/tools.ts" },
+    );
+    expect(hasGuardedAlreadyPresentEvidence(criterion, evidence)).toBe(false);
+
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "### get_current_working_directory",
+      { path: "Gemma.md" },
+    );
+    expect(hasGuardedAlreadyPresentEvidence(criterion, evidence)).toBe(true);
+  });
+
+  it("detects verify failures contradicted by successful command evidence", () => {
+    const evidence = createPlanStepEvidence();
+    const command = "pnpm test tests/main/currentWorkingDirectoryTool.test.ts";
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 (1000ms)\nstdout:\npassed",
+      { command },
+    );
+
+    expect(
+      isContradictedBySuccessfulEvidence(
+        command + " did not return expected results or failed to execute successfully.",
+        command + " passes.",
+        evidence,
+      ),
+    ).toBe(true);
+  });
+
+  it("detects successful required command evidence including bare test commands", () => {
+    const evidence = createPlanStepEvidence();
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 (1000ms)\nstdout:\npassed",
+      { command: "pnpm test" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 (1000ms)\nstdout:\nbuilt",
+      { command: "pnpm run build" },
+    );
+
+    expect(
+      hasSuccessfulRequiredCommandEvidence(
+        "pnpm test and pnpm run build pass.",
+        evidence,
       ),
     ).toBe(true);
   });
@@ -122,7 +199,7 @@ describe("plan step evidence", () => {
         evidence,
       ),
     ).toContain(
-      "missing read_file evidence for: Gemma.md, package.json, tests/main/currentDatetimeTool.test.ts",
+      "missing file evidence for: Gemma.md, package.json, tests/main/currentDatetimeTool.test.ts",
     );
   });
 
@@ -138,7 +215,28 @@ describe("plan step evidence", () => {
         "List src/main/tools.ts and src/main/index.ts.",
         evidence,
       ),
-    ).toContain("missing read_file evidence for: src/main/index.ts");
+    ).toContain("missing file evidence for: src/main/index.ts");
+  });
+
+  it("accepts list_files evidence for listed directories", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(evidence, "list_files", "src/cli/agent.ts", {
+      path: "src/cli",
+    });
+    recordPlanToolEvidence(evidence, "list_files", "src/main/tools.ts", {
+      path: "src/main",
+    });
+    recordPlanToolEvidence(evidence, "read_file", "agent source", {
+      path: "src/cli/agent.ts",
+    });
+
+    expect(
+      forcedVerifyFailureReason(
+        "The listing of src/cli and src/main has been retrieved and the contents of src/cli/agent.ts has been read.",
+        evidence,
+      ),
+    ).toBeNull();
   });
 
   it("allows a verify pass when every required read path is present", () => {

@@ -73,16 +73,24 @@ import {
   applyPlanAssemblyResponse,
   buildFallbackPlanForTask,
   buildPlanAssemblyInitialPrompt,
+  buildRequestedToolPlanningGuidance,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
+  findRequestedToolNames,
   isPlanAssemblyDoneResponse,
+  missingKnownHostToolGroundingReason,
+  unsafeKnownHostToolImplementationReason,
   type PlanAssemblyState,
 } from "./plan/assembly";
 import {
   buildIncompleteStepPrompt,
   createPlanStepEvidence,
   forcedVerifyFailureReason,
+  hasGuardedAlreadyPresentEvidence,
+  hasSuccessfulRequiredCommandEvidence,
+  isContradictedBySuccessfulEvidence,
+  isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
@@ -430,7 +438,7 @@ const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
-  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed.";
+  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed. Do not emit a verify tag about the malformed response.";
 
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
@@ -666,6 +674,22 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     ): void => {
       emit({ type: "harness_message", label, content, phase: "planning" });
       pushHarnessPrompt(label, content);
+    };
+    const buildPlanValidationPrompt = (reason: string): string => {
+      const requestedToolGuidance = buildRequestedToolPlanningGuidance(
+        findRequestedToolNames(planningTask),
+      ).trim();
+      return [
+        "The assembled plan is not executable yet: " + reason,
+        ...(requestedToolGuidance.length > 0 ? ["", requestedToolGuidance] : []),
+        "",
+        "Executable-plan validation gates:",
+        ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+        "",
+        "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
+        "Do not describe rewriting, correcting, or ensuring a previous step.",
+        "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+      ].join("\n");
     };
 
     for (const [messageIndex, m] of req.messages.entries()) {
@@ -1010,6 +1034,83 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             }
             emittedIdx = found.end;
 
+            if (
+              planState?.currentStepId &&
+              !awaitingVerify &&
+              found.name === "verify"
+            ) {
+              const criterion = planState.currentStepEvidenceCriterion() ?? "";
+              const forcedReason = forcedVerifyFailureReason(
+                criterion,
+                stepEvidence,
+              );
+              const resultText =
+                typeof found.args.result === "string"
+                  ? found.args.result.toLowerCase()
+                  : "";
+              const reason =
+                typeof found.args.reason === "string"
+                  ? found.args.reason
+                  : undefined;
+              if (resultText === "fail" && forcedReason) {
+                pushHarnessPrompt(
+                  "step incomplete",
+                  buildIncompleteStepPrompt(forcedReason),
+                );
+              } else if (
+                resultText === "fail" &&
+                reason &&
+                !isContradictedBySuccessfulEvidence(
+                  reason,
+                  criterion,
+                  stepEvidence,
+                )
+              ) {
+                const outcome = planState.failCurrentStepAttempt(reason);
+                drainPlanEvents();
+                awaitingVerify = false;
+                resetStepAttemptTracking();
+                if (outcome === "abort" || planState.state !== "running") {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                const next = planState.nextPrompt();
+                if (!next) {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                prepareStepEvidence(next);
+                pushHarnessPrompt(
+                  next.kind === "verify" ? "plan verify" : "plan step",
+                  next.text,
+                );
+                awaitingVerify = next.kind === "verify";
+              } else {
+                planState.finishStepBody();
+                drainPlanEvents();
+                const next = planState.nextPrompt();
+                if (!next) {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                prepareStepEvidence(next);
+                pushHarnessPrompt(
+                  next.kind === "verify" ? "plan verify" : "plan step",
+                  next.text,
+                );
+                awaitingVerify = next.kind === "verify";
+              }
+              executedAction = true;
+              emit({
+                type: "activity",
+                activity: { kind: "thinking", chars: 0 },
+              });
+              break streamLoop;
+            }
+
             const call: ToolCall = {
               id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
               name: found.name,
@@ -1068,6 +1169,72 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             if (planState?.currentStepId) {
               recordPlanToolEvidence(stepEvidence, found.name, result, found.args);
+            }
+            if (
+              planState?.currentStepId &&
+              !awaitingVerify &&
+              hasGuardedAlreadyPresentEvidence(
+                planState.currentStepEvidenceCriterion() ?? "",
+                stepEvidence,
+              )
+            ) {
+              planState.finishStepBody();
+              drainPlanEvents();
+              const next = planState.nextPrompt();
+              if (!next) {
+                emit({ type: "activity", activity: { kind: "idle" } });
+                emit({ type: "done" });
+                return;
+              }
+              prepareStepEvidence(next);
+              pushHarnessPrompt(
+                next.kind === "verify" ? "plan verify" : "plan step",
+                next.text,
+              );
+              awaitingVerify = next.kind === "verify";
+              executedAction = true;
+              pendingAction = null;
+              livePath = null;
+              liveContentStart = -1;
+              lastEmittedContent = "";
+              emit({
+                type: "activity",
+                activity: { kind: "thinking", chars: 0 },
+              });
+              break streamLoop;
+            }
+            if (
+              planState?.currentStepId &&
+              !awaitingVerify &&
+              hasSuccessfulRequiredCommandEvidence(
+                planState.currentVerifyCriterion() ?? "",
+                stepEvidence,
+              )
+            ) {
+              planState.finishStepBody();
+              drainPlanEvents();
+              const next = planState.nextPrompt();
+              if (!next) {
+                emit({ type: "activity", activity: { kind: "idle" } });
+                emit({ type: "done" });
+                return;
+              }
+              prepareStepEvidence(next);
+              pushHarnessPrompt(
+                next.kind === "verify" ? "plan verify" : "plan step",
+                next.text,
+              );
+              awaitingVerify = next.kind === "verify";
+              executedAction = true;
+              pendingAction = null;
+              livePath = null;
+              liveContentStart = -1;
+              lastEmittedContent = "";
+              emit({
+                type: "activity",
+                activity: { kind: "thinking", chars: 0 },
+              });
+              break streamLoop;
             }
             if (
               found.name === "edit_file" &&
@@ -1154,7 +1321,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                   ? repeatedActionForcedFailureReason({
                       actionName: found.name,
                       repeatedActionCount,
-                      criterion: planState.currentVerifyCriterion() ?? "",
+                      criterion: planState.currentStepEvidenceCriterion() ?? "",
                       evidence: stepEvidence,
                     })
                   : null;
@@ -1270,15 +1437,30 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       if (planState && awaitingVerify) {
         let vr = parseVerifyResult(buffer);
         if (vr) {
-          const forcedReason =
-            vr.result === "pass"
-              ? forcedVerifyFailureReason(
-                  planState.currentVerifyCriterion() ?? "",
-                  stepEvidence,
-                )
-              : null;
-          if (forcedReason) {
+          const forcedReason = forcedVerifyFailureReason(
+            planState.currentVerifyCriterion() ?? "",
+            stepEvidence,
+          );
+          if (vr.result === "pass" && forcedReason) {
             vr = { result: "fail", reason: forcedReason };
+          }
+          if (
+            vr.result === "fail" &&
+            isMalformedActionSelfReport(vr.reason)
+          ) {
+            vr = forcedReason
+              ? { result: "fail", reason: forcedReason }
+              : { result: "pass" };
+          }
+          if (
+            vr.result === "fail" &&
+            isContradictedBySuccessfulEvidence(
+              vr.reason,
+              planState.currentVerifyCriterion() ?? "",
+              stepEvidence,
+            )
+          ) {
+            vr = { result: "pass" };
           }
           flushBufferToUI();
           replaceBodyStripped();
@@ -1354,7 +1536,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             return;
           }
-          const assembled = applyPlanAssemblyResponse(planAssemblyState, buffer);
+          const assembled = applyPlanAssemblyResponse(
+            planAssemblyState,
+            buffer,
+            planningTask,
+          );
           planAssemblyState = assembled.state;
           if (assembled.kind === "accepted") {
             if (planAssemblyValidationActive) {
@@ -1384,21 +1570,92 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                     emit({ type: "done" });
                     return;
                   }
-                  const validationPrompt = [
-                    "The assembled plan is not executable yet: " +
-                      validation.reason,
-                    "",
-                    "Executable-plan validation gates:",
-                    ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
-                    "",
-                    "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
-                    "Do not describe rewriting, correcting, or ensuring a previous step.",
-                    "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
-                  ].join("\n");
+                  const validationPrompt = buildPlanValidationPrompt(
+                    validation.reason,
+                  );
                   baseMessages.push({ role: "assistant", content: buffer });
                   pushPlanningHarnessPrompt(
                     "plan assembly validation",
                     validationPrompt,
+                  );
+                  emit({
+                    type: "activity",
+                    activity: { kind: "thinking", chars: 0 },
+                  });
+                  continue;
+                }
+                const requestedToolNames = findRequestedToolNames(planningTask);
+                const missingGroundingReason =
+                  missingKnownHostToolGroundingReason(
+                    amendedPlan,
+                    requestedToolNames,
+                  );
+                if (missingGroundingReason) {
+                  planAssemblyValidationRetries += 1;
+                  const fallbackPlan =
+                    planAssemblyValidationRetries >=
+                    MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                      ? buildFallbackPlanForTask(planningTask)
+                      : null;
+                  if (fallbackPlan) {
+                    planAssemblyValidationActive = false;
+                    planAssemblyValidationRetries = 0;
+                    savePlan(req.conversationId, fallbackPlan.raw);
+                    emit({
+                      type: "plan_proposed",
+                      steps: fallbackPlan.steps.map((s) => ({
+                        name: s.name,
+                        prompt: s.prompt,
+                        verify: s.verify,
+                      })),
+                    });
+                    emit({ type: "activity", activity: { kind: "idle" } });
+                    emit({ type: "done" });
+                    return;
+                  }
+                  baseMessages.push({ role: "assistant", content: buffer });
+                  pushPlanningHarnessPrompt(
+                    "plan assembly validation",
+                    buildPlanValidationPrompt(missingGroundingReason),
+                  );
+                  emit({
+                    type: "activity",
+                    activity: { kind: "thinking", chars: 0 },
+                  });
+                  continue;
+                }
+                const unsafeImplementationReason =
+                  unsafeKnownHostToolImplementationReason(
+                    amendedPlan,
+                    requestedToolNames,
+                  );
+                if (unsafeImplementationReason) {
+                  planAssemblyValidationRetries += 1;
+                  const fallbackPlan =
+                    planAssemblyValidationRetries >=
+                    MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                      ? buildFallbackPlanForTask(planningTask)
+                      : null;
+                  if (fallbackPlan) {
+                    planAssemblyValidationActive = false;
+                    planAssemblyValidationRetries = 0;
+                    savePlan(req.conversationId, fallbackPlan.raw);
+                    emit({
+                      type: "plan_proposed",
+                      steps: fallbackPlan.steps.map((s) => ({
+                        name: s.name,
+                        prompt: s.prompt,
+                        verify: s.verify,
+                      })),
+                    });
+                    emit({ type: "activity", activity: { kind: "idle" } });
+                    emit({ type: "done" });
+                    return;
+                  }
+                  baseMessages.push({ role: "assistant", content: buffer });
+                  pushPlanningHarnessPrompt(
+                    "plan assembly validation",
+                    buildPlanValidationPrompt(unsafeImplementationReason),
                   );
                   emit({
                     type: "activity",
@@ -1446,6 +1703,28 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             continue;
           }
           if (assembled.kind === "rejected") {
+            planAssemblyValidationRetries += 1;
+            const fallbackPlan =
+              planAssemblyValidationRetries >=
+              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                ? buildFallbackPlanForTask(planningTask)
+                : null;
+            if (fallbackPlan) {
+              planAssemblyValidationActive = false;
+              planAssemblyValidationRetries = 0;
+              savePlan(req.conversationId, fallbackPlan.raw);
+              emit({
+                type: "plan_proposed",
+                steps: fallbackPlan.steps.map((s) => ({
+                  name: s.name,
+                  prompt: s.prompt,
+                  verify: s.verify,
+                })),
+              });
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
             baseMessages.push({ role: "assistant", content: buffer });
             pushPlanningHarnessPrompt(
               "plan assembly retry",
@@ -1482,19 +1761,91 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               emit({ type: "done" });
               return;
             }
-            const validationPrompt = [
-              "The assembled plan is not executable yet: " +
-                validation.reason,
-              "",
-              "Executable-plan validation gates:",
-              ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
-              "",
-              "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
-              "Do not describe rewriting, correcting, or ensuring a previous step.",
-              "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
-            ].join("\n");
+            const validationPrompt = buildPlanValidationPrompt(
+              validation.reason,
+            );
             baseMessages.push({ role: "assistant", content: buffer });
             pushPlanningHarnessPrompt("plan assembly validation", validationPrompt);
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          const requestedToolNames = findRequestedToolNames(planningTask);
+          const missingGroundingReason = missingKnownHostToolGroundingReason(
+            assembled.plan,
+            requestedToolNames,
+          );
+          if (missingGroundingReason) {
+            planAssemblyValidationActive = true;
+            planAssemblyValidationRetries += 1;
+            const fallbackPlan =
+              planAssemblyValidationRetries >=
+              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                ? buildFallbackPlanForTask(planningTask)
+                : null;
+            if (fallbackPlan) {
+              planAssemblyValidationActive = false;
+              planAssemblyValidationRetries = 0;
+              savePlan(req.conversationId, fallbackPlan.raw);
+              emit({
+                type: "plan_proposed",
+                steps: fallbackPlan.steps.map((s) => ({
+                  name: s.name,
+                  prompt: s.prompt,
+                  verify: s.verify,
+                })),
+              });
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            baseMessages.push({ role: "assistant", content: buffer });
+            pushPlanningHarnessPrompt(
+              "plan assembly validation",
+              buildPlanValidationPrompt(missingGroundingReason),
+            );
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          const unsafeImplementationReason =
+            unsafeKnownHostToolImplementationReason(
+              assembled.plan,
+              requestedToolNames,
+            );
+          if (unsafeImplementationReason) {
+            planAssemblyValidationActive = true;
+            planAssemblyValidationRetries += 1;
+            const fallbackPlan =
+              planAssemblyValidationRetries >=
+              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                ? buildFallbackPlanForTask(planningTask)
+                : null;
+            if (fallbackPlan) {
+              planAssemblyValidationActive = false;
+              planAssemblyValidationRetries = 0;
+              savePlan(req.conversationId, fallbackPlan.raw);
+              emit({
+                type: "plan_proposed",
+                steps: fallbackPlan.steps.map((s) => ({
+                  name: s.name,
+                  prompt: s.prompt,
+                  verify: s.verify,
+                })),
+              });
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            baseMessages.push({ role: "assistant", content: buffer });
+            pushPlanningHarnessPrompt(
+              "plan assembly validation",
+              buildPlanValidationPrompt(unsafeImplementationReason),
+            );
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -1544,10 +1895,86 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       if (planState) {
         const prematureVerify = parseVerifyResult(buffer);
         if (prematureVerify) {
+          const criterion = planState.currentStepEvidenceCriterion() ?? "";
           const forcedReason = forcedVerifyFailureReason(
-            planState.currentStepEvidenceCriterion() ?? "",
+            criterion,
             stepEvidence,
           );
+          if (
+            prematureVerify.result === "fail" &&
+            isMalformedActionSelfReport(prematureVerify.reason)
+          ) {
+            replaceBodyStripped();
+            if (forcedReason) {
+              pushHarnessPrompt(
+                "step incomplete",
+                buildIncompleteStepPrompt(forcedReason),
+              );
+              emit({
+                type: "activity",
+                activity: { kind: "thinking", chars: 0 },
+              });
+              continue;
+            }
+            planState.finishStepBody();
+            drainPlanEvents();
+            if (planState.state !== "running") {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            const next = planState.nextPrompt();
+            if (!next) {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            prepareStepEvidence(next);
+            pushHarnessPrompt(
+              next.kind === "verify" ? "plan verify" : "plan step",
+              next.text,
+            );
+            awaitingVerify = next.kind === "verify";
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
+          if (
+            prematureVerify.result === "fail" &&
+            isContradictedBySuccessfulEvidence(
+              prematureVerify.reason,
+              criterion,
+              stepEvidence,
+            )
+          ) {
+            replaceBodyStripped();
+            planState.finishStepBody();
+            drainPlanEvents();
+            if (planState.state !== "running") {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            const next = planState.nextPrompt();
+            if (!next) {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            prepareStepEvidence(next);
+            pushHarnessPrompt(
+              next.kind === "verify" ? "plan verify" : "plan step",
+              next.text,
+            );
+            awaitingVerify = next.kind === "verify";
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
           flushBufferToUI();
           replaceBodyStripped();
           baseMessages.push({ role: "assistant", content: buffer });
