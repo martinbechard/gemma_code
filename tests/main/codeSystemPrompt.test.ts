@@ -111,6 +111,15 @@ describe("codeSystemPrompt", () => {
       "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
     );
     expect(planPrompt).toContain(
+      "For requested get_current_ host tools, keep the requested tool name exactly and derive the test file by convention",
+    );
+    expect(planPrompt).toContain(
+      "get_current_hostname uses tests/main/currentHostnameTool.test.ts",
+    );
+    expect(planPrompt).not.toContain(
+      "For a current working directory tool request",
+    );
+    expect(planPrompt).toContain(
       "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
     );
     expect(planPrompt).toContain(

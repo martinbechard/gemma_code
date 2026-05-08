@@ -26,9 +26,11 @@ The host validates the assembled plan before executing it. Make the validation d
 - The assembled plan must name one exact tests/main test file path that ends in .test.ts.
 - The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.
 - The focused test command must use the same exact tests/main test file path that the test step creates or updates.
-- For a current working directory tool request, use get_current_working_directory, tests/main/currentWorkingDirectoryTool.test.ts, pnpm test tests/main/currentWorkingDirectoryTool.test.ts, and pnpm run build.
-- For a current working directory tool grounding step, read src/main/tools.ts, Gemma.md, package.json, and tests/main/currentWorkingDirectoryTool.test.ts exactly. Do not use broad directory-list grounding such as List src/main.
-- For a current working directory tool implementation step, tell the agent to read src/main/tools.ts and Gemma.md first, add get_current_working_directory only if missing, and avoid editing either file when get_current_working_directory is already present.
+- For requested get_current_ host tools, keep the requested tool name exactly and derive the test file by convention: drop get_current_, PascalCase the remaining underscore-separated words, then use tests/main/current plus that suffix plus Tool.test.ts. Example: get_current_hostname uses tests/main/currentHostnameTool.test.ts.
+- For requested get_current_ host tools, the focused test command is pnpm test plus the derived test file, and the build command is pnpm run build.
+- For requested get_current_ host tool grounding, name the exact canonical paths src/main/tools.ts, Gemma.md, package.json, and the derived tests/main test file path, and tell the agent to read or inspect those exact paths. Do not list file paths as directories, and do not use broad directory-list grounding such as List src/main.
+- For requested get_current_ host tool implementation, tell the agent to read src/main/tools.ts and Gemma.md first, add the requested tool only if missing, and avoid editing either file when the requested tool is already present.
+- For requested get_current_ host tools, emit the steps in this order: grounding, test, implementation, verification.
 - A step that creates or updates a test must name the exact focused test command for that same test file in the step prompt and verify text.
 - Do not put the focused test command only in verify. The test step prompt must tell the agent to read the exact test file, add or update coverage only if missing, then run the exact focused test command.
 - Every step that runs a focused test command or build command must repeat the exact command in the step verify text.

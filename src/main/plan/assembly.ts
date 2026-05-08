@@ -16,6 +16,20 @@ export const PLAN_ASSEMBLY_NEXT_PROMPT = [
   "Return plan: done only after the accepted steps visibly include grounding, test, implementation, the exact focused test command, and the exact build command.",
   "If any of those are missing, do not return plan: done. YAML only, no extra explanations.",
 ].join("\n");
+const HOST_TOOL_SOURCE_PATH = "src/main/tools.ts";
+const HOST_TOOL_DOC_PATH = "Gemma.md";
+const HOST_TOOL_PACKAGE_PATH = "package.json";
+const HOST_TOOL_BUILD_COMMAND = "pnpm run build";
+const HOST_TOOL_NAME_RE = /^get_current_[a-z0-9_]+$/;
+const HOST_TOOL_NAME_GLOBAL_RE = /\bget_current_[a-z0-9_]+\b/g;
+
+export interface HostToolPlanTarget {
+  toolName: string;
+  testPath: string;
+  focusedTestCommand: string;
+  buildCommand: string;
+  groundingPaths: string[];
+}
 
 export interface PlanAssemblyState {
   steps: ParsedStep[];
@@ -67,7 +81,7 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
 }
 
 export function findRequestedToolNames(text: string): string[] {
-  const names = new Set(text.match(/\bget_current_[a-z_]+\b/g) ?? []);
+  const names = new Set(text.match(HOST_TOOL_NAME_GLOBAL_RE) ?? []);
   if (
     /\bcurrent\s+working\s+directory\b/i.test(text) ||
     /\bprocess\s+current\s+working\s+directory\b/i.test(text)
@@ -83,82 +97,115 @@ export function findRequestedToolNames(text: string): string[] {
   return [...names];
 }
 
+export function deriveHostToolPlanTarget(
+  toolName: string,
+): HostToolPlanTarget | null {
+  if (!HOST_TOOL_NAME_RE.test(toolName)) return null;
+  const suffix = toolName.slice("get_current_".length);
+  const words = suffix.split("_").filter((word) => word.length > 0);
+  if (words.length === 0) return null;
+  const testPath =
+    "tests/main/current" +
+    words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join("") +
+    "Tool.test.ts";
+  const focusedTestCommand = `pnpm test ${testPath}`;
+  return {
+    toolName,
+    testPath,
+    focusedTestCommand,
+    buildCommand: HOST_TOOL_BUILD_COMMAND,
+    groundingPaths: [
+      HOST_TOOL_SOURCE_PATH,
+      HOST_TOOL_DOC_PATH,
+      HOST_TOOL_PACKAGE_PATH,
+      testPath,
+    ],
+  };
+}
+
+export function buildRequestedHostToolPlanTargets(
+  toolNames: string[],
+): HostToolPlanTarget[] {
+  return toolNames.flatMap((toolName) => {
+    const target = deriveHostToolPlanTarget(toolName);
+    return target ? [target] : [];
+  });
+}
+
 export function buildRequestedToolPlanningGuidance(
   toolNames: string[],
 ): string {
-  const details = toolNames.flatMap((toolName) => {
-    const testPath = testPathForRequestedTool(toolName);
-    return testPath ? [{ toolName, testPath }] : [];
-  });
-  if (details.length === 0) {
+  const targets = buildRequestedHostToolPlanTargets(toolNames);
+  if (targets.length === 0) {
     return toolNames.length > 0
       ? " Use the exact tool name " +
           toolNames.join(", ") +
           " in every implementation, test, and verification step."
       : "";
   }
-  return details
+  const targetText = targets
     .map(
-      ({ toolName, testPath }) =>
-        " For " +
-        toolName +
-        ", use the exact test file " +
-        testPath +
-        ", the exact focused test command pnpm test " +
-        testPath +
-        ", and the exact build command pnpm run build. The grounding step must read src/main/tools.ts, Gemma.md, package.json, and " +
-        testPath +
-        " exactly; do not use broad directory-list grounding such as List src/main. Keep the tool name " +
-        toolName +
-        " exactly in every implementation, test, and verification step. The test step is invalid unless its prompt and verify fields both include pnpm test " +
-        testPath +
-        ". The test step prompt must say to read " +
-        testPath +
-        ", add or update coverage only if missing, then run pnpm test " +
-        testPath +
-        ", not only name that command in verify. The implementation step prompt must tell the agent to read src/main/tools.ts and Gemma.md, add " +
-        toolName +
-        " only if missing, and avoid editing those files if " +
-        toolName +
-        " is already present. Do not return plan: done until the accepted plan has unique grounding, test, implementation, and verification steps.",
+      (target) =>
+        target.toolName +
+        " -> " +
+        target.testPath +
+        "; focused test command " +
+        target.focusedTestCommand +
+        "; build command " +
+        target.buildCommand,
     )
-    .join("");
+    .join("; ");
+  return (
+    " For requested get_current_* host tools, use this reusable plan convention: keep every requested get_current_* tool name exact; derive the test file as tests/main/current<PascalCase suffix>Tool.test.ts by dropping get_current_, PascalCasing the remaining underscore-separated words, prefixing current, and suffixing Tool.test.ts; use pnpm test <derived test file> as the focused test command; use pnpm run build as the build command; and do not return plan: done until the accepted plan has unique grounding, test, implementation, and verification steps. The grounding step must name the exact canonical paths " +
+    HOST_TOOL_SOURCE_PATH +
+    ", " +
+    HOST_TOOL_DOC_PATH +
+    ", " +
+    HOST_TOOL_PACKAGE_PATH +
+    ", and the derived tests/main/*.test.ts path, and its prompt must say to read or inspect those exact paths rather than list them as directories; avoid broad directory-list grounding such as List src/main. The accepted steps should be emitted in this order: grounding, test, implementation, verification. The test step prompt must say to read the derived test file, add or update coverage only if missing, then run the exact focused test command, and both prompt and verify must include that command. The implementation step must tell the agent to read " +
+    HOST_TOOL_SOURCE_PATH +
+    " and " +
+    HOST_TOOL_DOC_PATH +
+    ", add the requested tool only if missing, and avoid editing those files if the tool is already present. Requested host-tool targets: " +
+    targetText +
+    "."
+  );
 }
 
 export function buildFallbackPlanForTask(task: string): ParsedPlan | null {
   const requestedToolNames = findRequestedToolNames(task);
   if (requestedToolNames.length !== 1) return null;
   const toolName = requestedToolNames[0];
-  const testPath = testPathForRequestedTool(toolName);
-  if (!testPath) return null;
+  const target = deriveHostToolPlanTarget(toolName);
+  if (!target) return null;
 
   const steps: ParsedStep[] = [
     {
       name: "ground_tool",
       prompt:
-        `Read src/main/tools.ts, Gemma.md, package.json, and ${testPath}.`,
+        `Read ${HOST_TOOL_SOURCE_PATH}, ${HOST_TOOL_DOC_PATH}, and ${HOST_TOOL_PACKAGE_PATH}, then inspect whether ${target.testPath} exists with rg --files tests/main | rg "${testFileNamePattern(target.testPath)}".`,
       verify:
-        `src/main/tools.ts, Gemma.md, package.json, and ${testPath} have been read.`,
+        `${HOST_TOOL_SOURCE_PATH}, ${HOST_TOOL_DOC_PATH}, ${HOST_TOOL_PACKAGE_PATH}, and ${target.testPath} have been inspected.`,
     },
     {
       name: "test_tool",
       prompt:
-        `Read ${testPath}, confirm whether it already covers ${toolName}, do not edit ${testPath} if that coverage is already present, then run pnpm test ${testPath}.`,
+        `Read ${target.testPath}, confirm whether it already covers ${toolName}, add or update coverage only if missing, do not edit ${target.testPath} if that coverage is already present, then run ${target.focusedTestCommand}.`,
       verify:
-        `${testPath} covers ${toolName}, and pnpm test ${testPath} has been run.`,
+        `${target.testPath} covers ${toolName}, and ${target.focusedTestCommand} has been run.`,
     },
     {
-      name: "confirm_implementation",
+      name: "implement_tool",
       prompt:
-        `Read src/main/tools.ts and Gemma.md to confirm the ${toolName} implementation and documentation are present. If both files already contain ${toolName}, do not edit either file; summarize the existing implementation evidence instead.`,
-      verify: `src/main/tools.ts and Gemma.md contain ${toolName}.`,
+        `Read ${HOST_TOOL_SOURCE_PATH} and ${HOST_TOOL_DOC_PATH}, add ${toolName} only if missing, and avoid editing those files if ${toolName} is already present.`,
+      verify: `${HOST_TOOL_SOURCE_PATH} and ${HOST_TOOL_DOC_PATH} contain ${toolName}.`,
     },
     {
       name: "verify_tool",
       prompt:
-        `First use run_bash with exactly pnpm test ${testPath}. Then run pnpm test and pnpm run build.`,
+        `First use run_bash with exactly ${target.focusedTestCommand}. Then run pnpm test and ${target.buildCommand}.`,
       verify:
-        `pnpm test ${testPath}, pnpm test, and pnpm run build pass.`,
+        `${target.focusedTestCommand}, pnpm test, and ${target.buildCommand} pass.`,
     },
   ];
   const raw = stringify({ plan: { steps } }).trimEnd();
@@ -175,7 +222,7 @@ export function unsafeKnownHostToolImplementationReason(
   toolNames: string[],
 ): string | null {
   for (const toolName of toolNames) {
-    if (!testPathForRequestedTool(toolName)) continue;
+    if (!deriveHostToolPlanTarget(toolName)) continue;
     const firstBuildOrVerifyIndex = plan.steps.findIndex((step) =>
       /\bpnpm\s+run\s+build\b|\bnpm\s+run\s+build\b/i.test(
         `${step.name}\n${step.prompt}\n${step.verify}`,
@@ -209,7 +256,7 @@ export function unsafeKnownHostToolImplementationReason(
       }
       return (
         `Implementation step for ${toolName} must tell the agent to read ` +
-        `src/main/tools.ts and Gemma.md, add ${toolName} only if missing, ` +
+        `${HOST_TOOL_SOURCE_PATH} and ${HOST_TOOL_DOC_PATH}, add ${toolName} only if missing, ` +
         `and avoid editing those files if ${toolName} is already present.`
       );
     }
@@ -222,31 +269,16 @@ export function missingKnownHostToolGroundingReason(
   toolNames: string[],
 ): string | null {
   for (const toolName of toolNames) {
-    const testPath = testPathForRequestedTool(toolName);
-    if (!testPath) continue;
-    const requiredPaths = [
-      "src/main/tools.ts",
-      "Gemma.md",
-      "package.json",
-      testPath,
-    ];
+    const target = deriveHostToolPlanTarget(toolName);
+    if (!target) continue;
+    const requiredPaths = target.groundingPaths;
     const missingPaths = requiredPaths.filter((path) => !plan.raw.includes(path));
     if (missingPaths.length > 0) {
       return (
-        `Known host-tool plan for ${toolName} must ground on exact files: ` +
+        `Host-tool plan for ${toolName} must ground on exact files by convention: ` +
         `${requiredPaths.join(", ")}. Missing: ${missingPaths.join(", ")}.`
       );
     }
-  }
-  return null;
-}
-
-function testPathForRequestedTool(toolName: string): string | null {
-  if (toolName === "get_current_working_directory") {
-    return "tests/main/currentWorkingDirectoryTool.test.ts";
-  }
-  if (toolName === "get_current_datetime") {
-    return "tests/main/currentDatetimeTool.test.ts";
   }
   return null;
 }
@@ -310,6 +342,10 @@ export function applyPlanAssemblyResponse(
       duplicateStepName: step.name,
     });
   }
+  const taskSpecificReason = invalidHostToolStepReason(step, state, task);
+  if (taskSpecificReason) {
+    return rejected(state, taskSpecificReason, task);
+  }
 
   return {
     kind: "accepted",
@@ -319,6 +355,126 @@ export function applyPlanAssemblyResponse(
       task,
     ),
   };
+}
+
+function invalidHostToolStepReason(
+  step: ParsedStep,
+  state: PlanAssemblyState,
+  task: string,
+): string | null {
+  const targets = buildRequestedHostToolPlanTargets(findRequestedToolNames(task));
+  if (targets.length === 0) return null;
+  for (const target of targets) {
+    if (isHostToolGroundingStep(step, target)) {
+      if (state.steps.some((accepted) => isHostToolGroundingStep(accepted, target))) {
+        return (
+          `Host-tool grounding step for ${target.toolName} is already accepted. ` +
+          `Emit the test step that names ${target.focusedTestCommand} next.`
+        );
+      }
+      if (!/\b(read|inspect)\b/i.test(step.prompt)) {
+        return (
+          `Host-tool grounding step for ${target.toolName} must tell the agent ` +
+          `to read or inspect exact files, not list file paths as directories. ` +
+          `Use ${HOST_TOOL_SOURCE_PATH}, ${HOST_TOOL_DOC_PATH}, ` +
+          `${HOST_TOOL_PACKAGE_PATH}, and ${target.testPath}.`
+        );
+      }
+      if (/\blist\s+src\/main\b/i.test(step.prompt)) {
+        return (
+          `Host-tool grounding step for ${target.toolName} must not use broad ` +
+          `directory-list grounding such as List src/main.`
+        );
+      }
+      if (
+        /\blisting\b/i.test(step.verify) ||
+        !/\b(read|inspect|inspected)\b/i.test(step.verify)
+      ) {
+        return (
+          `Host-tool grounding verify text for ${target.toolName} must say the ` +
+          `exact files have been read or inspected, not that a listing was retrieved.`
+        );
+      }
+    }
+    if (
+      isHostToolImplementationStep(step, target) &&
+      !state.steps.some((accepted) => isHostToolTestStep(accepted, target))
+    ) {
+      return (
+        `Host-tool implementation step for ${target.toolName} must come after ` +
+        `the test step that names ${target.focusedTestCommand}.`
+      );
+    }
+    if (
+      isHostToolVerificationStep(step, target) &&
+      !state.steps.some((accepted) =>
+        isHostToolImplementationStep(accepted, target),
+      )
+    ) {
+      return (
+        `Host-tool verification step for ${target.toolName} must come after ` +
+        `the implementation step.`
+      );
+    }
+  }
+  return null;
+}
+
+function isHostToolGroundingStep(
+  step: ParsedStep,
+  target: HostToolPlanTarget,
+): boolean {
+  const text = `${step.name}\n${step.prompt}\n${step.verify}`;
+  const intentText = `${step.name}\n${step.prompt}`;
+  const hasNonGroundingIntent =
+    /\b(implement|edit|add|update)\b/i.test(intentText) ||
+    /\b(test|spec)\b/i.test(step.name) ||
+    /\b(?:pnpm|npm)\s+test\b/i.test(step.prompt);
+  const hasGroundingIntent =
+    /\b(ground|explore)\b/i.test(intentText) ||
+    (/\b(read|inspect|list)\b/i.test(intentText) &&
+      !hasNonGroundingIntent);
+  return (
+    hasGroundingIntent &&
+    (target.groundingPaths.some((path) => text.includes(path)) ||
+      text.includes(target.toolName))
+  );
+}
+
+function isHostToolTestStep(
+  step: ParsedStep,
+  target: HostToolPlanTarget,
+): boolean {
+  const text = `${step.name}\n${step.prompt}\n${step.verify}`;
+  return (
+    /\b(test|spec)\b/i.test(text) &&
+    text.includes(target.testPath) &&
+    text.includes(target.focusedTestCommand)
+  );
+}
+
+function isHostToolImplementationStep(
+  step: ParsedStep,
+  target: HostToolPlanTarget,
+): boolean {
+  const text = `${step.name}\n${step.prompt}\n${step.verify}`;
+  return (
+    /\b(implement|edit|add|update)\b/i.test(`${step.name}\n${step.prompt}`) &&
+    text.includes(target.toolName) &&
+    text.includes(HOST_TOOL_SOURCE_PATH)
+  );
+}
+
+function isHostToolVerificationStep(
+  step: ParsedStep,
+  target: HostToolPlanTarget,
+): boolean {
+  const text = `${step.name}\n${step.prompt}\n${step.verify}`;
+  return (
+    /\b(verify|build|run|pnpm|npm)\b/i.test(`${step.name}\n${step.prompt}`) &&
+    text.includes(target.focusedTestCommand) &&
+    text.includes(target.buildCommand)
+  );
 }
 
 export function isPlanAssemblyDoneResponse(response: string): boolean {
@@ -435,12 +591,24 @@ function buildTaskSpecificPlanProgressGuidance(
 ): string[] {
   const [toolName] = findRequestedToolNames(task);
   if (!toolName) return [];
-  const testPath = testPathForRequestedTool(toolName);
-  if (!testPath) return [];
-  const focusedCommand = `pnpm test ${testPath}`;
+  const target = deriveHostToolPlanTarget(toolName);
+  if (!target) return [];
+  const testPath = target.testPath;
+  const focusedCommand = target.focusedTestCommand;
   const acceptedText = state.steps
     .map((step) => `${step.name}\n${step.prompt}\n${step.verify}`)
     .join("\n");
+  const hasGroundingStep = state.steps.some((step) =>
+    isHostToolGroundingStep(step, target),
+  );
+  if (!hasGroundingStep) {
+    return [
+      `Next missing requirement: emit the grounding step for ${toolName}.`,
+      `That single step's prompt must tell the agent to read or inspect ${target.groundingPaths.join(", ")}.`,
+      `That single step's verify field must say ${target.groundingPaths.join(", ")} have been read or inspected.`,
+      "Do not return plan: done until this grounding step is accepted.",
+    ];
+  }
   const hasTestArtifactStep = state.steps.some((step) => {
     const stepText = `${step.name}\n${step.prompt}\n${step.verify}`;
     return (
@@ -481,6 +649,10 @@ function buildTaskSpecificPlanProgressGuidance(
     ];
   }
   return [];
+}
+
+function testFileNamePattern(testPath: string): string {
+  return testPath.split("/").at(-1) ?? testPath;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -81,6 +81,23 @@ describe("plan step evidence", () => {
     expect(hasGuardedAlreadyPresentEvidence(criterion, evidence)).toBe(true);
   });
 
+  it("requires exact file evidence for inspected criteria", () => {
+    const evidence = createPlanStepEvidence();
+    const criterion = "src/main/tools.ts and Gemma.md have been inspected.";
+
+    recordPlanToolEvidence(evidence, "read_file", "tools content", {
+      path: "src/main/tools.ts",
+    });
+    expect(forcedVerifyFailureReason(criterion, evidence)).toContain(
+      "missing file evidence for: Gemma.md",
+    );
+
+    recordPlanToolEvidence(evidence, "read_file", "gemma content", {
+      path: "Gemma.md",
+    });
+    expect(forcedVerifyFailureReason(criterion, evidence)).toBeNull();
+  });
+
   it("detects verify failures contradicted by successful command evidence", () => {
     const evidence = createPlanStepEvidence();
     const command = "pnpm test tests/main/currentWorkingDirectoryTool.test.ts";

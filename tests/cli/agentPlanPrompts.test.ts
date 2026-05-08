@@ -3,6 +3,7 @@ import {
   buildCodeNoProgressPrompt,
   buildEditFailureRecoveryPrompt,
   buildPlanAmendmentPrompt,
+  hasSatisfiedReadOnlyStepEvidence,
   buildPrematureVerifyPrompt,
   buildIncompleteStepPrompt,
   buildRepeatedActionPrompt,
@@ -15,6 +16,10 @@ import {
   shouldHandlePlanAssemblyBuffer,
   type AgentRunOptions,
 } from "../../src/cli/agent";
+import {
+  createPlanStepEvidence,
+  recordPlanToolEvidence,
+} from "../../src/main/plan/evidence";
 import {
   applyPlanAssemblyResponse,
   createPlanAssemblyState,
@@ -41,7 +46,7 @@ describe("buildRepeatedActionPrompt", () => {
 
     const prompt = buildCodeNoProgressPrompt(hostToolOpts, evidence);
 
-    expect(prompt).toContain("one exact tests/main/*.test.ts");
+    expect(prompt).toContain("one exact tests/main/currentDatetimeTool.test.ts");
   });
 
   it("forces the next missing host-tool inspection path after a repeated action", () => {
@@ -104,7 +109,7 @@ describe("buildRepeatedActionPrompt", () => {
 
     expect(prompt).toContain("<action name=\"run_bash\">");
     expect(prompt).toContain("rg --files tests/main");
-    expect(prompt).toContain("WorkingDirectory");
+    expect(prompt).toContain("currentDatetimeTool.test.ts");
   });
 });
 
@@ -164,6 +169,38 @@ describe("buildCodeNoProgressPrompt", () => {
   });
 });
 
+describe("hasSatisfiedReadOnlyStepEvidence", () => {
+  it("recognizes completed read-only inspection steps", () => {
+    const evidence = createPlanStepEvidence();
+    const criterion =
+      "src/main/tools.ts and Gemma.md have been read or inspected.";
+
+    recordPlanToolEvidence(evidence, "read_file", "tools content", {
+      path: "src/main/tools.ts",
+    });
+    expect(hasSatisfiedReadOnlyStepEvidence(criterion, evidence)).toBe(false);
+
+    recordPlanToolEvidence(evidence, "read_file", "gemma content", {
+      path: "Gemma.md",
+    });
+    expect(hasSatisfiedReadOnlyStepEvidence(criterion, evidence)).toBe(true);
+  });
+
+  it("does not treat implementation criteria as read-only steps", () => {
+    const evidence = createPlanStepEvidence();
+    recordPlanToolEvidence(evidence, "read_file", "get_current_hostname", {
+      path: "src/main/tools.ts",
+    });
+
+    expect(
+      hasSatisfiedReadOnlyStepEvidence(
+        "src/main/tools.ts contains get_current_hostname.",
+        evidence,
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("buildPlanAmendmentPrompt", () => {
   it("asks for one additional YAML plan step without more tools", () => {
     const prompt = buildPlanAmendmentPrompt(
@@ -213,6 +250,19 @@ describe("buildPlanAmendmentPrompt", () => {
       "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
     );
     expect(prompt).toContain("pnpm run build");
+  });
+
+  it("derives host-tool amendment guidance for arbitrary get_current names", () => {
+    const prompt = buildPlanAmendmentPrompt(
+      "Plan switched away from the requested tool name: get_current_hostname.",
+      [],
+      ["get_current_hostname"],
+    );
+
+    expect(prompt).toContain("get_current_hostname");
+    expect(prompt).toContain("tests/main/currentHostnameTool.test.ts");
+    expect(prompt).toContain("pnpm test tests/main/currentHostnameTool.test.ts");
+    expect(prompt).toContain("reusable plan convention");
   });
 
   it("requires exact missing commands in both prompt and verify fields", () => {

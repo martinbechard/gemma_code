@@ -29,10 +29,10 @@ import {
   validatePlanForExecution,
 } from "../main/plan/validation";
 import {
-  PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
   buildFallbackPlanForTask,
   buildPlanAssemblyInitialPrompt,
+  buildRequestedHostToolPlanTargets,
   buildRequestedToolPlanningGuidance,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
@@ -54,6 +54,7 @@ import {
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
+  type PlanStepEvidence,
 } from "../main/plan/evidence";
 import { killBackgroundTasksForConversation } from "../main/backgroundTasks";
 import {
@@ -201,6 +202,12 @@ function hasInspectedPath(
   );
 }
 
+function hasFocusedTestsMainSearch(evidence: PlanInspectionEvidence): boolean {
+  return evidence.bashCommands.some((command) =>
+    /^rg\s+--files\s+tests\/main\b/.test(command),
+  );
+}
+
 function isHostToolRequest(text: string): boolean {
   return (
     /\bget_current_datetime\b/i.test(text) ||
@@ -242,13 +249,28 @@ export function shouldHandlePlanAssemblyBuffer(
 
 function findMissingHostToolInspectionEvidence(
   evidence: PlanInspectionEvidence,
+  prompt: string,
 ): string[] {
   const missing: string[] = HOST_TOOL_CANONICAL_PATHS.filter(
     (path) => !hasInspectedPath(evidence, path),
   );
-  const hasTestEvidence = evidence.testPaths.size > 0;
+  const requestedTargets = buildRequestedHostToolPlanTargets(
+    findRequestedToolNames(prompt),
+  );
+  const hasRequestedTestEvidence =
+    requestedTargets.length > 0 &&
+    requestedTargets.some((target) => hasInspectedPath(evidence, target.testPath));
+  const hasTestEvidence =
+    evidence.testPaths.size > 0 ||
+    hasFocusedTestsMainSearch(evidence) ||
+    hasRequestedTestEvidence;
   if (!hasTestEvidence) {
-    missing.push("one exact tests/main/*.test.ts file or focused tests/main search");
+    const targetPaths = requestedTargets.map((target) => target.testPath);
+    missing.push(
+      targetPaths.length > 0
+        ? `one exact ${targetPaths.join(", ")} file or focused tests/main search`
+        : "one exact tests/main/*.test.ts file or focused tests/main search",
+    );
   }
   return missing;
 }
@@ -267,10 +289,13 @@ function nextInspectionPathForMissing(missingEvidence: string[]): string {
   for (const path of HOST_TOOL_CANONICAL_PATHS) {
     if (missingEvidence.includes(path)) return path;
   }
-  return "tests/main/currentDatetimeTool.test.ts";
+  return HOST_TOOL_CANONICAL_PATHS[0];
 }
 
-function buildInspectionActionForMissing(missingEvidence: string[]): string[] {
+function buildInspectionActionForMissing(
+  missingEvidence: string[],
+  prompt: string,
+): string[] {
   for (const path of HOST_TOOL_CANONICAL_PATHS) {
     if (missingEvidence.includes(path)) {
       return [
@@ -283,12 +308,23 @@ function buildInspectionActionForMissing(missingEvidence: string[]): string[] {
 
   if (
     missingEvidence.some((entry) =>
-      entry.includes("one exact tests/main/*.test.ts"),
+      entry.includes("one exact tests/main") ||
+      entry.includes("file or focused tests/main search"),
     )
   ) {
+    const requestedTargets = buildRequestedHostToolPlanTargets(
+      findRequestedToolNames(prompt),
+    );
+    const targetFileNames = requestedTargets.map((target) =>
+      testFileName(target.testPath),
+    );
+    const testSearchPattern =
+      targetFileNames.length > 0
+        ? [...targetFileNames, "Tool", "tools"].join("|")
+        : "Tool|tools|current|Current|ProjectScript|codeSystemPrompt";
     return [
       `<action name="run_bash">`,
-      `<command>rg --files tests/main | rg "Tool|tools|Datetime|WorkingDirectory|ProjectScript|codeSystemPrompt"</command>`,
+      `<command>rg --files tests/main | rg "${testSearchPattern}"</command>`,
       `</action>`,
     ];
   }
@@ -309,17 +345,33 @@ export function buildRepeatedActionPrompt(
 ): string {
   const missingEvidence =
     opts.mode === "code" && isHostToolRequest(opts.prompt)
-      ? findMissingHostToolInspectionEvidence(evidence)
+      ? findMissingHostToolInspectionEvidence(evidence, opts.prompt)
       : [];
   if (missingEvidence.length > 0) {
     return [
       `You repeated the same ${actionName} action ${repeatedActionCount} times.`,
       `Missing inspection evidence: ${missingEvidence.join(", ")}.`,
       "Your next response must be exactly this action tag and nothing else:",
-      ...buildInspectionActionForMissing(missingEvidence),
+      ...buildInspectionActionForMissing(missingEvidence, opts.prompt),
     ].join("\n");
   }
   return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action. Do not emit a YAML plan while recovering from a repeated action. Do not call ${actionName} with the same parameters again.`;
+}
+
+export function hasSatisfiedReadOnlyStepEvidence(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): boolean {
+  if (evidence.actionCount === 0) return false;
+  if (!/\b(read|inspect|inspected|retrieved)\b/i.test(criterion)) return false;
+  if (
+    /\b(get_current_|cover|covers|contain|contains|added|verified|implemented|pnpm|npm|build)\b/i.test(
+      criterion,
+    )
+  ) {
+    return false;
+  }
+  return forcedVerifyFailureReason(criterion, evidence) === null;
 }
 
 export function buildCodeNoProgressPrompt(
@@ -328,14 +380,14 @@ export function buildCodeNoProgressPrompt(
 ): string {
   const missingEvidence =
     opts.mode === "code" && isHostToolRequest(opts.prompt)
-      ? findMissingHostToolInspectionEvidence(evidence)
+      ? findMissingHostToolInspectionEvidence(evidence, opts.prompt)
       : [];
   if (missingEvidence.length > 0) {
     return [
       "You stopped without an action or YAML plan, but the host-project tool plan still needs concrete inspection evidence.",
       `Missing inspection evidence: ${missingEvidence.join(", ")}.`,
       "Your next response must be exactly this action tag and nothing else:",
-      ...buildInspectionActionForMissing(missingEvidence),
+      ...buildInspectionActionForMissing(missingEvidence, opts.prompt),
     ].join("\n");
   }
   if (opts.mode === "code" && isHostToolRequest(opts.prompt)) {
@@ -347,6 +399,10 @@ export function buildCodeNoProgressPrompt(
     ].join("\n");
   }
   return CODE_PLAN_NUDGE;
+}
+
+function testFileName(testPath: string): string {
+  return testPath.split("/").at(-1) ?? testPath;
 }
 
 export function buildPlanAmendmentPrompt(
@@ -964,6 +1020,31 @@ async function runAgentLoop(
       });
       if (planState?.currentStepId) {
         recordPlanToolEvidence(stepEvidence, action.name, result, action.args);
+      }
+      if (
+        planState?.currentStepId &&
+        !awaitingVerify &&
+        hasSatisfiedReadOnlyStepEvidence(
+          planState.currentStepEvidenceCriterion() ?? "",
+          stepEvidence,
+        )
+      ) {
+        meta("read/inspection evidence satisfied; advancing to verify");
+        planState.finishStepBody();
+        logPlanEvents();
+        if (planState.state !== "running") {
+          meta(`done — plan ${planState.state}`);
+          return;
+        }
+        const next = planState.nextPrompt();
+        if (!next) {
+          meta("done — plan complete");
+          return;
+        }
+        prepareStepEvidence(next);
+        pushHarnessPrompt(messages, next.kind, next.text);
+        awaitingVerify = next.kind === "verify";
+        continue;
       }
       if (
         planState?.currentStepId &&
