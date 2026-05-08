@@ -22,6 +22,10 @@ What if you could vibe code from an airplane? Or a cabin with no cell signal? Or
 
 It's a proof-of-concept for **fully offline, local-first vibe coding** using a small open model. The recommended model is ~3.2 GB. The whole thing runs on your laptop.
 
+## Project Context
+
+This project is experimental open-source work used to understand the capabilities of Gemma 4 as a local coding model. Development is a one-on-one collaboration between a human and AI agents: the human steers and reviews direction, while AI agents make the repository changes, verify them, and commit coherent work.
+
 ## How It Works
 
 1. **Describe what you want to build** — "A retro calculator app" or "A landing page for a coffee shop"
