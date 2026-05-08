@@ -23,6 +23,10 @@ const PROJECT_SCRIPT_DEFAULT_TIMEOUT_MS = 120_000;
 const PROJECT_SCRIPT_MAX_TIMEOUT_MS = 300_000;
 const PROJECT_SCRIPT_ALLOWED_NAMES = ["build", "test", "dev"] as const;
 const PROJECT_SCRIPT_MANAGERS = ["npm", "pnpm"] as const;
+const DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES = 1_000;
+const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
+const PROTECTED_OVERWRITE_PATH_RE =
+  /^(?:src|tests)\/|^Gemma(?:\.[A-Za-z]+)?\.md$|^package\.json$/;
 
 type ProjectScriptName = (typeof PROJECT_SCRIPT_ALLOWED_NAMES)[number];
 type ProjectScriptManager = (typeof PROJECT_SCRIPT_MANAGERS)[number];
@@ -237,10 +241,42 @@ async function writeFile(
   const raw = typeof args.content === "string" ? args.content : "";
   if (!path) return "Error: missing <path>";
   const content = cleanFileContent(raw, path);
+  const destructiveOverwriteError = await detectDestructiveOverwrite(
+    ctx.conversationId,
+    path,
+    content,
+  );
+  if (destructiveOverwriteError) return destructiveOverwriteError;
   await wsWriteFile(ctx.conversationId, path, content);
   ctx.onFileChange?.();
   const lines = content.split("\n").length;
   return `Wrote ${path} (${content.length} bytes, ${lines} lines).`;
+}
+
+async function detectDestructiveOverwrite(
+  conversationId: string,
+  path: string,
+  content: string,
+): Promise<string | null> {
+  if (!PROTECTED_OVERWRITE_PATH_RE.test(path)) return null;
+  let existing: string;
+  try {
+    existing = await wsReadFile(conversationId, path);
+  } catch {
+    return null;
+  }
+  if (existing.length < DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES) return null;
+  if (
+    content.length >=
+    existing.length * DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO
+  ) {
+    return null;
+  }
+  return [
+    `Error writing ${path}: destructive overwrite blocked.`,
+    "The existing project file is much larger than the replacement content.",
+    "Use edit_file, or use write_file with the full current file content plus the requested change.",
+  ].join(" ");
 }
 
 export function cleanFileContent(raw: string, path: string): string {
@@ -610,7 +646,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   run_bash: {
     name: "run_bash",
     description:
-      "Run a bash command inside the workspace directory. Use for npm install, git, formatters, quick checks.",
+      "Run a bash command inside the workspace directory. Use for exact commands with arguments, npm install, git, formatters, and quick checks.",
     params: [
       {
         name: "command",
@@ -626,7 +662,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   run_project_script: {
     name: "run_project_script",
     description:
-      "Run an allowed package.json script by name. Allowed scripts: build, test, dev. Package managers: npm, pnpm.",
+      "Run an allowed package.json script by name. Allowed scripts: build, test, dev. Package managers: npm, pnpm. Do not use this for exact commands with extra arguments, such as a focused test file path; use run_bash instead.",
     params: [
       {
         name: "script",

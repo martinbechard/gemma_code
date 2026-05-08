@@ -26,9 +26,11 @@ The host validates the assembled plan before executing it. Make the validation d
 - The assembled plan must name one exact tests/main test file path that ends in .test.ts.
 - The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.
 - The focused test command must use the same exact tests/main test file path that the test step creates or updates.
+- A step that creates or updates a test must name the exact focused test command for that same test file in the step prompt and verify text.
+- Every step that runs a focused test command or build command must repeat the exact command in the step verify text.
 - The assembled plan must name the exact build command it will run: pnpm run build or npm run build.
 - Keep requested get_current_ tool names exactly.
-- Do not use placeholder names such as exampleTool.test.ts or requested_tool_name.
+- Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.
 - Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.
 
 Do not copy examples from this prompt. A valid step must name the actual files and tests needed for this request when those files are known.

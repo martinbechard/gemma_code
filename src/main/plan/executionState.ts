@@ -91,6 +91,8 @@ export class PlanExecutionState {
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
         `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
+        `If this step names an exact command with arguments, such as pnpm test tests/main/someTool.test.ts, run that exact command with run_bash; do not substitute run_project_script. ` +
+        `Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet; preserve the current file content if a full-file rewrite is necessary. ` +
         `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
         `When this step's work is done, write a brief plain-text summary and stop; the host will then ask you to verify.`;
       const body = f.retryReason
@@ -116,6 +118,15 @@ export class PlanExecutionState {
     const f = this.top();
     if (f.phase !== "verify" && f.phase !== "step") return null;
     return f.plan.steps[f.stepIndex]?.verify ?? null;
+  }
+
+  currentStepEvidenceCriterion(): string | null {
+    if (this.state !== "running" || this.frames.length === 0) return null;
+    const f = this.top();
+    if (f.phase !== "verify" && f.phase !== "step") return null;
+    const step = f.plan.steps[f.stepIndex];
+    if (!step) return null;
+    return `${step.prompt}\n${step.verify}`;
   }
 
   finishStepBody(): void {

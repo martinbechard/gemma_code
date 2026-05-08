@@ -71,6 +71,11 @@ describe("codeSystemPrompt", () => {
       "old_string was not found or appears multiple times",
     );
     expect(executePrompt).toContain("do not retry the same old_string");
+    expect(executePrompt).toContain("Do not invent tool results");
+    expect(executePrompt).toContain(
+      "use run_bash with that exact command",
+    );
+    expect(executePrompt).toContain("preserve the current file content");
   });
 
   it("states the concrete executable-plan validation gates in plan mode", () => {
@@ -103,7 +108,7 @@ describe("codeSystemPrompt", () => {
       "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
     );
     expect(planPrompt).toContain(
-      "Do not use placeholder names such as exampleTool.test.ts or requested_tool_name.",
+      "Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.",
     );
     expect(planPrompt).toContain(
       "relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed",

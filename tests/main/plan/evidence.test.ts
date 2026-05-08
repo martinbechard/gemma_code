@@ -126,6 +126,21 @@ describe("plan step evidence", () => {
     );
   });
 
+  it("blocks a step summary when a listed path has not been read yet", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(evidence, "read_file", "tools source", {
+      path: "src/main/tools.ts",
+    });
+
+    expect(
+      forcedVerifyFailureReason(
+        "List src/main/tools.ts and src/main/index.ts.",
+        evidence,
+      ),
+    ).toContain("missing read_file evidence for: src/main/index.ts");
+  });
+
   it("allows a verify pass when every required read path is present", () => {
     const evidence = createPlanStepEvidence();
 
@@ -197,7 +212,7 @@ describe("plan step evidence", () => {
         "The build command pnpm run build has been executed successfully.",
         evidence,
       ),
-    ).toContain("missing command evidence");
+    ).toContain("missing successful command evidence for: pnpm run build");
   });
 
   it("allows a verify pass when a build criterion has successful command evidence", () => {
@@ -214,6 +229,92 @@ describe("plan step evidence", () => {
     expect(
       forcedVerifyFailureReason(
         "The build command pnpm run build has been executed successfully.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("accepts npm and pnpm build script commands as equivalent", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "run_project_script",
+      ["command=npm run build", "exit=0 (1000ms)", "stdout:", "built"].join(
+        "\n",
+      ),
+    );
+
+    expect(
+      forcedVerifyFailureReason("pnpm run build passes.", evidence),
+    ).toBeNull();
+  });
+
+  it("requires the exact focused test command named by the criterion", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "run_project_script",
+      [
+        "command=pnpm run test",
+        "exit=0 (1000ms)",
+        "stdout:",
+        "all tests passed",
+      ].join("\n"),
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
+        evidence,
+      ),
+    ).toContain(
+      "missing successful command evidence for: pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+  });
+
+  it("allows the exact focused test command when run_bash succeeds", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 stdout: pass",
+      { command: "pnpm test tests/main/currentWorkingDirectoryTool.test.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("allows a required exact command after an unrelated failed command", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "run_project_script",
+      [
+        "command=pnpm run test",
+        "exit=1 (1000ms)",
+        "stdout:",
+        "unrelated full suite failure",
+      ].join("\n"),
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 stdout: pass",
+      { command: "pnpm test tests/main/currentWorkingDirectoryTool.test.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
         evidence,
       ),
     ).toBeNull();

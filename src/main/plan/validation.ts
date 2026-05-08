@@ -15,19 +15,30 @@ export const EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES = [
   "The assembled plan must name one exact tests/main test file path that ends in .test.ts.",
   "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
   "The focused test command must use the same exact tests/main test file path that the test step creates or updates.",
+  "A step that creates or updates a test must name the exact focused test command for that same test file in the step prompt and verify text.",
+  "Every step that runs a focused test command or build command must repeat the exact command in the step verify text.",
   "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
   "Keep requested get_current_ tool names exactly.",
-  "Do not use placeholder names such as exampleTool.test.ts or requested_tool_name.",
+  "Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.",
   "Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.",
 ] as const;
 
 const TEST_FILE_PATH_RE = /\btests\/main\/[^\s<>"']+\.test\.ts\b/g;
 const FOCUSED_TEST_COMMAND_RE =
   /\b(?:pnpm|npm) test\s+(?:--\s+)?(tests\/main\/[^\s<>"']+\.test\.ts)\b/g;
+const FOCUSED_TEST_COMMAND_TEXT_RE =
+  /\b((?:pnpm|npm) test\s+(?:--\s+)?tests\/main\/[^\s<>"']+\.test\.ts)\b/g;
+const BUILD_COMMAND_TEXT_RE = /\b((?:pnpm|npm) run build)\b/g;
 const TEST_ARTIFACT_STEP_RE = /\b(?:test|spec)\b/i;
 const TEST_ARTIFACT_CHANGE_RE = /\b(?:write|create|update|add|extend|edit)\b/i;
 const TEST_PATH_MISMATCH_REASON =
   "Plan focused test command must use the same exact tests/main test file path that the test step creates or updates.";
+const TEST_ARTIFACT_COMMAND_REASON =
+  "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.";
+const FOCUSED_TEST_VERIFY_REASON =
+  "Every step that runs a focused test command must repeat the exact command in its verify field.";
+const BUILD_VERIFY_REASON =
+  "Every step that runs the build command must repeat the exact command in its verify field.";
 
 const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
   { label: "relevant tests", pattern: /\brelevant tests?\b/i },
@@ -54,6 +65,10 @@ const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
   {
     label: "requested_tool_name",
     pattern: /\brequested_tool_name\b/,
+  },
+  {
+    label: "newToolName.test.ts",
+    pattern: /\bnewToolName\.test\.ts\b/,
   },
 ];
 
@@ -145,6 +160,44 @@ export function validatePlanStepText(
         "Name exact files, test paths, and commands before the plan can run.",
     };
   }
+  const commandValidation = validateStepCommandText(step);
+  if (!commandValidation.valid) return commandValidation;
+  return { valid: true };
+}
+
+function validateStepCommandText(step: ParsedStep): PlanValidationResult {
+  const stepText = `${step.name}\n${step.prompt}\n${step.verify}`;
+  if (
+    TEST_ARTIFACT_STEP_RE.test(stepText) &&
+    TEST_ARTIFACT_CHANGE_RE.test(stepText)
+  ) {
+    const testPaths = extractTestFilePaths(stepText);
+    if (testPaths.length > 0) {
+      const focusedTestCommandPaths = extractFocusedTestCommandPaths(stepText);
+      if (!sameStringSet(testPaths, focusedTestCommandPaths)) {
+        return { valid: false, reason: TEST_ARTIFACT_COMMAND_REASON };
+      }
+    }
+  }
+
+  const promptFocusedTestCommands = extractFocusedTestCommandTexts(step.prompt);
+  if (
+    promptFocusedTestCommands.some(
+      (command) => !extractFocusedTestCommandTexts(step.verify).includes(command),
+    )
+  ) {
+    return { valid: false, reason: FOCUSED_TEST_VERIFY_REASON };
+  }
+
+  const promptBuildCommands = extractBuildCommandTexts(step.prompt);
+  if (
+    promptBuildCommands.some(
+      (command) => !extractBuildCommandTexts(step.verify).includes(command),
+    )
+  ) {
+    return { valid: false, reason: BUILD_VERIFY_REASON };
+  }
+
   return { valid: true };
 }
 
@@ -154,6 +207,14 @@ function extractTestFilePaths(text: string): string[] {
 
 function extractFocusedTestCommandPaths(text: string): string[] {
   return uniqueMatches(text, FOCUSED_TEST_COMMAND_RE, 1);
+}
+
+function extractFocusedTestCommandTexts(text: string): string[] {
+  return uniqueMatches(text, FOCUSED_TEST_COMMAND_TEXT_RE, 1);
+}
+
+function extractBuildCommandTexts(text: string): string[] {
+  return uniqueMatches(text, BUILD_COMMAND_TEXT_RE, 1);
 }
 
 function extractTestArtifactPaths(steps: ParsedStep[]): string[] {

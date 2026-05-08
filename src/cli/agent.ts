@@ -31,12 +31,17 @@ import {
 import {
   PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
+  buildFallbackPlanForTask,
+  buildPlanAssemblyInitialPrompt,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
+  finalizePlanAssembly,
+  findRequestedToolNames,
   isPlanAssemblyDoneResponse,
   type PlanAssemblyState,
 } from "../main/plan/assembly";
 import {
+  buildIncompleteStepPrompt,
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   isRecoverableEditFailureResult,
@@ -49,9 +54,13 @@ import {
   saveCliConversation,
 } from "./conversation";
 
+export { buildIncompleteStepPrompt } from "../main/plan/evidence";
+export { findRequestedToolNames } from "../main/plan/assembly";
+
 const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
 const MAX_NESTED_PLAN_REJECTIONS = 3;
+const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 3;
 const CODE_PLAN_NUDGE =
   "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ONLY_CONTINUE_NUDGE =
@@ -198,10 +207,6 @@ function isHostToolRequest(text: string): boolean {
     /\badd\s+[^.\n]*tool\b/i.test(text) ||
     /\bsrc\/main\/tools\.ts\b/.test(text)
   );
-}
-
-export function findRequestedToolNames(text: string): string[] {
-  return [...new Set(text.match(/\bget_current_[a-z_]+\b/g) ?? [])];
 }
 
 export function findPlanTestPaths(text: string): string[] {
@@ -368,6 +373,7 @@ export function buildPlanAmendmentPrompt(
     "",
     "Do not use tools. Emit exactly one additional well-formed YAML plan step now.",
     "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
+    "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
     "When there are no more steps, stop without emitting another YAML plan.",
   ].join("\n");
 }
@@ -486,7 +492,13 @@ export async function runChat(opts: AgentRunOptions): Promise<void> {
       displaySystemPrompt("chat", systemPrompt);
       meta(`cwd:       ${projectRoot}`);
     }
-    messages.push({ role: "user", content: opts.prompt });
+    messages.push({
+      role: "user",
+      content:
+        opts.mode === "code" && opts.planOnly
+          ? buildPlanAssemblyInitialPrompt(opts.prompt)
+          : opts.prompt,
+    });
 
     const ctx: ToolContext = {
       conversationId,
@@ -612,6 +624,8 @@ async function runAgentLoop(
   let nestedPlanRejections = 0;
   let planAssemblyState: PlanAssemblyState | null =
     opts.mode === "code" && !initialPlan ? createPlanAssemblyState() : null;
+  let planAssemblyValidationActive = false;
+  let planAssemblyValidationRetries = 0;
   let lastActionKey: string | null = null;
   let repeatedActionCount = 0;
   let planOnlyNudges = 0;
@@ -630,6 +644,9 @@ async function runAgentLoop(
     if (prompt.stepId === stepEvidenceStepId) return;
     stepEvidence = createPlanStepEvidence();
     stepEvidenceStepId = prompt.stepId;
+    lastActionKey = null;
+    repeatedActionCount = 0;
+    pendingEditRecoveryPath = null;
   };
 
   const resetStepAttemptTracking = (): void => {
@@ -679,10 +696,10 @@ async function runAgentLoop(
       );
       return "retry";
     }
-    const uninspectedPlanTestPaths = findUninspectedPlanTestPaths(
-      plan,
-      planInspectionEvidence,
-    );
+    const uninspectedPlanTestPaths =
+      planInspectionEvidence.testPaths.size > 0
+        ? findUninspectedPlanTestPaths(plan, planInspectionEvidence)
+        : [];
     if (uninspectedPlanTestPaths.length > 0) {
       pushHarnessPrompt(
         messages,
@@ -720,6 +737,26 @@ async function runAgentLoop(
     planState = new PlanExecutionState(plan);
     usePlanExecutionPrompt();
     return "started";
+  };
+
+  const handleAssembledPlanWithFallback = (
+    plan: ParsedPlan,
+  ): AssembledPlanHandlingResult => {
+    const handling = handleAssembledPlan(plan);
+    if (handling !== "retry") {
+      planAssemblyValidationRetries = 0;
+      return handling;
+    }
+
+    planAssemblyValidationRetries += 1;
+    if (planAssemblyValidationRetries < MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES) {
+      return handling;
+    }
+
+    const fallbackPlan = buildFallbackPlanForTask(opts.prompt);
+    if (!fallbackPlan) return handling;
+    meta("using fallback host-tool plan after repeated invalid amendments");
+    return handleAssembledPlan(fallbackPlan);
   };
 
   const harnessMode = opts.harnessMode ?? "active";
@@ -1019,12 +1056,28 @@ async function runAgentLoop(
           planAssemblyState = assembled.state;
           messages.push({ role: "assistant", content: buffer });
           if (assembled.kind === "accepted") {
+            if (planAssemblyValidationActive) {
+              const plan = finalizePlanAssembly(assembled.state);
+              if (!plan) {
+                pushHarnessPrompt(
+                  messages,
+                  "plan assembly",
+                  assembled.nextPrompt,
+                );
+                continue;
+              }
+              const handling = handleAssembledPlanWithFallback(plan);
+              planAssemblyValidationActive = handling === "retry";
+              if (handling === "retry") continue;
+              if (handling === "done") return;
+            }
             if (opts.planCompletionMode !== "model-done") {
               const executablePlan = finalizeExecutablePlanAssembly(
                 assembled.state,
               );
               if (executablePlan) {
-                const handling = handleAssembledPlan(executablePlan);
+                const handling = handleAssembledPlanWithFallback(executablePlan);
+                planAssemblyValidationActive = handling === "retry";
                 if (handling === "retry") continue;
                 if (handling === "done") return;
               } else {
@@ -1047,7 +1100,8 @@ async function runAgentLoop(
             );
             continue;
           } else {
-            const handling = handleAssembledPlan(assembled.plan);
+            const handling = handleAssembledPlanWithFallback(assembled.plan);
+            planAssemblyValidationActive = handling === "retry";
             if (handling === "retry") continue;
             if (handling === "done") return;
           }
@@ -1076,10 +1130,32 @@ async function runAgentLoop(
       const prematureVerify = parseVerifyResult(buffer);
       if (prematureVerify) {
         const forcedReason = forcedVerifyFailureReason(
-          planState.currentVerifyCriterion() ?? "",
+          planState.currentStepEvidenceCriterion() ?? "",
           stepEvidence,
         );
         messages.push({ role: "assistant", content: buffer });
+        if (prematureVerify.result === "fail") {
+          const failureReason =
+            prematureVerify.reason ?? forcedReason ?? "premature verify failure";
+          meta(`step attempt failed: ${failureReason}`);
+          const outcome = planState.failCurrentStepAttempt(failureReason);
+          logPlanEvents();
+          awaitingVerify = false;
+          resetStepAttemptTracking();
+          if (outcome === "abort" || planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            meta("done — plan complete");
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(messages, next.kind, next.text);
+          awaitingVerify = next.kind === "verify";
+          continue;
+        }
         if (forcedReason) {
           pushHarnessPrompt(
             messages,
@@ -1102,6 +1178,19 @@ async function runAgentLoop(
         prepareStepEvidence(next);
         pushHarnessPrompt(messages, next.kind, next.text);
         awaitingVerify = next.kind === "verify";
+        continue;
+      }
+      const incompleteReason = forcedVerifyFailureReason(
+        planState.currentStepEvidenceCriterion() ?? "",
+        stepEvidence,
+      );
+      if (incompleteReason) {
+        messages.push({ role: "assistant", content: buffer });
+        pushHarnessPrompt(
+          messages,
+          "step incomplete",
+          buildIncompleteStepPrompt(incompleteReason),
+        );
         continue;
       }
       messages.push({ role: "assistant", content: buffer });

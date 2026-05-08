@@ -52,11 +52,91 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
   const taskSentence = /[.!?]$/.test(trimmedTask)
     ? trimmedTask
     : trimmedTask + ".";
+  const requestedToolNames = findRequestedToolNames(trimmedTask);
+  const requestedToolGuidance =
+    requestedToolNames.length > 0
+      ? " Use the exact tool name " +
+        requestedToolNames.join(", ") +
+        " in every implementation, test, and verification step."
+      : "";
   return (
     PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX +
     taskSentence +
+    requestedToolGuidance +
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX
   );
+}
+
+export function findRequestedToolNames(text: string): string[] {
+  const names = new Set(text.match(/\bget_current_[a-z_]+\b/g) ?? []);
+  if (
+    /\bcurrent\s+working\s+directory\b/i.test(text) ||
+    /\bprocess\s+current\s+working\s+directory\b/i.test(text)
+  ) {
+    names.add("get_current_working_directory");
+  }
+  if (
+    /\bcurrent\s+date\s+time\b/i.test(text) ||
+    /\bcurrent\s+datetime\b/i.test(text)
+  ) {
+    names.add("get_current_datetime");
+  }
+  return [...names];
+}
+
+export function buildFallbackPlanForTask(task: string): ParsedPlan | null {
+  const requestedToolNames = findRequestedToolNames(task);
+  if (requestedToolNames.length !== 1) return null;
+  const toolName = requestedToolNames[0];
+  const testPath = testPathForRequestedTool(toolName);
+  if (!testPath) return null;
+
+  const steps: ParsedStep[] = [
+    {
+      name: "ground_tool",
+      prompt:
+        `Read src/main/tools.ts, Gemma.md, package.json, and ${testPath}.`,
+      verify:
+        `src/main/tools.ts, Gemma.md, package.json, and ${testPath} have been read.`,
+    },
+    {
+      name: "test_tool",
+      prompt:
+        `Read ${testPath}, preserve its existing Vitest style, add or update coverage for ${toolName} only if missing, then run pnpm test ${testPath}.`,
+      verify:
+        `${testPath} covers ${toolName}, and pnpm test ${testPath} has been run.`,
+    },
+    {
+      name: "confirm_implementation",
+      prompt:
+        `Read src/main/tools.ts and Gemma.md to confirm the ${toolName} implementation and documentation are present. If both files already contain ${toolName}, do not edit either file; summarize the existing implementation evidence instead.`,
+      verify: `src/main/tools.ts and Gemma.md contain ${toolName}.`,
+    },
+    {
+      name: "verify_tool",
+      prompt:
+        `First use run_bash with exactly pnpm test ${testPath}. Then run pnpm test and pnpm run build.`,
+      verify:
+        `pnpm test ${testPath}, pnpm test, and pnpm run build pass.`,
+    },
+  ];
+  const raw = stringify({ plan: { steps } }).trimEnd();
+  return {
+    steps,
+    raw,
+    start: 0,
+    end: raw.length,
+  };
+}
+
+function testPathForRequestedTool(toolName: string): string | null {
+  if (toolName === "get_current_working_directory") {
+    return "tests/main/currentWorkingDirectoryTool.test.ts";
+  }
+  if (toolName === "get_current_datetime") {
+    return "tests/main/currentDatetimeTool.test.ts";
+  }
+  return null;
 }
 
 export function applyPlanAssemblyResponse(

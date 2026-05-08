@@ -130,7 +130,7 @@ describe("validatePlanForExecution", () => {
         {
           name: "verify",
           prompt: "Run pnpm test and pnpm run build.",
-          verify: "Both commands pass.",
+          verify: "pnpm run build passes.",
         },
       ]),
     );
@@ -170,7 +170,7 @@ describe("validatePlanForExecution", () => {
           name: "verify",
           prompt:
             "Run pnpm test tests/currentWorkingDirectoryTool.test.ts, pnpm test, and pnpm run build.",
-          verify: "All three commands pass.",
+          verify: "pnpm run build passes.",
         },
       ]),
     );
@@ -211,7 +211,8 @@ describe("validatePlanForExecution", () => {
 
     expect(result).toEqual({
       valid: false,
-      reason: "Plan must name the exact test command it will run.",
+      reason:
+        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
     });
   });
 
@@ -251,7 +252,88 @@ describe("validatePlanForExecution", () => {
     expect(result).toEqual({
       valid: false,
       reason:
-        "Plan focused test command must use the same exact tests/main test file path that the test step creates or updates.",
+        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    });
+  });
+
+  it("rejects plans whose test-changing step omits the focused test command", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "ground_tool_creation",
+          prompt: "Read src/main/tools.ts and src/main/index.ts.",
+          verify: "src/main/tools.ts and src/main/index.ts have been read.",
+        },
+        {
+          name: "test_tool_implementation",
+          prompt:
+            "Update tests/main/tools.test.ts to cover get_current_working_directory.",
+          verify:
+            "tests/main/tools.test.ts covers get_current_working_directory.",
+        },
+        {
+          name: "implement_tool_and_verify",
+          prompt:
+            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
+          verify:
+            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+        },
+        {
+          name: "finalize_and_build",
+          prompt: "Run pnpm run build.",
+          verify: "pnpm run build completed successfully.",
+        },
+        {
+          name: "execute_test_and_build",
+          prompt:
+            "Run pnpm test tests/main/tools.test.ts and then run pnpm run build.",
+          verify: "The unit test passed, and pnpm run build completed successfully.",
+        },
+      ]),
+    );
+
+    expect(result).toEqual({
+      valid: false,
+      reason:
+        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    });
+  });
+
+  it("rejects command steps whose verify text omits the exact focused test command", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "ground",
+          prompt: "Read src/main/tools.ts and tests/main/tools.test.ts.",
+          verify: "src/main/tools.ts and tests/main/tools.test.ts have been read.",
+        },
+        {
+          name: "test",
+          prompt:
+            "Update tests/main/tools.test.ts to cover get_current_working_directory and run pnpm test tests/main/tools.test.ts.",
+          verify:
+            "pnpm test tests/main/tools.test.ts fails because get_current_working_directory is missing.",
+        },
+        {
+          name: "implement",
+          prompt:
+            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
+          verify:
+            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+        },
+        {
+          name: "verify",
+          prompt:
+            "Run pnpm test tests/main/tools.test.ts, pnpm test, and pnpm run build.",
+          verify: "The focused test, full test suite, and build pass.",
+        },
+      ]),
+    );
+
+    expect(result).toEqual({
+      valid: false,
+      reason:
+        "Every step that runs a focused test command must repeat the exact command in its verify field.",
     });
   });
 
@@ -282,7 +364,8 @@ describe("validatePlanForExecution", () => {
           name: "verify",
           prompt:
             "Run pnpm test tests/main/projectScriptTool.test.ts, pnpm test, and pnpm run build.",
-          verify: "All three commands pass.",
+          verify:
+            "pnpm test tests/main/projectScriptTool.test.ts, pnpm test, and pnpm run build pass.",
         },
       ]),
     );

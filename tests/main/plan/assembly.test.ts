@@ -4,9 +4,11 @@ import {
   PLAN_ASSEMBLY_NEXT_PROMPT,
   applyPlanAssemblyResponse,
   buildPlanAssemblyInitialPrompt,
+  buildFallbackPlanForTask,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
+  findRequestedToolNames,
 } from "../../../src/main/plan/assembly";
 import { validatePlanForExecution } from "../../../src/main/plan/validation";
 
@@ -49,8 +51,37 @@ describe("iterative plan assembly", () => {
     );
 
     expect(prompt).toBe(
-      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory. Use the exact tool name get_current_working_directory in every implementation, test, and verification step. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
     );
+  });
+
+  it("infers requested get_current tool names from plain-language tasks", () => {
+    expect(
+      findRequestedToolNames(
+        "create a new LLM tool to retrieve the current working directory",
+      ),
+    ).toEqual(["get_current_working_directory"]);
+  });
+
+  it("builds a concrete fallback plan for a known host tool request", () => {
+    const plan = buildFallbackPlanForTask(
+      "create a new LLM tool to retrieve the current working directory",
+    );
+
+    expect(plan).not.toBeNull();
+    if (!plan) return;
+    expect(plan.raw).toContain("get_current_working_directory");
+    expect(plan.raw).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+    expect(plan.steps[1]?.prompt).toContain("preserve its existing Vitest style");
+    expect(plan.steps[2]?.name).toBe("confirm_implementation");
+    expect(plan.steps[2]?.prompt).toContain(
+      "confirm the get_current_working_directory implementation",
+    );
+    expect(plan.steps[2]?.prompt).toContain("do not edit either file");
+    expect(plan.steps[3]?.prompt).toContain(
+      "First use run_bash with exactly pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+    expect(validatePlanForExecution(plan)).toEqual({ valid: true });
   });
 
   it("does not wrap an already formatted expert prompt", () => {

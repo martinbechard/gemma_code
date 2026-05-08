@@ -71,13 +71,16 @@ import {
 import {
   PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
+  buildFallbackPlanForTask,
   buildPlanAssemblyInitialPrompt,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
+  finalizePlanAssembly,
   isPlanAssemblyDoneResponse,
   type PlanAssemblyState,
 } from "./plan/assembly";
 import {
+  buildIncompleteStepPrompt,
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   isRecoverableEditFailureResult,
@@ -414,6 +417,7 @@ async function handleRepairModel(model: string): Promise<void> {
 
 const MAX_TOOL_ROUNDS_CHAT = 6;
 const MAX_TOOL_ROUNDS_CODE = 40;
+const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
@@ -715,6 +719,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     let planAssemblyState: PlanAssemblyState | null = topLevelPlanHarnessEnabled
       ? createPlanAssemblyState()
       : null;
+    let planAssemblyValidationActive = false;
+    let planAssemblyValidationRetries = 0;
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
     let stepEvidence = createPlanStepEvidence();
@@ -730,6 +736,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       if (prompt.stepId === stepEvidenceStepId) return;
       stepEvidence = createPlanStepEvidence();
       stepEvidenceStepId = prompt.stepId;
+      lastActionKey = null;
+      repeatedActionCount = 0;
+      pendingEditRecoveryPath = null;
     };
 
     const resetStepAttemptTracking = (): void => {
@@ -1348,6 +1357,70 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           const assembled = applyPlanAssemblyResponse(planAssemblyState, buffer);
           planAssemblyState = assembled.state;
           if (assembled.kind === "accepted") {
+            if (planAssemblyValidationActive) {
+              const amendedPlan = finalizePlanAssembly(assembled.state);
+              if (amendedPlan) {
+                const validation = validatePlanForExecution(amendedPlan);
+                if (!validation.valid) {
+                  planAssemblyValidationRetries += 1;
+                  const fallbackPlan =
+                    planAssemblyValidationRetries >=
+                    MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                      ? buildFallbackPlanForTask(planningTask)
+                      : null;
+                  if (fallbackPlan) {
+                    planAssemblyValidationActive = false;
+                    planAssemblyValidationRetries = 0;
+                    savePlan(req.conversationId, fallbackPlan.raw);
+                    emit({
+                      type: "plan_proposed",
+                      steps: fallbackPlan.steps.map((s) => ({
+                        name: s.name,
+                        prompt: s.prompt,
+                        verify: s.verify,
+                      })),
+                    });
+                    emit({ type: "activity", activity: { kind: "idle" } });
+                    emit({ type: "done" });
+                    return;
+                  }
+                  const validationPrompt = [
+                    "The assembled plan is not executable yet: " +
+                      validation.reason,
+                    "",
+                    "Executable-plan validation gates:",
+                    ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+                    "",
+                    "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
+                    "Do not describe rewriting, correcting, or ensuring a previous step.",
+                    "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+                  ].join("\n");
+                  baseMessages.push({ role: "assistant", content: buffer });
+                  pushPlanningHarnessPrompt(
+                    "plan assembly validation",
+                    validationPrompt,
+                  );
+                  emit({
+                    type: "activity",
+                    activity: { kind: "thinking", chars: 0 },
+                  });
+                  continue;
+                }
+                planAssemblyValidationActive = false;
+                savePlan(req.conversationId, amendedPlan.raw);
+                emit({
+                  type: "plan_proposed",
+                  steps: amendedPlan.steps.map((s) => ({
+                    name: s.name,
+                    prompt: s.prompt,
+                    verify: s.verify,
+                  })),
+                });
+                emit({ type: "activity", activity: { kind: "idle" } });
+                emit({ type: "done" });
+                return;
+              }
+            }
             const executablePlan = finalizeExecutablePlanAssembly(assembled.state);
             if (executablePlan) {
               baseMessages.push({ role: "assistant", content: buffer });
@@ -1386,6 +1459,29 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
           const validation = validatePlanForExecution(assembled.plan);
           if (!validation.valid) {
+            planAssemblyValidationActive = true;
+            planAssemblyValidationRetries += 1;
+            const fallbackPlan =
+              planAssemblyValidationRetries >=
+              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+                ? buildFallbackPlanForTask(planningTask)
+                : null;
+            if (fallbackPlan) {
+              planAssemblyValidationActive = false;
+              planAssemblyValidationRetries = 0;
+              savePlan(req.conversationId, fallbackPlan.raw);
+              emit({
+                type: "plan_proposed",
+                steps: fallbackPlan.steps.map((s) => ({
+                  name: s.name,
+                  prompt: s.prompt,
+                  verify: s.verify,
+                })),
+              });
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
             const validationPrompt = [
               "The assembled plan is not executable yet: " +
                 validation.reason,
@@ -1395,7 +1491,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               "",
               "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
               "Do not describe rewriting, correcting, or ensuring a previous step.",
-              "The new step's prompt and verify fields must contain the exact missing command or file path text.",
+              "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
             ].join("\n");
             baseMessages.push({ role: "assistant", content: buffer });
             pushPlanningHarnessPrompt("plan assembly validation", validationPrompt);
@@ -1449,12 +1545,44 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         const prematureVerify = parseVerifyResult(buffer);
         if (prematureVerify) {
           const forcedReason = forcedVerifyFailureReason(
-            planState.currentVerifyCriterion() ?? "",
+            planState.currentStepEvidenceCriterion() ?? "",
             stepEvidence,
           );
           flushBufferToUI();
           replaceBodyStripped();
           baseMessages.push({ role: "assistant", content: buffer });
+          if (prematureVerify.result === "fail") {
+            const failureReason =
+              prematureVerify.reason ??
+              forcedReason ??
+              "premature verify failure";
+            const outcome = planState.failCurrentStepAttempt(failureReason);
+            drainPlanEvents();
+            awaitingVerify = false;
+            resetStepAttemptTracking();
+            if (outcome === "abort" || planState.state !== "running") {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            const next = planState.nextPrompt();
+            if (!next) {
+              emit({ type: "activity", activity: { kind: "idle" } });
+              emit({ type: "done" });
+              return;
+            }
+            prepareStepEvidence(next);
+            pushHarnessPrompt(
+              next.kind === "verify" ? "plan verify" : "plan step",
+              next.text,
+            );
+            awaitingVerify = next.kind === "verify";
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
+          }
           if (!forcedReason) {
             planState.finishStepBody();
             drainPlanEvents();
@@ -1484,6 +1612,21 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           pushHarnessPrompt(
             "premature verify",
             buildPrematureVerifyPrompt(forcedReason),
+          );
+          emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+          continue;
+        }
+        const incompleteReason = forcedVerifyFailureReason(
+          planState.currentStepEvidenceCriterion() ?? "",
+          stepEvidence,
+        );
+        if (incompleteReason) {
+          flushBufferToUI();
+          emit({ type: "set_assistant_content", text: "" });
+          baseMessages.push({ role: "assistant", content: buffer });
+          pushHarnessPrompt(
+            "step incomplete",
+            buildIncompleteStepPrompt(incompleteReason),
           );
           emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
           continue;

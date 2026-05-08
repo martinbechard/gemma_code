@@ -43,6 +43,8 @@ describe("PlanExecutionState — single step happy path", () => {
     expect(p1?.text).toMatch(/read.*canonical/i);
     expect(p1?.text).toMatch(/multiple files to read/i);
     expect(p1?.text).toMatch(/gather.*evidence/i);
+    expect(p1?.text).toContain("run that exact command with run_bash");
+    expect(p1?.text).toContain("preserve the current file content");
     expect(p1?.text).toMatch(/required write, edit, or command action fails/i);
 
     s.finishStepBody();

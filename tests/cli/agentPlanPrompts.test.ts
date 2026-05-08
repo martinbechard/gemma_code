@@ -4,6 +4,7 @@ import {
   buildEditFailureRecoveryPrompt,
   buildPlanAmendmentPrompt,
   buildPrematureVerifyPrompt,
+  buildIncompleteStepPrompt,
   buildRepeatedActionPrompt,
   buildRepeatedEditFailureRecoveryPrompt,
   buildRepeatedRecoveryReadPrompt,
@@ -208,6 +209,16 @@ describe("buildPlanAmendmentPrompt", () => {
     );
     expect(prompt).toContain("Do not replace it with a different tool name");
   });
+
+  it("requires exact missing commands in both prompt and verify fields", () => {
+    const prompt = buildPlanAmendmentPrompt(
+      "Plan must name the exact test command it will run.",
+    );
+
+    expect(prompt).toContain(
+      "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+    );
+  });
 });
 
 describe("shouldHandlePlanAssemblyBuffer", () => {
@@ -251,6 +262,14 @@ describe("findRequestedToolNames", () => {
     expect(
       findRequestedToolNames(
         "Name the tool get_current_working_directory, not a generic one.",
+      ),
+    ).toEqual(["get_current_working_directory"]);
+  });
+
+  it("infers the current working directory tool name from plain language", () => {
+    expect(
+      findRequestedToolNames(
+        "create a new LLM tool to retrieve the current working directory",
       ),
     ).toEqual(["get_current_working_directory"]);
   });
@@ -307,6 +326,19 @@ describe("buildPrematureVerifyPrompt", () => {
     expect(prompt).toContain("verify tag while executing a step body");
     expect(prompt).toContain("Only emit verify tags after the host sends");
     expect(prompt).toContain("missing read_file evidence for: package.json");
+    expect(prompt).toContain("next required action tag");
+  });
+});
+
+describe("buildIncompleteStepPrompt", () => {
+  it("forces the next action when a step summary lacks required evidence", () => {
+    const prompt = buildIncompleteStepPrompt(
+      "missing read_file evidence for: src/main/index.ts",
+    );
+
+    expect(prompt).toContain("current plan step is not complete");
+    expect(prompt).toContain("missing read_file evidence for: src/main/index.ts");
+    expect(prompt).toContain("Do not invent tool results");
     expect(prompt).toContain("next required action tag");
   });
 });
