@@ -170,6 +170,28 @@ describe("iterative plan assembly", () => {
     expect(duplicate.reason).toContain("Duplicate step name");
   });
 
+  it("tells the model how to recover from a duplicate step name", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      implementStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const duplicate = applyPlanAssemblyResponse(first.state, implementStep);
+
+    expect(duplicate.kind).toBe("rejected");
+    if (duplicate.kind !== "rejected") return;
+    expect(duplicate.retryPrompt).toContain(
+      "Already accepted step names: implement.",
+    );
+    expect(duplicate.retryPrompt).toContain(
+      "The new step name must be unique and must not reuse any accepted step name.",
+    );
+    expect(duplicate.retryPrompt).toContain(
+      'The rejected name "implement" is already used.',
+    );
+  });
+
   it("finalizes to null until at least one step exists", () => {
     expect(finalizePlanAssembly(createPlanAssemblyState())).toBeNull();
   });

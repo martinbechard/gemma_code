@@ -79,9 +79,14 @@ import {
 import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
+  isRecoverableEditFailureResult,
   recordPlanToolEvidence,
 } from "./plan/evidence";
 import { killAllBackgroundTasks } from "./backgroundTasks";
+import {
+  createExecutionLogger,
+  executionLogPath,
+} from "./executionLog";
 
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
@@ -423,7 +428,7 @@ const INCOMPLETE_ACTION_NUDGE =
 
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
-    "The edit_file action failed because old_string was not found.",
+    "The edit_file action failed because old_string could not be applied safely.",
     "Before retrying the edit, running tests, or verifying, reread the target file and use its exact current contents.",
     "Your next response must be exactly this action tag and nothing else:",
     `<action name="read_file">`,
@@ -443,7 +448,7 @@ function buildRepeatedEditFailureRecoveryPrompt(
       : oldString;
   return [
     `The same edit_file old_string failed ${attemptCount} times for ${path}.`,
-    "That exact old_string is not in the current file. Do not use it again.",
+    "That exact old_string is invalid or ambiguous for this file. Do not use it again.",
     "Use the latest read_file result for this path already in the conversation.",
     "Your next response must be exactly one write_file action for this same path and nothing else.",
     "The write_file content must preserve the current file content and apply the requested change.",
@@ -577,7 +582,23 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
   const abort = new AbortController();
   chatAbortControllers.set(req.conversationId, abort);
 
-  const emit = (chunk: StreamChunk): void => send(channel, chunk);
+  const logExecution = createExecutionLogger(req.debugLogging === true, {
+    conversationId: req.conversationId,
+    mode: req.mode,
+    model: req.model,
+  });
+  logExecution("session_start", {
+    messageCount: req.messages.length,
+    enableTools: req.enableTools,
+    workingDir: req.workingDir,
+    codeSubmode: req.codeSubmode,
+    executePlan: req.executePlan,
+  });
+
+  const emit = (chunk: StreamChunk): void => {
+    logExecution("stream_chunk", chunk);
+    send(channel, chunk);
+  };
   const emitRuntimeActivity = (label: string, detail?: string): void => {
     emit({
       type: "activity",
@@ -595,9 +616,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
     let planExecutionSystemPrompt: string | null = null;
     const emitSystemPrompt = (label: string, content: string): void => {
+      logExecution("system_prompt", { label, content });
       emit({ type: "system_prompt", label, content });
     };
-    const pushHarnessPrompt = (_label: string, content: string): void => {
+    const pushHarnessPrompt = (label: string, content: string): void => {
+      logExecution("harness_prompt", { label, content });
       baseMessages.push({ role: "user", content });
     };
 
@@ -801,6 +824,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         const cleaned = cleanFileContent(partial, livePath);
         if (cleaned !== lastEmittedContent) {
           lastEmittedContent = cleaned;
+          logExecution("file_streaming", {
+            path: livePath,
+            content: cleaned,
+            done: false,
+          });
           send("file:streaming", {
             conversationId: req.conversationId,
             path: livePath,
@@ -838,7 +866,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       // so the human can inspect what the model actually receives. Overwritten
       // every round so the file always reflects the latest call.
       try {
-        saveLastPrompt(baseMessages, { mode: req.mode, model: req.model });
+        const promptPath = saveLastPrompt(baseMessages, {
+          mode: req.mode,
+          model: req.model,
+        });
+        logExecution("model_request", {
+          promptPath,
+          messageCount: baseMessages.length,
+        });
       } catch {
         // debug aid only; never let a write failure abort the chat round
       }
@@ -847,6 +882,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         messages: baseMessages,
         signal: abort.signal,
       })) {
+        logExecution("model_chunk", chunk);
         if (chunk.content) {
           if (firstToken) {
             firstToken = false;
@@ -964,6 +1000,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 ? { parentStepId: planState.currentStepId }
                 : {}),
             };
+            logExecution("tool_call", call);
             emit({ type: "tool_call", call });
             emit({
               type: "activity",
@@ -985,10 +1022,20 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             }
             try {
               result = await runTool(found.name, found.args, ctx);
+              logExecution("tool_result", {
+                id: call.id,
+                tool: found.name,
+                result,
+              });
               emit({ type: "tool_result", id: call.id, result });
             } catch (e) {
               result = `Error: ${(e as Error).message}`;
               hadError = true;
+              logExecution("tool_result", {
+                id: call.id,
+                tool: found.name,
+                error: result,
+              });
               emit({ type: "tool_result", id: call.id, error: result });
             }
 
@@ -1005,8 +1052,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             }
             if (
               found.name === "edit_file" &&
-              result.startsWith("Error editing") &&
-              result.includes("old_string not found") &&
+              isRecoverableEditFailureResult(result) &&
               typeof found.args.path === "string"
             ) {
               pendingEditRecoveryPath = found.args.path;
@@ -1031,13 +1077,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             }
             if (found.name === "edit_file") {
               const failedEdit = buildFailedEditKey(found.args);
-              if (failedEdit && !result.includes("old_string not found")) {
+              if (failedEdit && !isRecoverableEditFailureResult(result)) {
                 failedEditCounts.delete(failedEdit.key);
               }
               if (
                 typeof found.args.path === "string" &&
                 found.args.path === pendingEditRecoveryPath &&
-                !result.includes("old_string not found")
+                !isRecoverableEditFailureResult(result)
               ) {
                 pendingEditRecoveryPath = null;
               }
@@ -1062,6 +1108,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 );
                 executedAction = true;
                 if (livePath) {
+                  logExecution("file_streaming", {
+                    path: livePath,
+                    content: lastEmittedContent,
+                    done: true,
+                  });
                   send("file:streaming", {
                     conversationId: req.conversationId,
                     path: livePath,
@@ -1082,7 +1133,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               pushHarnessPrompt(
                 "repeated action",
                 `You repeated the same ${found.name} action ${repeatedActionCount} times. ` +
-                  "Use the tool result already provided and move to the next distinct action or emit a concrete YAML plan. " +
+                  "Use the tool result already provided and move to the next distinct action. " +
+                  "Do not emit a YAML plan while executing a plan step. " +
                   `Do not call ${found.name} with the same parameters again.`,
               );
             }
@@ -1099,6 +1151,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               );
             }
             if (livePath) {
+              logExecution("file_streaming", {
+                path: livePath,
+                content: lastEmittedContent,
+                done: true,
+              });
               send("file:streaming", {
                 conversationId: req.conversationId,
                 path: livePath,
@@ -1545,6 +1602,8 @@ app.whenReady().then(async () => {
     const c = chatAbortControllers.get(conversationId);
     if (c) c.abort();
   });
+
+  ipcMain.handle("debug:execution-log-path", async () => executionLogPath());
 
   ipcMain.handle("tools:list", async () => {
     return Object.values(TOOLS).map((t) => ({

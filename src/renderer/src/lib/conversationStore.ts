@@ -6,8 +6,9 @@ import type { AgentMode } from "@shared/types";
 import type { ChatMessage, SystemPromptSnapshot } from "@shared/types";
 
 export const STORAGE_KEY = "gemma-chat:conversations:v2";
-const AUTO_PLANNING_SUMMARY_ID = "auto-planning-summary";
+export const AUTO_PLANNING_SUMMARY_ID = "auto-planning-summary";
 const AUTO_EXECUTION_SEPARATOR_ID = "auto-execution-separator";
+const NO_EXPANDED_PLANNING_SUMMARIES: ReadonlySet<string> = new Set();
 
 // Minimal shape this module needs from a persisted conversation. Components
 // pass the full Conversation type at runtime; the lite shape exists so tests
@@ -71,12 +72,19 @@ export function isModeLocked(c: PersistedConversationLite): boolean {
 
 export type MessageRenderItem =
   | { kind: "message"; message: ChatMessage }
-  | { kind: "planning-summary"; id: string; messages: ChatMessage[] }
+  | {
+      kind: "planning-summary";
+      id: string;
+      messages: ChatMessage[];
+      expanded: boolean;
+    }
   | { kind: "execution-separator"; id: string };
 
 export function buildMessageRenderItems(
   messages: ChatMessage[],
   collapsePlanning: boolean,
+  expandedPlanningSummaryIds: ReadonlySet<string> =
+    NO_EXPANDED_PLANNING_SUMMARIES,
 ): MessageRenderItem[] {
   const visibleMessages = messages.filter(shouldDisplayConversationMessage);
   const hasExecution = visibleMessages.some(
@@ -98,11 +106,25 @@ export function buildMessageRenderItems(
 
     if (!separatorInserted && message.phase === "execution") {
       if (planningMessages.length > 0) {
+        const expanded = expandedPlanningSummaryIds.has(
+          AUTO_PLANNING_SUMMARY_ID,
+        );
         items.push({
           kind: "planning-summary",
           id: AUTO_PLANNING_SUMMARY_ID,
           messages: planningMessages,
+          expanded,
         });
+        if (expanded) {
+          items.push(
+            ...planningMessages.map(
+              (planningMessage): MessageRenderItem => ({
+                kind: "message",
+                message: planningMessage,
+              }),
+            ),
+          );
+        }
       }
       items.push({ kind: "execution-separator", id: AUTO_EXECUTION_SEPARATOR_ID });
       separatorInserted = true;

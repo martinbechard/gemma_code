@@ -21,6 +21,8 @@ The host validates the assembled plan before executing it. Make the validation d
 
 - At least four accepted steps are required before execution: grounding, test, implementation, and verification.
 - Step names are not fixed, but the step name, prompt, or verify text must include the words the validator looks for. The assembled plan must contain a grounding word such as ground, read, inspect, or list; a testing word such as test or spec; an implementation word such as implement, edit, add, or update; and a verification word such as verify, build, pnpm, npm, or run.
+- Every accepted step name must be unique.
+- If a response is rejected for a duplicate step name, the retry must use a different name from the accepted step names.
 - The assembled plan must name one exact tests/main test file path that ends in .test.ts.
 - The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.
 - The assembled plan must name the exact build command it will run: pnpm run build or npm run build.

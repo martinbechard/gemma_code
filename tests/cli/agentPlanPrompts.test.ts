@@ -83,7 +83,8 @@ describe("buildRepeatedActionPrompt", () => {
       2,
     );
 
-    expect(prompt).toContain("emit exactly one YAML plan step");
+    expect(prompt).toContain("move to the next distinct action");
+    expect(prompt).toContain("Do not emit a YAML plan");
     expect(prompt).not.toContain("Your next response must be exactly this action tag");
   });
 
@@ -271,7 +272,7 @@ describe("buildEditFailureRecoveryPrompt", () => {
       "tests/main/currentDatetimeTool.test.ts",
     );
 
-    expect(prompt).toContain("old_string was not found");
+    expect(prompt).toContain("old_string could not be applied safely");
     expect(prompt).toContain("<action name=\"read_file\">");
     expect(prompt).toContain(
       "<path>tests/main/currentDatetimeTool.test.ts</path>",

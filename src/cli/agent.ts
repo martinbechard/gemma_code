@@ -38,6 +38,7 @@ import {
 import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
+  isRecoverableEditFailureResult,
   recordPlanToolEvidence,
 } from "../main/plan/evidence";
 import { killBackgroundTasksForConversation } from "../main/backgroundTasks";
@@ -304,7 +305,7 @@ export function buildRepeatedActionPrompt(
       ...buildInspectionActionForMissing(missingEvidence),
     ].join("\n");
   }
-  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action, or emit exactly one YAML plan step. Do not call ${actionName} with the same parameters again.`;
+  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action. Do not emit a YAML plan while recovering from a repeated action. Do not call ${actionName} with the same parameters again.`;
 }
 
 export function buildCodeNoProgressPrompt(
@@ -371,7 +372,7 @@ export function buildPlanAmendmentPrompt(
 
 export function buildEditFailureRecoveryPrompt(path: string): string {
   return [
-    "The edit_file action failed because old_string was not found.",
+    "The edit_file action failed because old_string could not be applied safely.",
     "Before retrying the edit, running tests, or verifying, reread the target file and use its exact current contents.",
     "Your next response must be exactly this action tag and nothing else:",
     `<action name="read_file">`,
@@ -391,7 +392,7 @@ export function buildRepeatedEditFailureRecoveryPrompt(
       : oldString;
   return [
     `The same edit_file old_string failed ${attemptCount} times for ${path}.`,
-    "That exact old_string is not in the current file. Do not use it again.",
+    "That exact old_string is invalid or ambiguous for this file. Do not use it again.",
     "Use the latest read_file result for this path already in the conversation.",
     "Your next response must be exactly one write_file action for this same path and nothing else.",
     "The write_file content must preserve the current file content and apply the requested change.",
@@ -828,8 +829,7 @@ async function runAgentLoop(
       planOnlyNudges = 0;
       if (
         action.name === "edit_file" &&
-        result.startsWith("Error editing") &&
-        result.includes("old_string not found") &&
+        isRecoverableEditFailureResult(result) &&
         typeof action.args.path === "string"
       ) {
         pendingEditRecoveryPath = action.args.path;
@@ -857,12 +857,13 @@ async function runAgentLoop(
       }
       if (action.name === "edit_file") {
         const failedEdit = buildFailedEditKey(action.args);
-        if (failedEdit) {
+        if (failedEdit && !isRecoverableEditFailureResult(result)) {
           failedEditCounts.delete(failedEdit.key);
         }
         if (
           typeof action.args.path === "string" &&
-          action.args.path === pendingEditRecoveryPath
+          action.args.path === pendingEditRecoveryPath &&
+          !isRecoverableEditFailureResult(result)
         ) {
           pendingEditRecoveryPath = null;
         }

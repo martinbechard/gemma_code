@@ -60,6 +60,18 @@ describe("codeSystemPrompt", () => {
     );
   });
 
+  it("teaches execute mode that ambiguous old_string failures require a different edit path", () => {
+    const executePrompt = readFileSync(
+      join(process.cwd(), "Gemma.execute.md"),
+      "utf8",
+    );
+
+    expect(executePrompt).toContain(
+      "old_string was not found or appears multiple times",
+    );
+    expect(executePrompt).toContain("do not retry the same old_string");
+  });
+
   it("states the concrete executable-plan validation gates in plan mode", () => {
     const planPrompt = readFileSync(
       join(process.cwd(), "Gemma.plan.md"),
@@ -71,6 +83,10 @@ describe("codeSystemPrompt", () => {
     );
     expect(planPrompt).toContain(
       "Step names are not fixed, but the step name, prompt, or verify text must include the words the validator looks for.",
+    );
+    expect(planPrompt).toContain("Every accepted step name must be unique.");
+    expect(planPrompt).toContain(
+      "If a response is rejected for a duplicate step name, the retry must use a different name from the accepted step names.",
     );
     expect(planPrompt).toContain("ground, read, inspect, or list");
     expect(planPrompt).toContain("test or spec");

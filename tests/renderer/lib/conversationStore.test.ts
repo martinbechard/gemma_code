@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  AUTO_PLANNING_SUMMARY_ID,
   buildMessageRenderItems,
   pickStartupModel,
   isModeLocked,
@@ -166,6 +167,49 @@ describe("prompt display helpers", () => {
     });
   });
 
+  it("can expand a collapsed planning summary before the execution separator", () => {
+    const items = buildMessageRenderItems(
+      [
+        message("u1", "user", "planning"),
+        message("h1", "harness", "planning"),
+        message("a1", "assistant", "planning"),
+        message("a2", "assistant", "execution"),
+      ],
+      true,
+      new Set([AUTO_PLANNING_SUMMARY_ID]),
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "planning-summary",
+      "message",
+      "message",
+      "message",
+      "execution-separator",
+      "message",
+    ]);
+    expect(items[0]).toMatchObject({
+      kind: "planning-summary",
+      expanded: true,
+    });
+    expect(
+      items
+        .filter((item) => item.kind === "message")
+        .map((item) => item.message.id),
+    ).toEqual(["u1", "h1", "a1", "a2"]);
+  });
+
+  it("wires the planning summary row as an expandable control", () => {
+    const chatSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+      "utf8",
+    );
+
+    expect(chatSource).toContain("togglePlanningSummary");
+    expect(chatSource).toContain("aria-expanded={expanded}");
+    expect(chatSource).toContain("Show planning");
+    expect(chatSource).toContain("Hide planning");
+  });
+
   it("does not keep a live prompt-loaded marker in UI or CLI source", () => {
     for (const path of [
       "src/renderer/src/components/Chat.tsx",
@@ -208,6 +252,17 @@ describe("prompt display helpers", () => {
     expect(messageSource).toContain(
       "Tool calls stay outside showDetails so repeated actions remain separate timeline bubbles.",
     );
+  });
+
+  it("wires the execution logging toggle into chat requests", () => {
+    const chatSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+      "utf8",
+    );
+
+    expect(chatSource).toContain("executionLogging");
+    expect(chatSource).toContain("debugLogging: executionLogging");
+    expect(chatSource).toContain("onToggleExecutionLogging");
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

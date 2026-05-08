@@ -110,7 +110,9 @@ export function applyPlanAssemblyResponse(
     return rejected(state, stepValidation.reason);
   }
   if (state.steps.some((existing) => existing.name === step.name)) {
-    return rejected(state, 'Duplicate step name "' + step.name + '".');
+    return rejected(state, 'Duplicate step name "' + step.name + '".', {
+      duplicateStepName: step.name,
+    });
   }
 
   return {
@@ -145,13 +147,32 @@ export function finalizeExecutablePlanAssembly(
 function rejected(
   state: PlanAssemblyState,
   reason: string,
+  options: { duplicateStepName?: string } = {},
 ): PlanAssemblyResult {
+  const acceptedStepNames = state.steps.map((step) => step.name);
+  const acceptedNameGuidance =
+    acceptedStepNames.length > 0
+      ? [
+          "",
+          `Already accepted step names: ${acceptedStepNames.join(", ")}.`,
+          "The new step name must be unique and must not reuse any accepted step name.",
+        ]
+      : [];
+  const duplicateNameGuidance = options.duplicateStepName
+    ? [
+        `The rejected name "${options.duplicateStepName}" is already used.`,
+        `Do not return another step named "${options.duplicateStepName}".`,
+        "Use a task-specific name that has not appeared in the accepted plan.",
+      ]
+    : [];
   return {
     kind: "rejected",
     state,
     reason,
     retryPrompt: [
       "The previous planning response was rejected: " + reason,
+      ...acceptedNameGuidance,
+      ...duplicateNameGuidance,
       "",
       "Return exactly one YAML plan containing one step, with name, prompt, and verify string fields.",
     ].join("\n"),

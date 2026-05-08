@@ -46,6 +46,7 @@ interface Conversation {
 // is the UI-level discriminant the renderer carries around.
 type PillKey = "chat" | "build" | "code";
 const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
+const EXECUTION_LOGGING_STORAGE_KEY = "gemma-chat:execution-logging";
 
 function pillKeyOf(c: Pick<Conversation, "mode" | "workingDir">): PillKey {
   if (c.mode === "chat") return "chat";
@@ -126,6 +127,14 @@ export default function Chat({ model, onSwitchModel }: Props) {
   });
   const [activeId, setActiveId] = useState<string>(() => conversations[0].id);
   const [streaming, setStreaming] = useState(false);
+  const [executionLogging, setExecutionLogging] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(EXECUTION_LOGGING_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [executionLogPath, setExecutionLogPath] = useState("");
   const streamRef = useRef<{ abort: boolean }>({ abort: false });
 
   const activeConversation = useMemo(
@@ -136,6 +145,24 @@ export default function Chat({ model, onSwitchModel }: Props) {
   useEffect(() => {
     saveConversations(conversations);
   }, [conversations]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        EXECUTION_LOGGING_STORAGE_KEY,
+        executionLogging ? "true" : "false",
+      );
+    } catch {
+      // ignore
+    }
+  }, [executionLogging]);
+
+  useEffect(() => {
+    window.api
+      .executionLogPath()
+      .then(setExecutionLogPath)
+      .catch(() => setExecutionLogPath(""));
+  }, []);
 
   function updateActive(fn: (c: Conversation) => Conversation): void {
     setConversations((cs) => cs.map((c) => (c.id === activeId ? fn(c) : c)));
@@ -284,6 +311,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           mode: conv.mode,
           workingDir: conv.workingDir,
           codeSubmode: conv.workingDir ? codeSubmode : undefined,
+          debugLogging: executionLogging,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -472,6 +500,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           workingDir: conv.workingDir,
           codeSubmode: conv.workingDir ? codeSubmodeOf(conv) : undefined,
           executePlan: true,
+          debugLogging: executionLogging,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -526,6 +555,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
             onSelectCodeSubmode={selectCodeSubmode}
             onToggleCanvas={toggleCanvas}
             onSwitchModel={onSwitchModel}
+            executionLogging={executionLogging}
+            executionLogPath={executionLogPath}
+            onToggleExecutionLogging={() =>
+              setExecutionLogging((current) => !current)
+            }
           />
           <MessageList
             messages={activeConversation.messages}
@@ -626,6 +660,9 @@ function Header({
   onSelectCodeSubmode,
   onToggleCanvas,
   onSwitchModel,
+  executionLogging,
+  executionLogPath,
+  onToggleExecutionLogging,
 }: {
   model: string;
   pillKey: PillKey;
@@ -637,6 +674,9 @@ function Header({
   onSelectCodeSubmode: (next: CodeSubmode) => void;
   onToggleCanvas: () => void;
   onSwitchModel: (model: string) => void;
+  executionLogging: boolean;
+  executionLogPath: string;
+  onToggleExecutionLogging: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -721,6 +761,27 @@ function Header({
             </select>
           </label>
         )}
+        <button
+          type="button"
+          onClick={onToggleExecutionLogging}
+          title={
+            executionLogging
+              ? `Execution logging on: ${executionLogPath}`
+              : `Execution logging off: ${executionLogPath}`
+          }
+          className={`flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11.5px] transition ${
+            executionLogging
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+              : "border-white/[0.08] bg-white/[0.03] text-ink-400 hover:bg-white/[0.05] hover:text-ink-100"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              executionLogging ? "bg-emerald-300" : "bg-ink-500"
+            }`}
+          />
+          Log
+        </button>
         <div className="relative" ref={pickerRef}>
           <button
             onClick={() => setPickerOpen((o) => !o)}
@@ -868,6 +929,9 @@ function MessageList({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  const [expandedPlanningSummaryIds, setExpandedPlanningSummaryIds] = useState<
+    Set<string>
+  >(() => new Set());
 
   useEffect(() => {
     const el = ref.current;
@@ -886,7 +950,23 @@ function MessageList({
     }
   }, [messages]);
 
-  const renderItems = buildMessageRenderItems(messages, codeSubmode === "auto");
+  const togglePlanningSummary = useCallback((summaryId: string): void => {
+    setExpandedPlanningSummaryIds((current) => {
+      const next = new Set(current);
+      if (next.has(summaryId)) {
+        next.delete(summaryId);
+      } else {
+        next.add(summaryId);
+      }
+      return next;
+    });
+  }, []);
+
+  const renderItems = buildMessageRenderItems(
+    messages,
+    codeSubmode === "auto",
+    expandedPlanningSummaryIds,
+  );
   const empty = renderItems.length === 0;
 
   return (
@@ -897,7 +977,14 @@ function MessageList({
         <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10">
           {renderItems.map((item, i) => {
             if (item.kind === "planning-summary") {
-              return <PlanningSummary key={item.id} messages={item.messages} />;
+              return (
+                <PlanningSummary
+                  key={item.id}
+                  messages={item.messages}
+                  expanded={item.expanded}
+                  onToggle={() => togglePlanningSummary(item.id)}
+                />
+              );
             }
             if (item.kind === "execution-separator") {
               return <ExecutionSeparator key={item.id} />;
@@ -935,16 +1022,37 @@ function MessageList({
   );
 }
 
-function PlanningSummary({ messages }: { messages: ChatMessage[] }) {
+function PlanningSummary({
+  messages,
+  expanded,
+  onToggle,
+}: {
+  messages: ChatMessage[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const assistantCount = messages.filter(
     (message) => message.role === "assistant",
   ).length;
+  const actionLabel = expanded ? "Hide planning" : "Show planning";
   return (
     <div className="flex justify-center">
-      <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11.5px] text-ink-300">
-        Planning collapsed after execution started / {messages.length} messages /{" "}
-        {assistantCount} model responses
-      </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11.5px] text-ink-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-ink-100"
+        title={actionLabel}
+      >
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+        <span>
+          Planning collapsed after execution started / {messages.length} messages /{" "}
+          {assistantCount} model responses
+        </span>
+        <span className="border-l border-white/10 pl-2 text-ink-200">
+          {actionLabel}
+        </span>
+      </button>
     </div>
   );
 }

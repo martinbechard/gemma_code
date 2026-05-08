@@ -51,6 +51,9 @@ const api = {
   abortChat: (conversationId: string): Promise<void> =>
     ipcRenderer.invoke("chat:abort", conversationId),
 
+  executionLogPath: (): Promise<string> =>
+    ipcRenderer.invoke("debug:execution-log-path"),
+
   listTools: (): Promise<
     Array<{ name: string; description: string; mode: string }>
   > => ipcRenderer.invoke("tools:list"),

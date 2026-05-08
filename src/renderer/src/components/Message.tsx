@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import * as React from "react";
 import { marked } from "marked";
 import type {
   AgentActivity,
@@ -22,6 +22,8 @@ interface Parsed {
   thinkingInProgress: boolean;
   visible: string;
 }
+
+const PLAN_HARNESS_LABEL_PATTERN = /\b(?:plan|planning)\b/i;
 
 function parseThinking(content: string): Parsed {
   const openRe = /<think(?:ing)?>/;
@@ -52,11 +54,11 @@ export default function Message({
 }: Props) {
   const isUser = message.role === "user";
   const isHarness = message.role === "harness";
-  const parsed = useMemo(
+  const parsed = React.useMemo(
     () => parseThinking(message.content),
     [message.content],
   );
-  const html = useMemo(() => {
+  const html = React.useMemo(() => {
     if (!parsed.visible) return "";
     try {
       return marked.parse(parsed.visible, {
@@ -67,13 +69,35 @@ export default function Message({
       return escapeHtml(parsed.visible).replace(/\n/g, "<br/>");
     }
   }, [parsed.visible]);
+  const localPlanNodeIds = React.useMemo(
+    () => new Set((message.planNodes ?? []).map((node) => node.id)),
+    [message.planNodes],
+  );
+  const visibleStandaloneToolCalls = React.useMemo(
+    () =>
+      (message.toolCalls ?? []).filter(
+        (tc) => !tc.parentStepId || !localPlanNodeIds.has(tc.parentStepId),
+      ),
+    [message.toolCalls, localPlanNodeIds],
+  );
 
   if (message.role === "system") return null;
 
   if (isHarness) {
+    const alignAsUser =
+      message.phase === "planning" ||
+      PLAN_HARNESS_LABEL_PATTERN.test(message.harnessLabel ?? "");
+    const containerClass = alignAsUser
+      ? "flex justify-end"
+      : "flex justify-start";
+    const bubbleClass = [
+      "selectable rounded-2xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-2.5 text-[13px] leading-relaxed text-amber-50",
+      alignAsUser ? "max-w-[78%] rounded-br-md" : "max-w-[86%] rounded-bl-md",
+    ].join(" ");
+
     return (
-      <div className="flex justify-start">
-        <div className="selectable max-w-[86%] rounded-2xl rounded-bl-md border border-amber-300/20 bg-amber-300/[0.07] px-4 py-2.5 text-[13px] leading-relaxed text-amber-50">
+      <div className={containerClass}>
+        <div className={bubbleClass}>
           {message.harnessLabel && (
             <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wide text-amber-200/70">
               Harness / {message.harnessLabel}
@@ -142,11 +166,9 @@ export default function Message({
           />
         )}
 
-        {message.toolCalls
-          ?.filter((tc) => !tc.parentStepId)
-          .map((tc) => (
-            <ToolCallView key={tc.id} call={tc} />
-          ))}
+        {visibleStandaloneToolCalls.map((tc) => (
+          <ToolCallView key={tc.id} call={tc} />
+        ))}
 
         {!isEmpty && (
           <div
@@ -217,20 +239,20 @@ function ActivityBar({
   startedAt: number;
   toolCalls?: ToolCall[];
 }) {
-  const [elapsed, setElapsed] = useState(() =>
+  const [elapsed, setElapsed] = React.useState(() =>
     Math.floor((Date.now() - startedAt) / 1000),
   );
-  const verbIdxRef = useRef(0);
-  const [verbIdx, setVerbIdx] = useState(0);
+  const verbIdxRef = React.useRef(0);
+  const [verbIdx, setVerbIdx] = React.useState(0);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const id = window.setInterval(() => {
       setElapsed(Math.floor((Date.now() - startedAt) / 1000));
     }, 1000);
     return () => window.clearInterval(id);
   }, [startedAt]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (activity.kind === "thinking" || activity.kind === "generating") {
       const id = window.setInterval(() => {
         verbIdxRef.current++;
@@ -241,7 +263,7 @@ function ActivityBar({
     return undefined;
   }, [activity.kind]);
 
-  const label = useMemo(() => {
+  const label = React.useMemo(() => {
     if (activity.kind === "thinking") {
       const verbs = THINKING_VERBS;
       return verbs[verbIdx % verbs.length];
@@ -351,7 +373,7 @@ function ThinkingBlock({
   content: string;
   inProgress: boolean;
 }) {
-  const [open, setOpen] = useState(inProgress);
+  const [open, setOpen] = React.useState(inProgress);
   const labelClass = inProgress ? "shimmer-text" : "";
   return (
     <div className="mb-3 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02]">
@@ -447,7 +469,7 @@ function toolIcon(name: string): string {
 }
 
 function ToolCallView({ call }: { call: ToolCall }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = React.useState(false);
   const running = !!call.running;
   const { verb, target } = toolLabel(call);
   const ico = toolIcon(call.name);
@@ -580,7 +602,7 @@ function PlanRow({
   const expandable =
     (isStep && !!node.prompt) ||
     (isVerify && (!!node.criterion || !!node.reason));
-  const [open, setOpen] = useState(running);
+  const [open, setOpen] = React.useState(running);
 
   const label =
     node.kind === "plan"
@@ -719,7 +741,7 @@ function PlanView({
   nodes: PlanNode[];
   toolCalls: ToolCall[];
 }) {
-  const trees = useMemo(() => buildPlanTree(nodes), [nodes]);
+  const trees = React.useMemo(() => buildPlanTree(nodes), [nodes]);
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
       {trees.map((t) => (
@@ -738,7 +760,7 @@ function PlanProposalView({
   executed: boolean;
   onExecute?: () => void;
 }) {
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [openIdx, setOpenIdx] = React.useState<number | null>(null);
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-amber-300/20 bg-amber-300/[0.04] px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2">
