@@ -215,6 +215,46 @@ describe("validatePlanForExecution", () => {
     });
   });
 
+  it("rejects plans whose focused test command uses a different path than the test step updates", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "ground",
+          prompt:
+            "Read src/main/tools.ts, Gemma.md, and tests/main/tools.test.ts.",
+          verify:
+            "src/main/tools.ts, Gemma.md, and tests/main/tools.test.ts have been read.",
+        },
+        {
+          name: "test",
+          prompt:
+            "Update tests/main/tools.test.ts to cover get_current_working_directory.",
+          verify:
+            "tests/main/tools.test.ts covers get_current_working_directory.",
+        },
+        {
+          name: "implement",
+          prompt:
+            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
+          verify:
+            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+        },
+        {
+          name: "verify",
+          prompt:
+            "Run pnpm test tests/main/getCurrentWorkingDirectoryTool.test.ts, pnpm test, and pnpm run build.",
+          verify: "All three commands pass.",
+        },
+      ]),
+    );
+
+    expect(result).toEqual({
+      valid: false,
+      reason:
+        "Plan focused test command must use the same exact tests/main test file path that the test step creates or updates.",
+    });
+  });
+
   it("accepts concrete source, test, and verification steps", () => {
     const result = validatePlanForExecution(
       parsedPlan([

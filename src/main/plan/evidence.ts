@@ -7,7 +7,15 @@ export interface PlanStepEvidence {
   commandFailures: string[];
 }
 
+export interface RepeatedActionFailureInput {
+  actionName: string;
+  repeatedActionCount: number;
+  criterion: string;
+  evidence: PlanStepEvidence;
+}
+
 const MAX_REASON_CHARS = 160;
+const REPEATED_FAILED_ACTION_THRESHOLD = 2;
 const COMMAND_EXIT_RE = /\bexit=(?:0|[1-9]\d*|killed)\b/;
 const FAILED_EXIT_RE = /\bexit=(?:[1-9]\d*|killed)\b/;
 const PATH_RE =
@@ -131,6 +139,18 @@ export function forcedVerifyFailureReason(
   }
 
   return null;
+}
+
+export function repeatedActionForcedFailureReason({
+  actionName,
+  repeatedActionCount,
+  criterion,
+  evidence,
+}: RepeatedActionFailureInput): string | null {
+  if (repeatedActionCount < REPEATED_FAILED_ACTION_THRESHOLD) return null;
+  const reason = forcedVerifyFailureReason(criterion, evidence);
+  if (!reason) return null;
+  return `repeated ${actionName} action after unresolved failure: ${reason}`;
 }
 
 function extractCriterionPaths(criterion: string): string[] {

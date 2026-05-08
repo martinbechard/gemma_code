@@ -100,17 +100,7 @@ export class PlanExecutionState {
       return { kind: "step", stepId: f.currentStepNodeId!, text };
     }
 
-    if (!f.verifyStartEmitted) {
-      f.currentVerifyNodeId = this.idGen();
-      f.verifyStartEmitted = true;
-      this.events.push({
-        type: "plan_node_start",
-        kind: "verify",
-        id: f.currentVerifyNodeId,
-        parentId: f.currentStepNodeId,
-        criterion: step.verify,
-      });
-    }
+    this.startVerify(f);
     const text =
       `Verify: ${step.verify}\n\n` +
       `Use only prior tool results and visible file evidence from this step. ` +
@@ -124,7 +114,7 @@ export class PlanExecutionState {
   currentVerifyCriterion(): string | null {
     if (this.state !== "running" || this.frames.length === 0) return null;
     const f = this.top();
-    if (f.phase !== "verify") return null;
+    if (f.phase !== "verify" && f.phase !== "step") return null;
     return f.plan.steps[f.stepIndex]?.verify ?? null;
   }
 
@@ -178,6 +168,17 @@ export class PlanExecutionState {
     return "abort";
   }
 
+  failCurrentStepAttempt(reason: string): ApplyResult {
+    if (this.state !== "running" || this.frames.length === 0) return "abort";
+    const f = this.top();
+    if (!f.currentStepNodeId) return "abort";
+    if (f.phase === "step") {
+      f.phase = "verify";
+      this.startVerify(f);
+    }
+    return this.applyVerify({ result: "fail", reason });
+  }
+
   drainEvents(): PlanEvent[] {
     const out = this.events;
     this.events = [];
@@ -228,6 +229,20 @@ export class PlanExecutionState {
         status,
       });
     }
+  }
+
+  private startVerify(f: Frame): void {
+    if (f.verifyStartEmitted) return;
+    const step = f.plan.steps[f.stepIndex];
+    f.currentVerifyNodeId = this.idGen();
+    f.verifyStartEmitted = true;
+    this.events.push({
+      type: "plan_node_start",
+      kind: "verify",
+      id: f.currentVerifyNodeId,
+      parentId: f.currentStepNodeId,
+      criterion: step.verify,
+    });
   }
 
   private endVerify(f: Frame, status: "ok" | "failed", reason?: string): void {

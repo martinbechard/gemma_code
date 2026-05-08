@@ -14,11 +14,20 @@ export const EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES = [
   "Step names are not fixed, but the step name, prompt, or verify text must include the words the validator looks for. The assembled plan must contain a grounding word such as ground, read, inspect, or list; a testing word such as test or spec; an implementation word such as implement, edit, add, or update; and a verification word such as verify, build, pnpm, npm, or run.",
   "The assembled plan must name one exact tests/main test file path that ends in .test.ts.",
   "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
+  "The focused test command must use the same exact tests/main test file path that the test step creates or updates.",
   "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
   "Keep requested get_current_ tool names exactly.",
   "Do not use placeholder names such as exampleTool.test.ts or requested_tool_name.",
   "Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.",
 ] as const;
+
+const TEST_FILE_PATH_RE = /\btests\/main\/[^\s<>"']+\.test\.ts\b/g;
+const FOCUSED_TEST_COMMAND_RE =
+  /\b(?:pnpm|npm) test\s+(?:--\s+)?(tests\/main\/[^\s<>"']+\.test\.ts)\b/g;
+const TEST_ARTIFACT_STEP_RE = /\b(?:test|spec)\b/i;
+const TEST_ARTIFACT_CHANGE_RE = /\b(?:write|create|update|add|extend|edit)\b/i;
+const TEST_PATH_MISMATCH_REASON =
+  "Plan focused test command must use the same exact tests/main test file path that the test step creates or updates.";
 
 const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
   { label: "relevant tests", pattern: /\brelevant tests?\b/i },
@@ -83,7 +92,8 @@ export function validatePlanForExecution(
     };
   }
 
-  if (!/\btests\/main\/[^\s<>]+\.test\.ts\b/.test(wholePlan)) {
+  const planTestPaths = extractTestFilePaths(wholePlan);
+  if (planTestPaths.length === 0) {
     return {
       valid: false,
       reason:
@@ -91,10 +101,22 @@ export function validatePlanForExecution(
     };
   }
 
-  if (!/\b(?:pnpm|npm) test\b/.test(wholePlan)) {
+  const focusedTestCommandPaths = extractFocusedTestCommandPaths(wholePlan);
+  if (focusedTestCommandPaths.length === 0) {
     return {
       valid: false,
       reason: "Plan must name the exact test command it will run.",
+    };
+  }
+
+  const testArtifactPaths = extractTestArtifactPaths(plan.steps);
+  if (
+    testArtifactPaths.length === 0 ||
+    !sameStringSet(testArtifactPaths, focusedTestCommandPaths)
+  ) {
+    return {
+      valid: false,
+      reason: TEST_PATH_MISMATCH_REASON,
     };
   }
 
@@ -124,4 +146,44 @@ export function validatePlanStepText(
     };
   }
   return { valid: true };
+}
+
+function extractTestFilePaths(text: string): string[] {
+  return uniqueMatches(text, TEST_FILE_PATH_RE, 0);
+}
+
+function extractFocusedTestCommandPaths(text: string): string[] {
+  return uniqueMatches(text, FOCUSED_TEST_COMMAND_RE, 1);
+}
+
+function extractTestArtifactPaths(steps: ParsedStep[]): string[] {
+  const paths = new Set<string>();
+  for (const step of steps) {
+    const text = `${step.name}\n${step.prompt}\n${step.verify}`;
+    if (
+      !TEST_ARTIFACT_STEP_RE.test(text) ||
+      !TEST_ARTIFACT_CHANGE_RE.test(text)
+    ) {
+      continue;
+    }
+    for (const path of extractTestFilePaths(text)) {
+      paths.add(path);
+    }
+  }
+  return [...paths];
+}
+
+function uniqueMatches(text: string, pattern: RegExp, groupIndex: number): string[] {
+  const values = new Set<string>();
+  for (const match of text.matchAll(pattern)) {
+    const value = match[groupIndex];
+    if (value) values.add(value);
+  }
+  return [...values];
+}
+
+function sameStringSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
 }

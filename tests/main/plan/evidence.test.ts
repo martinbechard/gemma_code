@@ -4,6 +4,7 @@ import {
   forcedVerifyFailureReason,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
+  repeatedActionForcedFailureReason,
 } from "../../../src/main/plan/evidence";
 
 describe("plan step evidence", () => {
@@ -229,5 +230,20 @@ describe("plan step evidence", () => {
         evidence,
       ),
     ).toBeNull();
+  });
+
+  it("turns a repeated failed command into a forced step-attempt failure", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(evidence, "run_bash", "exit=1 stdout: failed");
+
+    expect(
+      repeatedActionForcedFailureReason({
+        actionName: "run_bash",
+        repeatedActionCount: 2,
+        criterion: "pnpm test tests/main/tools.test.ts passes.",
+        evidence,
+      }),
+    ).toContain("repeated run_bash action after unresolved failure");
   });
 });

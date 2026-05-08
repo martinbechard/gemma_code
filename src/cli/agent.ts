@@ -40,6 +40,7 @@ import {
   forcedVerifyFailureReason,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
+  repeatedActionForcedFailureReason,
 } from "../main/plan/evidence";
 import { killBackgroundTasksForConversation } from "../main/backgroundTasks";
 import {
@@ -630,6 +631,14 @@ async function runAgentLoop(
     stepEvidenceStepId = prompt.stepId;
   };
 
+  const resetStepAttemptTracking = (): void => {
+    lastActionKey = null;
+    repeatedActionCount = 0;
+    stepEvidence = createPlanStepEvidence();
+    stepEvidenceStepId = null;
+    pendingEditRecoveryPath = null;
+  };
+
   const logPlanEvents = (): void => {
     if (!planState) return;
     for (const ev of planState.drainEvents()) {
@@ -889,6 +898,37 @@ async function runAgentLoop(
           );
           continue;
         }
+        const repeatedFailureReason =
+          planState?.currentStepId
+            ? repeatedActionForcedFailureReason({
+                actionName: action.name,
+                repeatedActionCount,
+                criterion: planState.currentVerifyCriterion() ?? "",
+                evidence: stepEvidence,
+              })
+            : null;
+        if (repeatedFailureReason && planState) {
+          meta(`step attempt failed: ${repeatedFailureReason}`);
+          const outcome = planState.failCurrentStepAttempt(
+            repeatedFailureReason,
+          );
+          logPlanEvents();
+          awaitingVerify = false;
+          resetStepAttemptTracking();
+          if (outcome === "abort" || planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            meta("done — plan complete");
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(messages, next.kind, next.text);
+          awaitingVerify = next.kind === "verify";
+          continue;
+        }
         pushHarnessPrompt(
           messages,
           "repeated action",
@@ -924,6 +964,9 @@ async function runAgentLoop(
       const outcome = planState.applyVerify(vr);
       logPlanEvents();
       awaitingVerify = false;
+      if (outcome === "retry") {
+        resetStepAttemptTracking();
+      }
       if (outcome === "abort" || planState.state !== "running") {
         meta(`done — plan ${planState.state}`);
         return;

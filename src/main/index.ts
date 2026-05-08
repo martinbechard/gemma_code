@@ -81,6 +81,7 @@ import {
   forcedVerifyFailureReason,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
+  repeatedActionForcedFailureReason,
 } from "./plan/evidence";
 import { killAllBackgroundTasks } from "./backgroundTasks";
 import {
@@ -730,6 +731,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       stepEvidenceStepId = prompt.stepId;
     };
 
+    const resetStepAttemptTracking = (): void => {
+      lastActionKey = null;
+      repeatedActionCount = 0;
+      stepEvidence = createPlanStepEvidence();
+      stepEvidenceStepId = null;
+      pendingEditRecoveryPath = null;
+    };
+
     const usePlanExecutionPrompt = (): void => {
       if (!planExecutionSystemPrompt || baseMessages[0]?.role !== "system") {
         return;
@@ -1130,6 +1139,45 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 });
                 break streamLoop;
               }
+              const repeatedFailureReason =
+                planState?.currentStepId
+                  ? repeatedActionForcedFailureReason({
+                      actionName: found.name,
+                      repeatedActionCount,
+                      criterion: planState.currentVerifyCriterion() ?? "",
+                      evidence: stepEvidence,
+                    })
+                  : null;
+              if (repeatedFailureReason && planState) {
+                const outcome =
+                  planState.failCurrentStepAttempt(repeatedFailureReason);
+                drainPlanEvents();
+                awaitingVerify = false;
+                resetStepAttemptTracking();
+                if (outcome === "abort" || planState.state !== "running") {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                const next = planState.nextPrompt();
+                if (!next) {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                prepareStepEvidence(next);
+                pushHarnessPrompt(
+                  next.kind === "verify" ? "plan verify" : "plan step",
+                  next.text,
+                );
+                awaitingVerify = next.kind === "verify";
+                executedAction = true;
+                emit({
+                  type: "activity",
+                  activity: { kind: "thinking", chars: 0 },
+                });
+                break streamLoop;
+              }
               pushHarnessPrompt(
                 "repeated action",
                 `You repeated the same ${found.name} action ${repeatedActionCount} times. ` +
@@ -1228,6 +1276,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           const outcome = planState.applyVerify(vr);
           drainPlanEvents();
           awaitingVerify = false;
+          if (outcome === "retry") {
+            resetStepAttemptTracking();
+          }
           if (outcome === "abort" || planState.state !== "running") {
             emit({ type: "activity", activity: { kind: "idle" } });
             emit({ type: "done" });

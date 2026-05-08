@@ -198,6 +198,41 @@ describe("PlanExecutionState — currentStepId", () => {
 });
 
 describe("PlanExecutionState — verify retry and abort", () => {
+  it("can fail the current step attempt from step phase and retry without waiting for verify text", () => {
+    const s = new PlanExecutionState(plan({ name: "verify" }), {
+      idGen: counter(),
+      maxRetries: 1,
+    });
+
+    const first = s.nextPrompt();
+    expect(first?.kind).toBe("step");
+
+    expect(
+      s.failCurrentStepAttempt(
+        "repeated run_bash action after command failure",
+      ),
+    ).toBe("retry");
+
+    const retry = s.nextPrompt();
+    expect(retry?.kind).toBe("step");
+    expect(retry?.stepId).toBe(first?.stepId);
+    expect(retry?.text).toContain("repeated run_bash action");
+
+    const events = s.drainEvents();
+    expect(startEvents(events).map((e) => e.kind)).toEqual([
+      "plan",
+      "step",
+      "verify",
+    ]);
+    expect(endEvents(events)).toContainEqual(
+      expect.objectContaining({
+        kind: "verify",
+        status: "failed",
+        reason: "repeated run_bash action after command failure",
+      }),
+    );
+  });
+
   it("retries the same step on fail, eventually advances on pass", () => {
     const s = new PlanExecutionState(plan({ name: "x" }), {
       idGen: counter(),
