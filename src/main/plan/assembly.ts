@@ -147,28 +147,18 @@ export function buildRequestedToolPlanningGuidance(
     .map(
       (target) =>
         target.toolName +
-        " -> " +
+        ": test " +
         target.testPath +
-        "; focused test command " +
+        "; focused " +
         target.focusedTestCommand +
-        "; build command " +
+        "; build " +
         target.buildCommand,
     )
     .join("; ");
   return (
-    " For requested get_current_* host tools, use this reusable plan convention: keep every requested get_current_* tool name exact; derive the test file as tests/main/current<PascalCase suffix>Tool.test.ts by dropping get_current_, PascalCasing the remaining underscore-separated words, prefixing current, and suffixing Tool.test.ts; use pnpm test <derived test file> as the focused test command; use pnpm run build as the build command; and do not return plan: done until the accepted plan has unique grounding, test, implementation, and verification steps. The grounding step must name the exact canonical paths " +
-    HOST_TOOL_SOURCE_PATH +
-    ", " +
-    HOST_TOOL_DOC_PATH +
-    ", " +
-    HOST_TOOL_PACKAGE_PATH +
-    ", and the derived tests/main/*.test.ts path, and its prompt must say to read or inspect those exact paths rather than list them as directories; avoid broad directory-list grounding such as List src/main. The accepted steps should be emitted in this order: grounding, test, implementation, verification. The test step prompt must say to read the derived test file, add or update coverage only if missing, then run the exact focused test command, and both prompt and verify must include that command. The implementation step must tell the agent to read " +
-    HOST_TOOL_SOURCE_PATH +
-    " and " +
-    HOST_TOOL_DOC_PATH +
-    ", add the requested tool only if missing, and avoid editing those files if the tool is already present. Requested host-tool targets: " +
+    " Requested host-tool target facts: " +
     targetText +
-    "."
+    ". Apply the get_current_ host-tool planning convention from the plan system prompt."
   );
 }
 
@@ -388,7 +378,7 @@ function invalidHostToolStepReason(
       }
       if (
         /\blisting\b/i.test(step.verify) ||
-        !/\b(read|inspect|inspected)\b/i.test(step.verify)
+        !/\b(read|reading|inspect|inspected|inspection)\b/i.test(step.verify)
       ) {
         return (
           `Host-tool grounding verify text for ${target.toolName} must say the ` +
@@ -603,10 +593,7 @@ function buildTaskSpecificPlanProgressGuidance(
   );
   if (!hasGroundingStep) {
     return [
-      `Next missing requirement: emit the grounding step for ${toolName}.`,
-      `That single step's prompt must tell the agent to read or inspect ${target.groundingPaths.join(", ")}.`,
-      `That single step's verify field must say ${target.groundingPaths.join(", ")} have been read or inspected.`,
-      "Do not return plan: done until this grounding step is accepted.",
+      `Next required step: grounding for ${toolName}; read or inspect ${target.groundingPaths.join(", ")}.`,
     ];
   }
   const hasTestArtifactStep = state.steps.some((step) => {
@@ -620,10 +607,7 @@ function buildTaskSpecificPlanProgressGuidance(
   });
   if (!hasTestArtifactStep) {
     return [
-      `Next missing requirement: emit the test step for ${toolName}.`,
-      `That single step's prompt must tell the agent to read ${testPath}, add or update coverage only if missing, then run ${focusedCommand}.`,
-      `That single step's verify field must say ${testPath} covers ${toolName}, and ${focusedCommand} passes.`,
-      "Do not return plan: done until this test step is accepted.",
+      `Next required step: test for ${toolName}; use ${testPath} and ${focusedCommand} in both prompt and verify.`,
     ];
   }
   const hasImplementationStep = state.steps.some((step) => {
@@ -636,16 +620,12 @@ function buildTaskSpecificPlanProgressGuidance(
   });
   if (!hasImplementationStep) {
     return [
-      `Next missing requirement: emit the implementation step for ${toolName}.`,
-      `That single step must tell the agent to read src/main/tools.ts and Gemma.md, add ${toolName} only if missing, and avoid editing those files if ${toolName} is already present.`,
-      "Do not return plan: done until this implementation step is accepted.",
+      `Next required step: implementation for ${toolName}; read src/main/tools.ts and Gemma.md, add only if missing, and avoid edits if present.`,
     ];
   }
   if (!acceptedText.includes("pnpm run build")) {
     return [
-      `Next missing requirement: emit the verification or build step for ${toolName}.`,
-      `That single step's prompt and verify fields must both contain ${focusedCommand} and pnpm run build.`,
-      "Do not return plan: done until this verification step is accepted.",
+      `Next required step: verification for ${toolName}; include ${focusedCommand} and pnpm run build in prompt and verify.`,
     ];
   }
   return [];

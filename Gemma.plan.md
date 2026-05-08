@@ -31,6 +31,7 @@ The host validates the assembled plan before executing it. Make the validation d
 - For requested get_current_ host tool grounding, name the exact canonical paths src/main/tools.ts, Gemma.md, package.json, and the derived tests/main test file path, and tell the agent to read or inspect those exact paths. Do not list file paths as directories, and do not use broad directory-list grounding such as List src/main.
 - For requested get_current_ host tool implementation, tell the agent to read src/main/tools.ts and Gemma.md first, add the requested tool only if missing, and avoid editing either file when the requested tool is already present.
 - For requested get_current_ host tools, emit the steps in this order: grounding, test, implementation, verification.
+- Use the get_current_ host tool convention to choose the concrete files and commands. Do not restate the convention inside each plan step.
 - A step that creates or updates a test must name the exact focused test command for that same test file in the step prompt and verify text.
 - Do not put the focused test command only in verify. The test step prompt must tell the agent to read the exact test file, add or update coverage only if missing, then run the exact focused test command.
 - Every step that runs a focused test command or build command must repeat the exact command in the step verify text.

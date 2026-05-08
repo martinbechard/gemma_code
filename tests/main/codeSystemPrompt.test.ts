@@ -116,6 +116,9 @@ describe("codeSystemPrompt", () => {
     expect(planPrompt).toContain(
       "get_current_hostname uses tests/main/currentHostnameTool.test.ts",
     );
+    expect(planPrompt).toContain(
+      "Do not restate the convention inside each plan step",
+    );
     expect(planPrompt).not.toContain(
       "For a current working directory tool request",
     );

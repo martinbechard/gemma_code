@@ -78,10 +78,11 @@ describe("iterative plan assembly", () => {
       "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
     );
     expect(prompt).toContain("pnpm run build");
-    expect(prompt).toContain("reusable plan convention");
-    expect(prompt).toContain("tests/main/current<PascalCase suffix>Tool.test.ts");
     expect(prompt).toContain(
-      "do not return plan: done until the accepted plan has unique grounding, test, implementation, and verification steps.",
+      "Requested host-tool target facts: get_current_working_directory: test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+    expect(prompt).toContain(
+      "Apply the get_current_ host-tool planning convention from the plan system prompt.",
     );
   });
 
@@ -219,7 +220,7 @@ describe("iterative plan assembly", () => {
     if (result.kind !== "rejected") return;
     expect(result.reason).toContain("must tell the agent to read or inspect");
     expect(result.retryPrompt).toContain(
-      "Next missing requirement: emit the grounding step for get_current_working_directory.",
+      "Next required step: grounding for get_current_working_directory",
     );
     expect(result.retryPrompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
   });
@@ -242,6 +243,22 @@ describe("iterative plan assembly", () => {
     expect(result.reason).toContain(
       "must say the exact files have been read or inspected",
     );
+  });
+
+  it("accepts host-tool grounding verify text that says reading or inspection completed", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "plan:",
+        "  steps:",
+        "    - name: ground",
+        "      prompt: Read or inspect src/main/tools.ts, Gemma.md, package.json, and tests/main/currentWorkingDirectoryTool.test.ts.",
+        "      verify: The reading or inspection of src/main/tools.ts, Gemma.md, package.json, and tests/main/currentWorkingDirectoryTool.test.ts has been completed.",
+      ].join("\n"),
+      "create a new LLM tool to retrieve the current working directory",
+    );
+
+    expect(result.kind).toBe("accepted");
   });
 
   it("rejects repeated host-tool grounding after one grounding step is accepted", () => {
@@ -268,7 +285,7 @@ describe("iterative plan assembly", () => {
     if (repeated.kind !== "rejected") return;
     expect(repeated.reason).toContain("grounding step for get_current_working_directory is already accepted");
     expect(repeated.retryPrompt).toContain(
-      "Next missing requirement: emit the test step for get_current_working_directory.",
+      "Next required step: test for get_current_working_directory",
     );
   });
 
@@ -393,7 +410,7 @@ describe("iterative plan assembly", () => {
     );
     expect(result.nextPrompt).toContain("pnpm run build");
     expect(result.nextPrompt).toContain(
-      "Next missing requirement: emit the test step for get_current_working_directory.",
+      "Next required step: test for get_current_working_directory",
     );
   });
 
@@ -414,10 +431,10 @@ describe("iterative plan assembly", () => {
     expect(second.kind).toBe("accepted");
     if (second.kind !== "accepted") return;
     expect(second.nextPrompt).toContain(
-      "Next missing requirement: emit the implementation step for get_current_working_directory.",
+      "Next required step: implementation for get_current_working_directory",
     );
     expect(second.nextPrompt).not.toContain(
-      "Next missing requirement: emit the verification or build step for get_current_working_directory.",
+      "Next required step: verification for get_current_working_directory",
     );
   });
 
@@ -586,7 +603,7 @@ describe("iterative plan assembly", () => {
     );
     expect(rejected.retryPrompt).toContain("pnpm run build");
     expect(rejected.retryPrompt).toContain(
-      "Next missing requirement: emit the grounding step for get_current_working_directory.",
+      "Next required step: grounding for get_current_working_directory",
     );
   });
 

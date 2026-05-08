@@ -43,7 +43,7 @@ const REQUIRES_SUCCESS_RE =
   /\b(exit(?:ed)? 0|pass|passes|all ran|green|succeeds|successful|successfully)\b/i;
 const READ_CRITERION_RE = /\b(?:has|have)\s+been\s+read\b/i;
 const READ_ACTION_REQUIREMENT_RE =
-  /\b(?:read|inspect|inspected|list|listed|retrieve|retrieved|contents?)\b/i;
+  /\b(?:read|reading|inspect|inspected|inspection|list|listed|retrieve|retrieved|contents?)\b/i;
 const COMMAND_CRITERION_RE =
   /\b(?:command|pnpm|npm)\b|\b(?:build|built)\b[\s\S]*\b(?:exit(?:ed)?\s*0|pass|passes|passed|green|succeeds|successful|successfully|executed)\b|\b(?:test|tests|suite)\b[\s\S]*\b(?:exit(?:ed)?\s*0|pass|passes|passed|green|succeeds|successful|successfully|fail|fails|failed|failing)\b/i;
 const MALFORMED_ACTION_SELF_REPORT_RE =

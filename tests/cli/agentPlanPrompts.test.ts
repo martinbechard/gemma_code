@@ -184,6 +184,12 @@ describe("hasSatisfiedReadOnlyStepEvidence", () => {
       path: "Gemma.md",
     });
     expect(hasSatisfiedReadOnlyStepEvidence(criterion, evidence)).toBe(true);
+    expect(
+      hasSatisfiedReadOnlyStepEvidence(
+        "The reading or inspection of src/main/tools.ts and Gemma.md has been completed.",
+        evidence,
+      ),
+    ).toBe(true);
   });
 
   it("does not treat implementation criteria as read-only steps", () => {
@@ -195,6 +201,12 @@ describe("hasSatisfiedReadOnlyStepEvidence", () => {
     expect(
       hasSatisfiedReadOnlyStepEvidence(
         "src/main/tools.ts contains get_current_hostname.",
+        evidence,
+      ),
+    ).toBe(false);
+    expect(
+      hasSatisfiedReadOnlyStepEvidence(
+        "The implementation of the get_current_hostname tool in src/main/tools.ts is complete or confirmed as already present.",
         evidence,
       ),
     ).toBe(false);
@@ -262,7 +274,9 @@ describe("buildPlanAmendmentPrompt", () => {
     expect(prompt).toContain("get_current_hostname");
     expect(prompt).toContain("tests/main/currentHostnameTool.test.ts");
     expect(prompt).toContain("pnpm test tests/main/currentHostnameTool.test.ts");
-    expect(prompt).toContain("reusable plan convention");
+    expect(prompt).toContain(
+      "Apply the get_current_ host-tool planning convention from the plan system prompt.",
+    );
   });
 
   it("requires exact missing commands in both prompt and verify fields", () => {

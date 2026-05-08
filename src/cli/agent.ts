@@ -363,9 +363,11 @@ export function hasSatisfiedReadOnlyStepEvidence(
   evidence: PlanStepEvidence,
 ): boolean {
   if (evidence.actionCount === 0) return false;
-  if (!/\b(read|inspect|inspected|retrieved)\b/i.test(criterion)) return false;
+  if (!/\b(read|reading|inspect|inspected|inspection|retrieved)\b/i.test(criterion)) {
+    return false;
+  }
   if (
-    /\b(get_current_|cover|covers|contain|contains|added|verified|implemented|pnpm|npm|build)\b/i.test(
+    /\b(get_current_|tool|cover|covers|contain|contains|add|added|verify|verified|implement|implemented|implementation|confirm|confirmed|present|pnpm|npm|build)\b/i.test(
       criterion,
     )
   ) {
