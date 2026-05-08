@@ -74,6 +74,7 @@ import {
   buildPlanAssemblyInitialPrompt,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
+  isPlanAssemblyDoneResponse,
   type PlanAssemblyState,
 } from "./plan/assembly";
 import {
@@ -1319,7 +1320,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       const planAssemblyDone =
         !planState &&
         !!planAssemblyState &&
-        buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT;
+        isPlanAssemblyDoneResponse(buffer);
       const planAssemblyStopped =
         !planState &&
         !!planAssemblyState &&

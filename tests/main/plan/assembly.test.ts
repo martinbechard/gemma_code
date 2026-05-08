@@ -111,6 +111,23 @@ describe("iterative plan assembly", () => {
     expect(done.plan.end).toBe(done.plan.raw.length);
   });
 
+  it("assembles accepted steps when the model returns fenced YAML plan done", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const done = applyPlanAssemblyResponse(
+      first.state,
+      ["```yaml", PLAN_ASSEMBLY_DONE_TEXT, "```"].join("\n"),
+    );
+
+    expect(done.kind).toBe("finished");
+    if (done.kind !== "finished") return;
+    expect(done.plan.steps.map((step) => step.name)).toEqual(["explore"]);
+  });
+
   it("rejects conversational done text after accepted steps", () => {
     const first = applyPlanAssemblyResponse(
       createPlanAssemblyState(),

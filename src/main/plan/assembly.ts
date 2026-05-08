@@ -1,8 +1,10 @@
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { findNextPlan, type ParsedPlan, type ParsedStep } from "./parser";
 import { validatePlanForExecution, validatePlanStepText } from "./validation";
 
 const MAX_PLAN_ASSEMBLY_STEPS = 16;
+const WHOLE_RESPONSE_YAML_FENCE_RE =
+  /^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
@@ -61,8 +63,7 @@ export function applyPlanAssemblyResponse(
   state: PlanAssemblyState,
   response: string,
 ): PlanAssemblyResult {
-  const trimmed = response.trim();
-  if (trimmed === PLAN_ASSEMBLY_DONE_TEXT) {
+  if (isPlanAssemblyDoneResponse(response)) {
     const plan = finalizePlanAssembly(state);
     if (!plan) {
       return rejected(
@@ -118,6 +119,23 @@ export function applyPlanAssemblyResponse(
     state: { steps: [...state.steps, step] },
     nextPrompt: PLAN_ASSEMBLY_NEXT_PROMPT,
   };
+}
+
+export function isPlanAssemblyDoneResponse(response: string): boolean {
+  const raw = response.trim();
+  const fenced = WHOLE_RESPONSE_YAML_FENCE_RE.exec(raw);
+  const text = (fenced?.[1] ?? raw).trim();
+  if (text === PLAN_ASSEMBLY_DONE_TEXT) return true;
+
+  let doc: unknown;
+  try {
+    doc = parse(text);
+  } catch {
+    return false;
+  }
+  if (!isRecord(doc)) return false;
+  const keys = Object.keys(doc);
+  return keys.length === 1 && doc.plan === "done";
 }
 
 export function finalizePlanAssembly(
@@ -178,4 +196,8 @@ function rejected(
         : []),
     ].join("\n"),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

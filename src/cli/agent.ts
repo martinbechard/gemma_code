@@ -33,6 +33,7 @@ import {
   applyPlanAssemblyResponse,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
+  isPlanAssemblyDoneResponse,
   type PlanAssemblyState,
 } from "../main/plan/assembly";
 import {
@@ -219,7 +220,7 @@ export function shouldHandlePlanAssemblyBuffer(
   if (check.planFound && check.planFound !== "incomplete") return true;
   if (check.planStateActive) return false;
   if (!check.planAssemblyState) return false;
-  if (check.buffer.trim() === PLAN_ASSEMBLY_DONE_TEXT) return true;
+  if (isPlanAssemblyDoneResponse(check.buffer)) return true;
   return (
     check.planAssemblyState.steps.length > 0 &&
     check.planFound === null &&
