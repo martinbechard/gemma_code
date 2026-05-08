@@ -54,6 +54,7 @@ describe("codeSystemPrompt", () => {
     );
     expect(planPrompt).toContain("Do not emit action tags");
     expect(planPrompt).toContain("Do not add stop, conclude, cleanup");
+    expect(planPrompt).toContain("plan: done");
     expect(planPrompt).not.toContain("no plan + no action");
     expect(planPrompt).not.toContain(
       "Emit one complete YAML plan covering the work end to end",

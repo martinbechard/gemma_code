@@ -78,12 +78,12 @@ describe("iterative plan assembly", () => {
     ]);
     expect(result.nextPrompt).toBe(PLAN_ASSEMBLY_NEXT_PROMPT);
     expect(result.nextPrompt).toBe(
-      "What should I tell the agent next? Are we done? in YAML only no extra explanations, just the prompt?",
+      "What should I tell the agent next? If the plan is complete, reply exactly with plan: done. YAML only, no extra explanations.",
     );
-    expect(result.nextPrompt).not.toContain(PLAN_ASSEMBLY_DONE_TEXT);
+    expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_DONE_TEXT);
   });
 
-  it("assembles accepted steps when the model stops returning YAML", () => {
+  it("assembles accepted steps when the model returns plan done", () => {
     const first = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
       exploreStep,
@@ -95,7 +95,7 @@ describe("iterative plan assembly", () => {
 
     const done = applyPlanAssemblyResponse(
       second.state,
-      "That is all the agent needs.",
+      PLAN_ASSEMBLY_DONE_TEXT,
     );
 
     expect(done.kind).toBe("finished");
@@ -109,6 +109,24 @@ describe("iterative plan assembly", () => {
     expect(done.plan.raw).toContain("name: test");
     expect(done.plan.start).toBe(0);
     expect(done.plan.end).toBe(done.plan.raw.length);
+  });
+
+  it("rejects conversational done text after accepted steps", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const done = applyPlanAssemblyResponse(
+      first.state,
+      "That is all the agent needs.",
+    );
+
+    expect(done.kind).toBe("rejected");
+    if (done.kind !== "rejected") return;
+    expect(done.reason).toContain("exactly one YAML plan step");
+    expect(done.retryPrompt).toContain(PLAN_ASSEMBLY_DONE_TEXT);
   });
 
   it("rejects multiple steps in a single response", () => {

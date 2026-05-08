@@ -4,13 +4,13 @@ import { validatePlanForExecution, validatePlanStepText } from "./validation";
 
 const MAX_PLAN_ASSEMBLY_STEPS = 16;
 
-export const PLAN_ASSEMBLY_DONE_TEXT = "no plan + no action";
+export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: ";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
   " What should I start by telling the agent? in YAML only no extra explanations, just the prompt?";
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
-  "What should I tell the agent next? Are we done? in YAML only no extra explanations, just the prompt?",
+  "What should I tell the agent next? If the plan is complete, reply exactly with plan: done. YAML only, no extra explanations.",
 ].join("\n");
 
 export interface PlanAssemblyState {
@@ -78,13 +78,11 @@ export function applyPlanAssemblyResponse(
     return rejected(state, "The response contains incomplete YAML.");
   }
   if (!parsed) {
-    const plan = finalizePlanAssembly(state);
-    if (plan) {
-      return { kind: "finished", state, plan };
-    }
     return rejected(
       state,
-      "The response must contain exactly one YAML plan step.",
+      state.steps.length > 0
+        ? "The response must contain exactly one YAML plan step or plan: done."
+        : "The response must contain exactly one YAML plan step.",
     );
   }
   if (parsed.steps.length !== 1) {
@@ -175,6 +173,9 @@ function rejected(
       ...duplicateNameGuidance,
       "",
       "Return exactly one YAML plan containing one step, with name, prompt, and verify string fields.",
+      ...(acceptedStepNames.length > 0
+        ? ["If the assembled plan is complete, return exactly " + PLAN_ASSEMBLY_DONE_TEXT + "."]
+        : []),
     ].join("\n"),
   };
 }

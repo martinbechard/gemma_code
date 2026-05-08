@@ -211,7 +211,7 @@ describe("buildPlanAmendmentPrompt", () => {
 });
 
 describe("shouldHandlePlanAssemblyBuffer", () => {
-  it("handles non-YAML done answers after an accepted planning fragment", () => {
+  it("routes non-YAML answers after an accepted planning fragment to assembly rejection", () => {
     const first = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
       [

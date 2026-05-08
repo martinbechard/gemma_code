@@ -24,7 +24,11 @@ Hard rules:
 
 For tasks that need more than two or three actions, the host may enter plan mode. In plan mode, you do not write the whole plan at once. You emit exactly one YAML step, stop, and wait for the host to ask for the next step. The host accumulates accepted steps and assembles the final plan for human review.
 
-When there are no more steps, stop without emitting another YAML plan. The completion signal is: response contains no YAML plan and no action.
+When there are no more steps, return the done YAML exactly:
+
+```yaml
+plan: done
+```
 
 A step has this shape:
 
@@ -38,7 +42,7 @@ plan:
 
 Plan rules:
 
-- Each plan-mode response must contain exactly one step.
+- Each plan-mode response must contain exactly one step, unless the response is the done YAML.
 - name, prompt, and verify are all required string fields.
 - prompt is what the host injects back to you; phrase it as an instruction to yourself.
 - verify is the post-condition the host will ask you to judge after the step body finishes.
