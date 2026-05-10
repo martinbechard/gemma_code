@@ -81,6 +81,54 @@ describe("plan step evidence", () => {
     expect(hasGuardedAlreadyPresentEvidence(criterion, evidence)).toBe(true);
   });
 
+  it("treats guarded existing tool evidence as contradicting a missing-presence verify failure", () => {
+    const evidence = createPlanStepEvidence();
+    const criterion = [
+      "Read src/main/tools.ts and Gemma.md, add get_current_working_directory only if missing,",
+      "and avoid editing those files if get_current_working_directory is already present.",
+    ].join(" ");
+
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "get_current_working_directory",
+      { path: "src/main/tools.ts" },
+    );
+    recordPlanToolEvidence(evidence, "read_file", "get_current_working_directory", {
+      path: "Gemma.md",
+    });
+
+    expect(
+      isContradictedBySuccessfulEvidence(
+        "Could not confirm presence of get_current_working_directory in src/main/tools.ts and Gemma.md",
+        criterion,
+        evidence,
+      ),
+    ).toBe(true);
+  });
+
+  it("treats direct contains criteria as satisfied by exact tool evidence", () => {
+    const evidence = createPlanStepEvidence();
+    const criterion =
+      "src/main/tools.ts and Gemma.md contain get_current_working_directory";
+
+    recordPlanToolEvidence(evidence, "read_file", "get_current_working_directory", {
+      path: "src/main/tools.ts",
+    });
+    recordPlanToolEvidence(evidence, "read_file", "get_current_working_directory", {
+      path: "Gemma.md",
+    });
+
+    expect(hasGuardedAlreadyPresentEvidence(criterion, evidence)).toBe(true);
+    expect(
+      isContradictedBySuccessfulEvidence(
+        "Could not confirm presence of get_current_working_directory in src/main/tools.ts and Gemma.md",
+        criterion,
+        evidence,
+      ),
+    ).toBe(true);
+  });
+
   it("requires exact file evidence for inspected criteria", () => {
     const evidence = createPlanStepEvidence();
     const criterion = "src/main/tools.ts and Gemma.md have been inspected.";
@@ -420,6 +468,27 @@ describe("plan step evidence", () => {
     expect(
       forcedVerifyFailureReason(
         "pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("allows required exact commands when a successful run_bash command chains them", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 stdout: pass",
+      {
+        command:
+          "pnpm test tests/main/currentWorkingDirectoryTool.test.ts && pnpm run build",
+      },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build pass.",
         evidence,
       ),
     ).toBeNull();

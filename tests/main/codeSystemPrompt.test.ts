@@ -110,6 +110,13 @@ describe("codeSystemPrompt", () => {
     expect(planPrompt).toContain(
       "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
     );
+    expect(planPrompt).toContain("## Project-specific tool planning context");
+    expect(planPrompt).toContain(
+      "For new tool work, first inspect existing similar tools, tests, package scripts, and project instructions",
+    );
+    expect(planPrompt).toContain(
+      "Do not inject or assume a task-specific test path, focused test command, or build command",
+    );
     expect(planPrompt).toContain(
       "For requested get_current_ host tools, keep the requested tool name exactly and derive the test file by convention",
     );

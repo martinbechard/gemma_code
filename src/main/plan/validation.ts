@@ -177,7 +177,14 @@ function validateStepCommandText(step: ParsedStep): PlanValidationResult {
         !sameStringSet(testPaths, extractFocusedTestCommandPaths(step.prompt)) ||
         !sameStringSet(testPaths, extractFocusedTestCommandPaths(step.verify))
       ) {
-        return { valid: false, reason: TEST_ARTIFACT_COMMAND_REASON };
+        return {
+          valid: false,
+          reason:
+            TEST_ARTIFACT_COMMAND_REASON +
+            " Use " +
+            testPaths.map((path) => `pnpm test ${path}`).join(", ") +
+            " in both prompt and verify.",
+        };
       }
     }
   }
@@ -188,7 +195,19 @@ function validateStepCommandText(step: ParsedStep): PlanValidationResult {
       (command) => !extractFocusedTestCommandTexts(step.verify).includes(command),
     )
   ) {
-    return { valid: false, reason: FOCUSED_TEST_VERIFY_REASON };
+    return {
+      valid: false,
+      reason:
+        FOCUSED_TEST_VERIFY_REASON +
+        " Missing from verify: " +
+        promptFocusedTestCommands
+          .filter(
+            (command) =>
+              !extractFocusedTestCommandTexts(step.verify).includes(command),
+          )
+          .join(", ") +
+        ".",
+    };
   }
 
   const promptBuildCommands = extractBuildCommandTexts(step.prompt);
@@ -197,7 +216,18 @@ function validateStepCommandText(step: ParsedStep): PlanValidationResult {
       (command) => !extractBuildCommandTexts(step.verify).includes(command),
     )
   ) {
-    return { valid: false, reason: BUILD_VERIFY_REASON };
+    return {
+      valid: false,
+      reason:
+        BUILD_VERIFY_REASON +
+        " Missing from verify: " +
+        promptBuildCommands
+          .filter(
+            (command) => !extractBuildCommandTexts(step.verify).includes(command),
+          )
+          .join(", ") +
+        ".",
+    };
   }
 
   return { valid: true };

@@ -80,7 +80,7 @@ export function isContradictedBySuccessfulEvidence(
   evidence: PlanStepEvidence,
 ): boolean {
   if (typeof reason !== "string" || reason.length === 0) return false;
-  if (!/\b(?:did not|failed|failure|not return|not execute)\b/i.test(reason)) {
+  if (!/\b(?:did not|failed|failure|not return|not execute|could not)\b/i.test(reason)) {
     return false;
   }
   if (forcedVerifyFailureReason(criterion, evidence)) return false;
@@ -89,6 +89,14 @@ export function isContradictedBySuccessfulEvidence(
       reason,
     ) &&
     hasSuccessfulRequiredCommandEvidence(criterion, evidence)
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:confirm|presence|present|contain|contains|missing|not found|could not)\b/i.test(
+      reason,
+    ) &&
+    hasGuardedAlreadyPresentEvidence(criterion, evidence)
   ) {
     return true;
   }
@@ -113,7 +121,12 @@ export function hasGuardedAlreadyPresentEvidence(
   criterion: string,
   evidence: PlanStepEvidence,
 ): boolean {
-  if (!GUARDED_ALREADY_PRESENT_RE.test(criterion)) return false;
+  if (
+    !GUARDED_ALREADY_PRESENT_RE.test(criterion) &&
+    !/\b(?:contain|contains|present|presence)\b/i.test(criterion)
+  ) {
+    return false;
+  }
   const toolNames = [
     ...new Set([...criterion.matchAll(GET_CURRENT_TOOL_RE)].map((match) => match[0])),
   ];
@@ -351,6 +364,13 @@ function commandsEquivalent(
   requiredCommand: string,
 ): boolean {
   if (actualCommand === requiredCommand) return true;
+  const actualParts = actualCommand
+    .split(/\s*&&\s*/)
+    .map((part) => normalizeCommand(part))
+    .filter((part) => part.length > 0);
+  if (actualParts.length > 1) {
+    return actualParts.some((part) => commandsEquivalent(part, requiredCommand));
+  }
   return isBuildCommand(actualCommand) && isBuildCommand(requiredCommand);
 }
 

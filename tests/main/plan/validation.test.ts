@@ -209,11 +209,14 @@ describe("validatePlanForExecution", () => {
       ]),
     );
 
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    });
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain(
+      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    );
+    expect(result.reason).toContain(
+      "pnpm test tests/main/currentDatetimeTool.test.ts",
+    );
   });
 
   it("rejects plans whose focused test command uses a different path than the test step updates", () => {
@@ -249,11 +252,12 @@ describe("validatePlanForExecution", () => {
       ]),
     );
 
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    });
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain(
+      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    );
+    expect(result.reason).toContain("pnpm test tests/main/tools.test.ts");
   });
 
   it("rejects plans whose test-changing step omits the focused test command", () => {
@@ -292,11 +296,12 @@ describe("validatePlanForExecution", () => {
       ]),
     );
 
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    });
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain(
+      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    );
+    expect(result.reason).toContain("pnpm test tests/main/tools.test.ts");
   });
 
   it("rejects test-changing steps that put the focused command only in verify", () => {
@@ -333,11 +338,14 @@ describe("validatePlanForExecution", () => {
       ]),
     );
 
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    });
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain(
+      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
+    );
+    expect(result.reason).toContain(
+      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
   });
 
   it("rejects command steps whose verify text omits the exact focused test command", () => {
@@ -371,11 +379,12 @@ describe("validatePlanForExecution", () => {
       ]),
     );
 
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Every step that runs a focused test command must repeat the exact command in its verify field.",
-    });
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain(
+      "Every step that runs a focused test command must repeat the exact command in its verify field.",
+    );
+    expect(result.reason).toContain("pnpm test tests/main/tools.test.ts");
   });
 
   it("accepts concrete source, test, and verification steps", () => {

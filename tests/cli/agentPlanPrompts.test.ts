@@ -243,6 +243,9 @@ describe("buildPlanAmendmentPrompt", () => {
     expect(prompt).toContain(
       "Use the already inspected test path exactly: tests/main/currentDatetimeTool.test.ts.",
     );
+    expect(prompt).toContain(
+      "Use the focused test command exactly: pnpm test tests/main/currentDatetimeTool.test.ts.",
+    );
     expect(prompt).toContain("Do not invent a new test path");
   });
 
@@ -257,14 +260,16 @@ describe("buildPlanAmendmentPrompt", () => {
       "Keep the requested tool name exactly: get_current_working_directory.",
     );
     expect(prompt).toContain("Do not replace it with a different tool name");
-    expect(prompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
     expect(prompt).toContain(
+      "Use project instructions and grounded file evidence to derive placement, tests, and commands.",
+    );
+    expect(prompt).not.toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+    expect(prompt).not.toContain(
       "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
     );
-    expect(prompt).toContain("pnpm run build");
   });
 
-  it("derives host-tool amendment guidance for arbitrary get_current names", () => {
+  it("does not inject derived host-tool amendment facts for arbitrary get_current names", () => {
     const prompt = buildPlanAmendmentPrompt(
       "Plan switched away from the requested tool name: get_current_hostname.",
       [],
@@ -272,9 +277,12 @@ describe("buildPlanAmendmentPrompt", () => {
     );
 
     expect(prompt).toContain("get_current_hostname");
-    expect(prompt).toContain("tests/main/currentHostnameTool.test.ts");
-    expect(prompt).toContain("pnpm test tests/main/currentHostnameTool.test.ts");
     expect(prompt).toContain(
+      "Use project instructions and grounded file evidence to derive placement, tests, and commands.",
+    );
+    expect(prompt).not.toContain("tests/main/currentHostnameTool.test.ts");
+    expect(prompt).not.toContain("pnpm test tests/main/currentHostnameTool.test.ts");
+    expect(prompt).not.toContain(
       "Apply the get_current_ host-tool planning convention from the plan system prompt.",
     );
   });
@@ -286,6 +294,9 @@ describe("buildPlanAmendmentPrompt", () => {
 
     expect(prompt).toContain(
       "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+    );
+    expect(prompt).toContain(
+      "Do not return plan: done; the assembled plan did not pass validation yet.",
     );
   });
 });

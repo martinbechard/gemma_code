@@ -72,18 +72,12 @@ describe("iterative plan assembly", () => {
     expect(prompt).toContain(
       "Our task: create a new LLM tool to retrieve the current working directory.",
     );
-    expect(prompt).toContain("get_current_working_directory");
-    expect(prompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
-    expect(prompt).toContain(
+    expect(prompt).not.toContain("get_current_working_directory");
+    expect(prompt).not.toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+    expect(prompt).not.toContain(
       "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
     );
-    expect(prompt).toContain("pnpm run build");
-    expect(prompt).toContain(
-      "Requested host-tool target facts: get_current_working_directory: test tests/main/currentWorkingDirectoryTool.test.ts",
-    );
-    expect(prompt).toContain(
-      "Apply the get_current_ host-tool planning convention from the plan system prompt.",
-    );
+    expect(prompt).not.toContain("Requested host-tool target facts");
   });
 
   it("infers requested get_current tool names from plain-language tasks", () => {
@@ -220,9 +214,30 @@ describe("iterative plan assembly", () => {
     if (result.kind !== "rejected") return;
     expect(result.reason).toContain("must tell the agent to read or inspect");
     expect(result.retryPrompt).toContain(
-      "Next required step: grounding for get_current_working_directory",
+      "Next required step: grounding. Return a YAML step whose prompt says exactly",
     );
     expect(result.retryPrompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
+  });
+
+  it("rejects host-tool grounding that omits the derived test path", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "plan:",
+        "  steps:",
+        "    - name: explore",
+        "      prompt: Inspect src/main/tools.ts, Gemma.md, package.json, and existing tests to derive placement.",
+        "      verify: src/main/tools.ts, Gemma.md, package.json, and existing tests have been inspected.",
+      ].join("\n"),
+      "create a new LLM tool to retrieve the current working directory",
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.reason).toContain(
+      "Host-tool grounding step for get_current_working_directory must name exact canonical paths",
+    );
+    expect(result.reason).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
   });
 
   it("rejects host-tool grounding verify text that claims a listing was retrieved", () => {
@@ -285,7 +300,7 @@ describe("iterative plan assembly", () => {
     if (repeated.kind !== "rejected") return;
     expect(repeated.reason).toContain("grounding step for get_current_working_directory is already accepted");
     expect(repeated.retryPrompt).toContain(
-      "Next required step: test for get_current_working_directory",
+      "Next required step: test. Return a YAML step whose prompt says exactly",
     );
   });
 
@@ -306,6 +321,52 @@ describe("iterative plan assembly", () => {
     if (result.kind !== "rejected") return;
     expect(result.reason).toContain(
       "must come after the test step that names pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+  });
+
+  it("rejects host-tool test steps that use derived placeholders instead of exact paths and commands", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      currentWorkingDirectoryGroundingStep,
+      "create a new LLM tool to retrieve the current working directory",
+    );
+    if (first.kind !== "accepted") throw new Error("expected grounding step");
+
+    const result = applyPlanAssemblyResponse(
+      first.state,
+      [
+        "plan:",
+        "  steps:",
+        "    - name: test",
+        "      prompt: Write a unit test for get_current_working_directory using the derived test file and focused test command.",
+        "      verify: The unit test for get_current_working_directory has been written and the focused test command is ready.",
+      ].join("\n"),
+      "create a new LLM tool to retrieve the current working directory",
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.reason).toContain(
+      "tests/main/currentWorkingDirectoryTool.test.ts and pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
+    );
+  });
+
+  it("repairs test steps that put the exact focused command only in verify", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "plan:",
+        "  steps:",
+        "    - name: test",
+        "      prompt: Write a unit test in tests/main/duplicateStepNameTest.test.ts to check duplicate step names.",
+        "      verify: The unit test in tests/main/duplicateStepNameTest.test.ts has been written and pnpm test tests/main/duplicateStepNameTest.test.ts has been run.",
+      ].join("\n"),
+    );
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.state.steps[0]?.prompt).toContain(
+      "pnpm test tests/main/duplicateStepNameTest.test.ts",
     );
   });
 
@@ -393,7 +454,7 @@ describe("iterative plan assembly", () => {
     expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_DONE_TEXT);
   });
 
-  it("keeps host-tool facts in the next-step prompt", () => {
+  it("adds dynamic exact host-tool progress guidance to the next-step prompt", () => {
     const result = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
       currentWorkingDirectoryGroundingStep,
@@ -403,14 +464,12 @@ describe("iterative plan assembly", () => {
     expect(result.kind).toBe("accepted");
     if (result.kind !== "accepted") return;
     expect(result.nextPrompt).toContain("Accepted steps so far: ground.");
-    expect(result.nextPrompt).toContain("get_current_working_directory");
+    expect(result.nextPrompt).toContain(
+      "Next required step: test. Return a YAML step whose prompt says exactly",
+    );
     expect(result.nextPrompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
     expect(result.nextPrompt).toContain(
       "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
-    );
-    expect(result.nextPrompt).toContain("pnpm run build");
-    expect(result.nextPrompt).toContain(
-      "Next required step: test for get_current_working_directory",
     );
   });
 
@@ -431,11 +490,54 @@ describe("iterative plan assembly", () => {
     expect(second.kind).toBe("accepted");
     if (second.kind !== "accepted") return;
     expect(second.nextPrompt).toContain(
-      "Next required step: implementation for get_current_working_directory",
+      "Next required step: implementation. Return a YAML step whose prompt says exactly",
     );
     expect(second.nextPrompt).not.toContain(
-      "Next required step: verification for get_current_working_directory",
+      "Next required step: verification. Return a YAML step whose prompt says exactly",
     );
+  });
+
+  it("does not mistake host-tool verification commands for test coverage work", () => {
+    let result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      currentWorkingDirectoryGroundingStep,
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+    if (result.kind !== "accepted") throw new Error("expected grounding step");
+
+    result = applyPlanAssemblyResponse(
+      result.state,
+      currentWorkingDirectoryTestStep,
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+    if (result.kind !== "accepted") throw new Error("expected test step");
+
+    result = applyPlanAssemblyResponse(
+      result.state,
+      [
+        "plan:",
+        "  steps:",
+        "    - name: implementation",
+        "      prompt: Read src/main/tools.ts and Gemma.md, add get_current_working_directory only if missing, and avoid editing those files if get_current_working_directory is already present.",
+        "      verify: src/main/tools.ts and Gemma.md contain get_current_working_directory.",
+      ].join("\n"),
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+    if (result.kind !== "accepted") throw new Error("expected implementation step");
+
+    result = applyPlanAssemblyResponse(
+      result.state,
+      [
+        "plan:",
+        "  steps:",
+        "    - name: verification",
+        "      prompt: Run pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build.",
+        "      verify: pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build pass.",
+      ].join("\n"),
+      "create a new LLM tool to retrieve the current working directory in this project",
+    );
+
+    expect(result.kind).toBe("accepted");
   });
 
   it("assembles accepted steps when the model returns plan done", () => {
@@ -582,7 +684,7 @@ describe("iterative plan assembly", () => {
     );
   });
 
-  it("keeps host-tool facts in rejected-step retry prompts", () => {
+  it("uses dynamic exact host-tool progress guidance in rejected-step retry prompts", () => {
     const rejected = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
       [
@@ -597,13 +699,13 @@ describe("iterative plan assembly", () => {
 
     expect(rejected.kind).toBe("rejected");
     if (rejected.kind !== "rejected") return;
-    expect(rejected.retryPrompt).toContain("get_current_working_directory");
+    expect(rejected.retryPrompt).not.toContain("get_current_working_directory");
     expect(rejected.retryPrompt).toContain(
       "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
     );
-    expect(rejected.retryPrompt).toContain("pnpm run build");
+    expect(rejected.retryPrompt).toContain("tests/main/currentWorkingDirectoryTool.test.ts");
     expect(rejected.retryPrompt).toContain(
-      "Next required step: grounding for get_current_working_directory",
+      "Next required step: grounding. Return a YAML step whose prompt says exactly",
     );
   });
 

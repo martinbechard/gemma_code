@@ -33,7 +33,6 @@ import {
   buildFallbackPlanForTask,
   buildPlanAssemblyInitialPrompt,
   buildRequestedHostToolPlanTargets,
-  buildRequestedToolPlanningGuidance,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
@@ -68,7 +67,7 @@ export { findRequestedToolNames } from "../main/plan/assembly";
 const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
 const MAX_NESTED_PLAN_REJECTIONS = 3;
-const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 3;
+const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
 const CODE_PLAN_NUDGE =
   "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ONLY_CONTINUE_NUDGE =
@@ -417,7 +416,11 @@ export function buildPlanAmendmentPrompt(
       ? [
           "",
           `Use the already inspected test path exactly: ${exactTestPaths.join(", ")}.`,
+          `Use the focused test command exactly: ${exactTestPaths
+            .map((path) => `pnpm test ${path}`)
+            .join(", ")}.`,
           "Do not invent a new test path.",
+          "If the new step creates or updates that test path, its prompt and verify fields must both include the exact focused test command.",
         ]
       : [];
   const toolNameGuidance =
@@ -426,19 +429,13 @@ export function buildPlanAmendmentPrompt(
           "",
           `Keep the requested tool name exactly: ${exactToolNames.join(", ")}.`,
           "Do not replace it with a different tool name.",
+          "Use project instructions and grounded file evidence to derive placement, tests, and commands.",
         ]
-      : [];
-  const requestedToolPlanningGuidance =
-    buildRequestedToolPlanningGuidance(exactToolNames).trim();
-  const exactHostToolGuidance =
-    requestedToolPlanningGuidance.length > 0
-      ? ["", requestedToolPlanningGuidance]
       : [];
   return [
     `The assembled plan is not executable yet: ${reason}`,
     ...testPathGuidance,
     ...toolNameGuidance,
-    ...exactHostToolGuidance,
     "",
     "Executable-plan validation gates:",
     ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
@@ -446,7 +443,7 @@ export function buildPlanAmendmentPrompt(
     "Do not use tools. Emit exactly one additional well-formed YAML plan step now.",
     "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
     "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
-    "When there are no more steps, stop without emitting another YAML plan.",
+    "Do not return plan: done; the assembled plan did not pass validation yet.",
   ].join("\n");
 }
 
@@ -755,6 +752,9 @@ async function runAgentLoop(
   const handleAssembledPlan = (
     plan: ParsedPlan,
   ): AssembledPlanHandlingResult => {
+    const planTestPaths = [
+      ...new Set([...planInspectionEvidence.testPaths, ...findPlanTestPaths(plan.raw)]),
+    ];
     const validation = validatePlanForExecution(plan);
     if (!validation.valid) {
       pushHarnessPrompt(
@@ -762,7 +762,7 @@ async function runAgentLoop(
         "plan assembly validation",
         buildPlanAmendmentPrompt(
           validation.reason,
-          [...planInspectionEvidence.testPaths],
+          planTestPaths,
           findRequestedToolNames(opts.prompt),
         ),
       );
@@ -779,7 +779,7 @@ async function runAgentLoop(
         "plan rejected - amend yaml",
         buildPlanAmendmentPrompt(
           missingGroundingReason,
-          [...planInspectionEvidence.testPaths],
+          planTestPaths,
           requestedToolNames,
         ),
       );
@@ -793,7 +793,7 @@ async function runAgentLoop(
         "plan rejected - amend yaml",
         buildPlanAmendmentPrompt(
           unsafeImplementationReason,
-          [...planInspectionEvidence.testPaths],
+          planTestPaths,
           requestedToolNames,
         ),
       );
@@ -809,7 +809,7 @@ async function runAgentLoop(
         "plan rejected - amend yaml",
         buildPlanAmendmentPrompt(
           `Plan names test paths that were not inspected: ${uninspectedPlanTestPaths.join(", ")}.`,
-          [...planInspectionEvidence.testPaths],
+          planTestPaths,
           requestedToolNames,
         ),
       );
@@ -824,7 +824,7 @@ async function runAgentLoop(
         "plan rejected - amend yaml",
         buildPlanAmendmentPrompt(
           `Plan switched away from the requested tool name: ${missingRequestedToolNames.join(", ")}.`,
-          [...planInspectionEvidence.testPaths],
+          planTestPaths,
           missingRequestedToolNames,
         ),
       );

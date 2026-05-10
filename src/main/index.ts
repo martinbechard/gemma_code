@@ -425,7 +425,7 @@ async function handleRepairModel(model: string): Promise<void> {
 
 const MAX_TOOL_ROUNDS_CHAT = 6;
 const MAX_TOOL_ROUNDS_CODE = 40;
-const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 3;
+const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
@@ -689,6 +689,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
         "Do not describe rewriting, correcting, or ensuring a previous step.",
         "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+        "Do not return plan: done; the assembled plan did not pass validation yet.",
       ].join("\n");
     };
 
