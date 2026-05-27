@@ -90,13 +90,13 @@ describe("codeSystemPrompt", () => {
       "utf8",
     );
 
-    expect(planPrompt).toContain("The host performs deterministic validation of plan shape only");
+    expect(planPrompt).toContain("I perform deterministic validation of plan shape only");
     expect(planPrompt).toContain(
       "The plan must contain at least one executable step.",
     );
     expect(planPrompt).toContain("Every step name must be unique.");
     expect(planPrompt).toContain(
-      "After the assembled plan passes deterministic validation, the host asks for semantic review.",
+      "After the assembled plan passes deterministic validation, I ask for semantic review.",
     );
     expect(planPrompt).toContain(
       "return one complete corrected YAML plan with all steps",
@@ -119,9 +119,22 @@ describe("codeSystemPrompt", () => {
     const commonPrompt = readFileSync(join(process.cwd(), "Gemma.md"), "utf8");
 
     expect(commonPrompt).toContain("you do not write the whole plan at once");
-    expect(commonPrompt).toContain("host accumulates accepted steps");
+    expect(commonPrompt).toContain("I accumulate accepted steps");
     expect(commonPrompt).toContain("response contains no YAML plan and no action");
     expect(commonPrompt).not.toContain("reply exactly");
+  });
+
+  it("does not introduce an undefined platform persona in prompt files", () => {
+    for (const promptFile of [
+      "Gemma.md",
+      "Gemma.code.md",
+      "Gemma.plan.md",
+      "Gemma.execute.md",
+    ]) {
+      const prompt = readFileSync(join(process.cwd(), promptFile), "utf8");
+
+      expect(prompt).not.toMatch(/\bhost\b/i);
+    }
   });
 
   it("loads code and plan instructions for code planning mode", () => {

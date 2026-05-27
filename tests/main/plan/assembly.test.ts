@@ -52,6 +52,7 @@ describe("iterative plan assembly", () => {
     expect(prompt).toContain(
       "<UserRequest>add keyboard shortcuts to the composer.</UserRequest>",
     );
+    expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
     expect(prompt).not.toContain("get_current");
     expect(prompt).not.toContain("pnpm run build");
@@ -72,6 +73,7 @@ describe("iterative plan assembly", () => {
       },
     ]);
     expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_NEXT_PROMPT);
+    expect(result.nextPrompt).not.toMatch(/\bhost\b/i);
     expect(result.nextPrompt).not.toContain("tests/main");
     expect(result.nextPrompt).not.toContain("get_current");
   });
@@ -200,6 +202,7 @@ describe("semantic plan review", () => {
     expect(prompt).toContain("add keyboard shortcuts to the composer");
     expect(prompt).toContain("name: explore");
     expect(prompt).toContain(PLAN_SEMANTIC_REVIEW_PASS_TEXT);
+    expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
     expect(prompt).not.toContain("get_current");
   });

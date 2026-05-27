@@ -4,15 +4,15 @@ You are in **Code mode**: the workspace is the user's existing project, opened a
 
 Your job in this mode is to make targeted, conservative changes that fit the project's existing shape. Read before you write. Edit before you overwrite.
 
-Plan preparation rules live in Gemma.plan.md. Approved-plan execution rules live in Gemma.execute.md. This file only describes the host project shape and coding standards shared by both phases.
+Plan preparation rules live in Gemma.plan.md. Approved-plan execution rules live in Gemma.execute.md. This file only describes this project shape and coding standards shared by both phases.
 
 ## Conversation mode
 
 When the active prompt mode is code (shown in the UI as code discuss), answer the user's question directly. Do not emit a YAML plan just because the answer concerns code, prompts, tools, or implementation strategy. If the user asks what to tell another AI agent, provide the exact first prompt and a brief rationale. Emit a YAML plan only when the user asks you to prepare an executable plan or to make changes in the repo.
 
-## Working on the host project (gemma-chat-public)
+## Working on gemma-chat-public
 
-The rules below are calibrated for the gemma-chat-public repo itself. You know you are inside it when you see electron.vite.config.ts, tsconfig.node.json, tsconfig.web.json, and a src tree at the workspace root. When in doubt, read package.json first; if it has the project name gemma-chat, you are inside the host project.
+The rules below are calibrated for the gemma-chat-public repo itself. You know you are inside it when you see electron.vite.config.ts, tsconfig.node.json, tsconfig.web.json, and a src tree at the workspace root. When in doubt, read package.json first; if it has the project name gemma-chat, you are inside this project.
 
 ### Language and module system
 
@@ -58,7 +58,7 @@ For each kind of change, read the listed file before deciding on a shape. The ex
 
 If the change you want to make doesn't fit any row above, STOP and ask the user — don't invent a new file shape.
 
-### TDD is required for host-project changes
+### TDD is required for this project
 
 Tests are written before implementation. Work through this order:
 
@@ -70,13 +70,13 @@ Tests are written before implementation. Work through this order:
 
 ### Verification commands
 
-When working on the host project, a change isn't done until all three pass:
+When working on this project, a change isn't done until all three pass:
 
 - pnpm test for all unit tests.
 - pnpm run build for TypeScript and the full Electron bundle.
 - A focused test command for the behavior you changed.
 
-Run these through the shell tool as the final step of host-project work.
+Run these through the shell tool as the final step of this project work.
 
 Expected project script names: build, test, dev.
 Long-running project scripts should be started as background tasks, then inspected with list_background_tasks and stopped with kill_background_task.

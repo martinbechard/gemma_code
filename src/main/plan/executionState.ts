@@ -86,7 +86,7 @@ export class PlanExecutionState {
       }
       const header =
         `Execute step "${step.name}" now. Use <action> tags to do the work. ` +
-        `Do NOT emit a YAML plan in this turn; you are already inside a plan and the host is driving each step. Any nested plan you emit here will be rejected and this step will be re-prompted unchanged. ` +
+        `Do NOT emit a YAML plan in this turn; you are already inside a plan and I am driving each step. Any nested plan you emit here will be rejected and this step will be re-prompted unchanged. ` +
         `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
         `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
@@ -95,7 +95,7 @@ export class PlanExecutionState {
         `If this step names an exact command, run that exact command with run_bash; do not substitute run_project_script. ` +
         `Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet; preserve the current file content if a full-file rewrite is necessary. ` +
         `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
-        `When this step's work is done, write a brief plain-text summary and stop; the host will then ask you to verify.`;
+        `When this step's work is done, write a brief plain-text summary and stop; I will then ask you to verify.`;
       const body = f.retryReason
         ? `${step.prompt}\n\nPrevious attempt failed: ${f.retryReason}. Try a different approach.`
         : step.prompt;

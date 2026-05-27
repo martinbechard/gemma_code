@@ -27,7 +27,7 @@ The harness must not require paths under tests/main, derived get current tool na
 ## Success Criteria
 
 - Auto mode can assemble a plan for arbitrary repository tasks.
-- The host never injects task-specific files or commands.
-- The host still persists the final plan file before execution.
+- The harness never injects task-specific files or commands.
+- The harness still persists the final plan file before execution.
 - Invalid plan syntax is caught deterministically.
 - Plan completeness and task fit are reviewed semantically by the model.

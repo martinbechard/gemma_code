@@ -87,8 +87,8 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
       taskSentence +
       PLAN_ASSEMBLY_USER_REQUEST_CLOSE,
     "",
-    "Build the plan one step at a time. The host will accumulate accepted YAML fragments and save the final plan file after review.",
-    "Choose exact files, tests, commands, and documentation steps from the request and project evidence; the host will not provide request-specific paths or commands.",
+    "Build the plan one step at a time. I will accumulate the steps that you produce and save the final plan file after review.",
+    "Choose exact files, tests, commands, and documentation steps from the request and project evidence; I will not provide request-specific paths or commands.",
     "",
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
   ].join("\n");

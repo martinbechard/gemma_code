@@ -271,7 +271,7 @@ export function buildPrematureVerifyPrompt(reason: string | null): string {
     : "The current step is not complete yet.";
   return [
     "You emitted a verify tag while executing a step body.",
-    "Only emit verify tags after the host sends a Verify request.",
+    "Only emit verify tags after I send a Verify request.",
     reasonLine,
     "Continue the current step now with the next required action tag, or write a blocker summary if you cannot proceed.",
   ].join("\n");

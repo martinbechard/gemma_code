@@ -239,13 +239,14 @@ describe("buildRepeatedEditFailureRecoveryPrompt", () => {
 });
 
 describe("buildPrematureVerifyPrompt", () => {
-  it("keeps a step alive when verify is emitted before the host asks", () => {
+  it("keeps a step alive when verify is emitted before the harness asks", () => {
     const prompt = buildPrematureVerifyPrompt(
       "missing read_file evidence for: package.json",
     );
 
     expect(prompt).toContain("verify tag while executing a step body");
-    expect(prompt).toContain("Only emit verify tags after the host sends");
+    expect(prompt).toContain("Only emit verify tags after I send");
+    expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).toContain("missing read_file evidence for: package.json");
     expect(prompt).toContain("next required action tag");
   });
