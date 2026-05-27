@@ -84,53 +84,22 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain("preserve the current file content");
   });
 
-  it("states the concrete executable-plan validation gates in plan mode", () => {
+  it("states the generic executable-plan validation and review gates in plan mode", () => {
     const planPrompt = readFileSync(
       join(process.cwd(), "Gemma.plan.md"),
       "utf8",
     );
 
+    expect(planPrompt).toContain("The host performs deterministic validation of plan shape only");
     expect(planPrompt).toContain(
-      "At least four accepted steps are required before execution: grounding, test, implementation, and verification.",
+      "The plan must contain at least one executable step.",
+    );
+    expect(planPrompt).toContain("Every step name must be unique.");
+    expect(planPrompt).toContain(
+      "After the assembled plan passes deterministic validation, the host asks for semantic review.",
     );
     expect(planPrompt).toContain(
-      "Step names are not fixed, but the step name, prompt, or verify text must include the words the validator looks for.",
-    );
-    expect(planPrompt).toContain("Every accepted step name must be unique.");
-    expect(planPrompt).toContain(
-      "If a response is rejected for a duplicate step name, the retry must use a different name from the accepted step names.",
-    );
-    expect(planPrompt).toContain("ground, read, inspect, or list");
-    expect(planPrompt).toContain("test or spec");
-    expect(planPrompt).toContain("implement, edit, add, or update");
-    expect(planPrompt).toContain("verify, build, pnpm, npm, or run");
-    expect(planPrompt).toContain(
-      "The assembled plan must name one exact tests/main test file path that ends in .test.ts.",
-    );
-    expect(planPrompt).toContain(
-      "The assembled plan must name the exact focused test command it will run, such as pnpm test tests/main/currentDatetimeTool.test.ts.",
-    );
-    expect(planPrompt).toContain("## Project-specific tool planning context");
-    expect(planPrompt).toContain(
-      "For new tool work, first inspect existing similar tools, tests, package scripts, and project instructions",
-    );
-    expect(planPrompt).toContain(
-      "Do not inject or assume a task-specific test path, focused test command, or build command",
-    );
-    expect(planPrompt).toContain(
-      "For requested get_current_ host tools, keep the requested tool name exactly and derive the test file by convention",
-    );
-    expect(planPrompt).toContain(
-      "get_current_hostname uses tests/main/currentHostnameTool.test.ts",
-    );
-    expect(planPrompt).toContain(
-      "Do not restate the convention inside each plan step",
-    );
-    expect(planPrompt).not.toContain(
-      "For a current working directory tool request",
-    );
-    expect(planPrompt).toContain(
-      "The assembled plan must name the exact build command it will run: pnpm run build or npm run build.",
+      "return one complete corrected YAML plan with all steps",
     );
     expect(planPrompt).toContain(
       "Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.",
@@ -138,7 +107,9 @@ describe("codeSystemPrompt", () => {
     expect(planPrompt).toContain(
       "relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed",
     );
-    expect(planPrompt).toContain("Keep requested get_current_ tool names exactly.");
+    expect(planPrompt).not.toContain("tests/main/currentDatetimeTool.test.ts");
+    expect(planPrompt).not.toContain("get_current_hostname");
+    expect(planPrompt).not.toContain("pnpm run build or npm run build");
     for (const line of EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES) {
       expect(planPrompt).toContain(line);
     }

@@ -37,385 +37,89 @@ describe("validatePlanForExecution", () => {
     });
   });
 
-  it("rejects placeholder wording copied from the sample plan", () => {
+  it("rejects duplicate step names", () => {
     const result = validatePlanForExecution(
       parsedPlan([
         {
           name: "ground",
-          prompt: "Read src/main/tools.ts and the relevant tests.",
-          verify: "The relevant tests have been read.",
+          prompt: "Read package.json.",
+          verify: "package.json has been read.",
+        },
+        {
+          name: "ground",
+          prompt: "Read README.md.",
+          verify: "README.md has been read.",
         },
       ]),
     );
 
     expect(result.valid).toBe(false);
     if (result.valid) return;
-    expect(result.reason).toContain("ground");
-    expect(result.reason).toContain("relevant tests");
+    expect(result.reason).toContain("Duplicate step name");
   });
 
-  it("rejects sample placeholder filenames and tool names", () => {
+  it("rejects empty step fields", () => {
     const result = validatePlanForExecution(
       parsedPlan([
         {
           name: "ground",
-          prompt:
-            "Read src/main/tools.ts, Gemma.md, package.json, and tests/main/exampleTool.test.ts.",
-          verify:
-            "src/main/tools.ts, Gemma.md, package.json, and tests/main/exampleTool.test.ts have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/main/exampleTool.test.ts so it proves requested_tool_name, then run pnpm test tests/main/exampleTool.test.ts.",
-          verify:
-            "pnpm test tests/main/exampleTool.test.ts fails for requested_tool_name.",
-        },
-        {
-          name: "implement",
-          prompt:
-            "Edit src/main/tools.ts and Gemma.md to add requested_tool_name.",
-          verify: "src/main/tools.ts and Gemma.md contain requested_tool_name.",
-        },
-        {
-          name: "verify",
-          prompt:
-            "Run pnpm test tests/main/exampleTool.test.ts, pnpm test, and pnpm run build.",
-          verify: "All three commands pass.",
+          prompt: "   ",
+          verify: "package.json has been read.",
         },
       ]),
     );
 
     expect(result.valid).toBe(false);
     if (result.valid) return;
-    expect(result.reason).toContain("exampleTool.test.ts");
+    expect(result.reason).toContain("prompt");
   });
 
-  it("rejects plans that do not cover the full feature workflow", () => {
+  it("accepts concrete plans that use project-specific paths outside tests/main", () => {
     const result = validatePlanForExecution(
       parsedPlan([
         {
-          name: "ground",
-          prompt: "Read src/main/tools.ts and tests/main/projectScriptTool.test.ts.",
-          verify: "The named files have been read.",
+          name: "ground_extension",
+          prompt:
+            "Read src/renderer/src/components/Composer.tsx and tests/renderer/components/Message.test.ts.",
+          verify:
+            "src/renderer/src/components/Composer.tsx and tests/renderer/components/Message.test.ts have been read.",
+        },
+        {
+          name: "cover_extension",
+          prompt:
+            "Update tests/renderer/components/Message.test.ts to cover composer-visible message rendering, then run npm test tests/renderer/components/Message.test.ts.",
+          verify:
+            "npm test tests/renderer/components/Message.test.ts passes for composer-visible message rendering.",
+        },
+        {
+          name: "implement_extension",
+          prompt:
+            "Edit src/renderer/src/components/Composer.tsx to render the message state selected by the test.",
+          verify:
+            "src/renderer/src/components/Composer.tsx renders the message state selected by the test.",
+        },
+        {
+          name: "verify_extension",
+          prompt:
+            "Run npm test tests/renderer/components/Message.test.ts and npm run typecheck:web.",
+          verify:
+            "npm test tests/renderer/components/Message.test.ts and npm run typecheck:web pass.",
         },
       ]),
     );
 
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan must include grounding, test, implementation, and verification steps.",
-    });
+    expect(result).toEqual({ valid: true });
   });
 
-  it("rejects plans that do not name an exact test file", () => {
+  it("does not require a fixed four step workflow", () => {
     const result = validatePlanForExecution(
       parsedPlan([
         {
-          name: "ground",
-          prompt: "Read src/main/tools.ts and Gemma.md.",
-          verify: "src/main/tools.ts and Gemma.md have been read.",
-        },
-        {
-          name: "test",
-          prompt: "Add a failing test for get_current_datetime and run pnpm test.",
-          verify: "pnpm test fails for the missing behavior.",
-        },
-        {
-          name: "implement",
-          prompt: "Edit src/main/tools.ts and Gemma.md to add get_current_datetime.",
-          verify: "src/main/tools.ts and Gemma.md contain get_current_datetime.",
-        },
-        {
-          name: "verify",
-          prompt: "Run pnpm test and pnpm run build.",
-          verify: "pnpm run build passes.",
-        },
-      ]),
-    );
-
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan must name the exact tests/main test file path it will create or update.",
-    });
-  });
-
-  it("rejects host-project test paths outside tests/main", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground",
+          name: "document_decision",
           prompt:
-            "Read src/main/tools.ts, Gemma.md, and tests/currentWorkingDirectoryTool.test.ts.",
+            "Create design/general-purpose-plan-harness.md describing deterministic syntax validation and model semantic review.",
           verify:
-            "src/main/tools.ts, Gemma.md, and tests/currentWorkingDirectoryTool.test.ts have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/currentWorkingDirectoryTool.test.ts and run pnpm test tests/currentWorkingDirectoryTool.test.ts.",
-          verify:
-            "pnpm test tests/currentWorkingDirectoryTool.test.ts fails because get_current_working_directory is missing.",
-        },
-        {
-          name: "implement",
-          prompt:
-            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
-          verify:
-            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
-        },
-        {
-          name: "verify",
-          prompt:
-            "Run pnpm test tests/currentWorkingDirectoryTool.test.ts, pnpm test, and pnpm run build.",
-          verify: "pnpm run build passes.",
-        },
-      ]),
-    );
-
-    expect(result).toEqual({
-      valid: false,
-      reason:
-        "Plan must name the exact tests/main test file path it will create or update.",
-    });
-  });
-
-  it("rejects plans that do not name exact verification commands", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground",
-          prompt: "Read src/main/tools.ts and tests/main/currentDatetimeTool.test.ts.",
-          verify: "The named files have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/main/currentDatetimeTool.test.ts to cover get_current_datetime.",
-          verify: "The focused test fails for the missing behavior.",
-        },
-        {
-          name: "implement",
-          prompt: "Edit src/main/tools.ts and Gemma.md to add get_current_datetime.",
-          verify: "src/main/tools.ts and Gemma.md contain get_current_datetime.",
-        },
-        {
-          name: "verify",
-          prompt: "Run the focused tests and the build.",
-          verify: "The commands pass.",
-        },
-      ]),
-    );
-
-    expect(result.valid).toBe(false);
-    if (result.valid) return;
-    expect(result.reason).toContain(
-      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    );
-    expect(result.reason).toContain(
-      "pnpm test tests/main/currentDatetimeTool.test.ts",
-    );
-  });
-
-  it("rejects plans whose focused test command uses a different path than the test step updates", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground",
-          prompt:
-            "Read src/main/tools.ts, Gemma.md, and tests/main/tools.test.ts.",
-          verify:
-            "src/main/tools.ts, Gemma.md, and tests/main/tools.test.ts have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/main/tools.test.ts to cover get_current_working_directory.",
-          verify:
-            "tests/main/tools.test.ts covers get_current_working_directory.",
-        },
-        {
-          name: "implement",
-          prompt:
-            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
-          verify:
-            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
-        },
-        {
-          name: "verify",
-          prompt:
-            "Run pnpm test tests/main/getCurrentWorkingDirectoryTool.test.ts, pnpm test, and pnpm run build.",
-          verify: "All three commands pass.",
-        },
-      ]),
-    );
-
-    expect(result.valid).toBe(false);
-    if (result.valid) return;
-    expect(result.reason).toContain(
-      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    );
-    expect(result.reason).toContain("pnpm test tests/main/tools.test.ts");
-  });
-
-  it("rejects plans whose test-changing step omits the focused test command", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground_tool_creation",
-          prompt: "Read src/main/tools.ts and src/main/index.ts.",
-          verify: "src/main/tools.ts and src/main/index.ts have been read.",
-        },
-        {
-          name: "test_tool_implementation",
-          prompt:
-            "Update tests/main/tools.test.ts to cover get_current_working_directory.",
-          verify:
-            "tests/main/tools.test.ts covers get_current_working_directory.",
-        },
-        {
-          name: "implement_tool_and_verify",
-          prompt:
-            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
-          verify:
-            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
-        },
-        {
-          name: "finalize_and_build",
-          prompt: "Run pnpm run build.",
-          verify: "pnpm run build completed successfully.",
-        },
-        {
-          name: "execute_test_and_build",
-          prompt:
-            "Run pnpm test tests/main/tools.test.ts and then run pnpm run build.",
-          verify: "The unit test passed, and pnpm run build completed successfully.",
-        },
-      ]),
-    );
-
-    expect(result.valid).toBe(false);
-    if (result.valid) return;
-    expect(result.reason).toContain(
-      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    );
-    expect(result.reason).toContain("pnpm test tests/main/tools.test.ts");
-  });
-
-  it("rejects test-changing steps that put the focused command only in verify", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground",
-          prompt:
-            "Read src/main/tools.ts and tests/main/currentWorkingDirectoryTool.test.ts.",
-          verify:
-            "src/main/tools.ts and tests/main/currentWorkingDirectoryTool.test.ts have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/main/currentWorkingDirectoryTool.test.ts to cover get_current_working_directory.",
-          verify:
-            "tests/main/currentWorkingDirectoryTool.test.ts covers get_current_working_directory, and pnpm test tests/main/currentWorkingDirectoryTool.test.ts passes.",
-        },
-        {
-          name: "implement",
-          prompt:
-            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
-          verify:
-            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
-        },
-        {
-          name: "verify",
-          prompt:
-            "Run pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build.",
-          verify:
-            "pnpm test tests/main/currentWorkingDirectoryTool.test.ts and pnpm run build pass.",
-        },
-      ]),
-    );
-
-    expect(result.valid).toBe(false);
-    if (result.valid) return;
-    expect(result.reason).toContain(
-      "Plan test step must name the exact focused test command for the same tests/main test file it creates or updates.",
-    );
-    expect(result.reason).toContain(
-      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
-    );
-  });
-
-  it("rejects command steps whose verify text omits the exact focused test command", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground",
-          prompt: "Read src/main/tools.ts and tests/main/tools.test.ts.",
-          verify: "src/main/tools.ts and tests/main/tools.test.ts have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/main/tools.test.ts to cover get_current_working_directory and run pnpm test tests/main/tools.test.ts.",
-          verify:
-            "pnpm test tests/main/tools.test.ts fails because get_current_working_directory is missing.",
-        },
-        {
-          name: "implement",
-          prompt:
-            "Edit src/main/tools.ts and Gemma.md to add get_current_working_directory.",
-          verify:
-            "src/main/tools.ts and Gemma.md contain get_current_working_directory.",
-        },
-        {
-          name: "verify",
-          prompt:
-            "Run pnpm test tests/main/tools.test.ts, pnpm test, and pnpm run build.",
-          verify: "The focused test, full test suite, and build pass.",
-        },
-      ]),
-    );
-
-    expect(result.valid).toBe(false);
-    if (result.valid) return;
-    expect(result.reason).toContain(
-      "Every step that runs a focused test command must repeat the exact command in its verify field.",
-    );
-    expect(result.reason).toContain("pnpm test tests/main/tools.test.ts");
-  });
-
-  it("accepts concrete source, test, and verification steps", () => {
-    const result = validatePlanForExecution(
-      parsedPlan([
-        {
-          name: "ground",
-          prompt:
-            "Read src/main/tools.ts, Gemma.md, and tests/main/projectScriptTool.test.ts.",
-          verify:
-            "The tool registry, prompt file, and tests/main/projectScriptTool.test.ts have been read.",
-        },
-        {
-          name: "test",
-          prompt:
-            "Update tests/main/projectScriptTool.test.ts to cover get_current_datetime and run pnpm test tests/main/projectScriptTool.test.ts.",
-          verify:
-            "pnpm test tests/main/projectScriptTool.test.ts fails because get_current_datetime is missing.",
-        },
-        {
-          name: "implement",
-          prompt: "Edit src/main/tools.ts and Gemma.md to add get_current_datetime.",
-          verify:
-            "src/main/tools.ts and Gemma.md contain the get_current_datetime tool.",
-        },
-        {
-          name: "verify",
-          prompt:
-            "Run pnpm test tests/main/projectScriptTool.test.ts, pnpm test, and pnpm run build.",
-          verify:
-            "pnpm test tests/main/projectScriptTool.test.ts, pnpm test, and pnpm run build pass.",
+            "design/general-purpose-plan-harness.md describes deterministic syntax validation and model semantic review.",
         },
       ]),
     );

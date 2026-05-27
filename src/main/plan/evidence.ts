@@ -27,11 +27,9 @@ const MAX_REASON_CHARS = 160;
 const REPEATED_FAILED_ACTION_THRESHOLD = 2;
 const COMMAND_EXIT_RE = /\bexit=(?:0|[1-9]\d*|killed)\b/;
 const FAILED_EXIT_RE = /\bexit=(?:[1-9]\d*|killed)\b/;
-const FOCUSED_TEST_COMMAND_RE =
-  /\b(?:pnpm|npm)\s+test\s+tests\/main\/[A-Za-z0-9_./-]+\.test\.ts\b/g;
-const BARE_TEST_COMMAND_RE =
-  /\b(?:pnpm|npm)\s+test\b(?!\s+tests\/main\/[A-Za-z0-9_./-]+\.test\.ts)/g;
-const BUILD_COMMAND_RE = /\b(?:pnpm|npm)\s+run\s+build\b/g;
+const TEST_COMMAND_RE =
+  /\b(?:pnpm|npm)\s+test(?:\s+--)?(?:\s+[A-Za-z0-9_./-]+\.test\.[tj]sx?)?\b/g;
+const PACKAGE_RUN_COMMAND_RE = /\b(?:pnpm|npm)\s+run\s+[A-Za-z0-9:_-]+\b/g;
 const PATH_RE =
   /\b(?:src|tests)\/[A-Za-z0-9_./-]+\b|\bGemma(?:\.[A-Za-z]+)?\.md\b|\bpackage\.json\b/g;
 const TOOL_ERROR_RE =
@@ -329,13 +327,10 @@ function commandFromAction(
 
 function extractRequiredCommands(criterion: string): string[] {
   const commands = new Set<string>();
-  for (const match of criterion.matchAll(FOCUSED_TEST_COMMAND_RE)) {
+  for (const match of criterion.matchAll(TEST_COMMAND_RE)) {
     commands.add(normalizeCommand(match[0]));
   }
-  for (const match of criterion.matchAll(BARE_TEST_COMMAND_RE)) {
-    commands.add(normalizeCommand(match[0]));
-  }
-  for (const match of criterion.matchAll(BUILD_COMMAND_RE)) {
+  for (const match of criterion.matchAll(PACKAGE_RUN_COMMAND_RE)) {
     commands.add(normalizeCommand(match[0]));
   }
   return [...commands];

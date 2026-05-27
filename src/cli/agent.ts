@@ -30,16 +30,11 @@ import {
 } from "../main/plan/validation";
 import {
   applyPlanAssemblyResponse,
-  buildFallbackPlanForTask,
   buildPlanAssemblyInitialPrompt,
-  buildRequestedHostToolPlanTargets,
+  applyPlanSemanticReviewResponse,
+  buildPlanSemanticReviewPrompt,
   createPlanAssemblyState,
-  finalizeExecutablePlanAssembly,
-  finalizePlanAssembly,
-  findRequestedToolNames,
   isPlanAssemblyDoneResponse,
-  missingKnownHostToolGroundingReason,
-  unsafeKnownHostToolImplementationReason,
   type PlanAssemblyState,
 } from "../main/plan/assembly";
 import {
@@ -62,7 +57,6 @@ import {
 } from "./conversation";
 
 export { buildIncompleteStepPrompt } from "../main/plan/evidence";
-export { findRequestedToolNames } from "../main/plan/assembly";
 
 const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
@@ -78,11 +72,6 @@ const MAX_PLAN_ONLY_NUDGES = 3;
 const MAX_CODE_NO_PROGRESS_NUDGES = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
-const HOST_TOOL_CANONICAL_PATHS = [
-  "src/main/tools.ts",
-  "Gemma.md",
-  "package.json",
-] as const;
 type PlanCompletionMode = "executable" | "model-done";
 type AssembledPlanHandlingResult = "retry" | "done" | "started";
 
@@ -109,7 +98,6 @@ interface PlanInspectionEvidence {
   listedFiles: boolean;
   readPaths: Set<string>;
   bashCommands: string[];
-  testPaths: Set<string>;
 }
 
 interface PlanAssemblyBufferCheck {
@@ -152,7 +140,6 @@ export function createPlanInspectionEvidence(): PlanInspectionEvidence {
     listedFiles: false,
     readPaths: new Set(),
     bashCommands: [],
-    testPaths: new Set(),
   };
 }
 
@@ -171,9 +158,6 @@ export function recordPlanInspectionEvidence(
     const path = actionArgs.path;
     if (typeof path === "string" && path.length > 0) {
       evidence.readPaths.add(path);
-      if (/^tests\/main\/.+\.test\.ts$/.test(path)) {
-        evidence.testPaths.add(path);
-      }
     }
     return;
   }
@@ -181,55 +165,8 @@ export function recordPlanInspectionEvidence(
     const command = actionArgs.command;
     if (typeof command === "string" && command.length > 0) {
       evidence.bashCommands.push(command);
-      const combinedOutput = `${command}\n${result}`;
-      for (const match of combinedOutput.matchAll(
-        /tests\/+main\/[^\s"'<>]+\.test\.ts/g,
-      )) {
-        evidence.testPaths.add(match[0].replace(/\/+/g, "/"));
-      }
     }
   }
-}
-
-function hasInspectedPath(
-  evidence: PlanInspectionEvidence,
-  path: string,
-): boolean {
-  return (
-    evidence.readPaths.has(path) ||
-    evidence.bashCommands.some((command) => command.includes(path))
-  );
-}
-
-function hasFocusedTestsMainSearch(evidence: PlanInspectionEvidence): boolean {
-  return evidence.bashCommands.some((command) =>
-    /^rg\s+--files\s+tests\/main\b/.test(command),
-  );
-}
-
-function isHostToolRequest(text: string): boolean {
-  return (
-    /\bget_current_datetime\b/i.test(text) ||
-    /\bcurrent\s+date\s+time\b/i.test(text) ||
-    /\bcurrent\s+datetime\b/i.test(text) ||
-    /\bcurrent\s+working\s+directory\b/i.test(text) ||
-    /\bprocess\s+current\s+working\s+directory\b/i.test(text) ||
-    /\bget_current_working_directory\b/i.test(text) ||
-    /\bnew\s+[^.\n]*tool\b/i.test(text) ||
-    /\bcreate\s+[^.\n]*tool\b/i.test(text) ||
-    /\badd\s+[^.\n]*tool\b/i.test(text) ||
-    /\bsrc\/main\/tools\.ts\b/.test(text)
-  );
-}
-
-export function findPlanTestPaths(text: string): string[] {
-  return [
-    ...new Set(
-      [...text.matchAll(/\btests\/+main\/[^\s"'<>]+\.test\.ts\b/g)].map(
-        (match) => match[0].replace(/\/+/g, "/"),
-      ),
-    ),
-  ];
 }
 
 export function shouldHandlePlanAssemblyBuffer(
@@ -246,114 +183,12 @@ export function shouldHandlePlanAssemblyBuffer(
   );
 }
 
-function findMissingHostToolInspectionEvidence(
-  evidence: PlanInspectionEvidence,
-  prompt: string,
-): string[] {
-  const missing: string[] = HOST_TOOL_CANONICAL_PATHS.filter(
-    (path) => !hasInspectedPath(evidence, path),
-  );
-  const requestedTargets = buildRequestedHostToolPlanTargets(
-    findRequestedToolNames(prompt),
-  );
-  const hasRequestedTestEvidence =
-    requestedTargets.length > 0 &&
-    requestedTargets.some((target) => hasInspectedPath(evidence, target.testPath));
-  const hasTestEvidence =
-    evidence.testPaths.size > 0 ||
-    hasFocusedTestsMainSearch(evidence) ||
-    hasRequestedTestEvidence;
-  if (!hasTestEvidence) {
-    const targetPaths = requestedTargets.map((target) => target.testPath);
-    missing.push(
-      targetPaths.length > 0
-        ? `one exact ${targetPaths.join(", ")} file or focused tests/main search`
-        : "one exact tests/main/*.test.ts file or focused tests/main search",
-    );
-  }
-  return missing;
-}
-
-function findUninspectedPlanTestPaths(
-  plan: ParsedPlan,
-  evidence: PlanInspectionEvidence,
-): string[] {
-  if (evidence.testPaths.size === 0) return [];
-  return findPlanTestPaths(plan.raw).filter(
-    (path) => !evidence.testPaths.has(path),
-  );
-}
-
-function nextInspectionPathForMissing(missingEvidence: string[]): string {
-  for (const path of HOST_TOOL_CANONICAL_PATHS) {
-    if (missingEvidence.includes(path)) return path;
-  }
-  return HOST_TOOL_CANONICAL_PATHS[0];
-}
-
-function buildInspectionActionForMissing(
-  missingEvidence: string[],
-  prompt: string,
-): string[] {
-  for (const path of HOST_TOOL_CANONICAL_PATHS) {
-    if (missingEvidence.includes(path)) {
-      return [
-        `<action name="read_file">`,
-        `<path>${path}</path>`,
-        `</action>`,
-      ];
-    }
-  }
-
-  if (
-    missingEvidence.some((entry) =>
-      entry.includes("one exact tests/main") ||
-      entry.includes("file or focused tests/main search"),
-    )
-  ) {
-    const requestedTargets = buildRequestedHostToolPlanTargets(
-      findRequestedToolNames(prompt),
-    );
-    const targetFileNames = requestedTargets.map((target) =>
-      testFileName(target.testPath),
-    );
-    const testSearchPattern =
-      targetFileNames.length > 0
-        ? [...targetFileNames, "Tool", "tools"].join("|")
-        : "Tool|tools|current|Current|ProjectScript|codeSystemPrompt";
-    return [
-      `<action name="run_bash">`,
-      `<command>rg --files tests/main | rg "${testSearchPattern}"</command>`,
-      `</action>`,
-    ];
-  }
-
-  const nextPath = nextInspectionPathForMissing(missingEvidence);
-  return [
-    `<action name="read_file">`,
-    `<path>${nextPath}</path>`,
-    `</action>`,
-  ];
-}
-
 export function buildRepeatedActionPrompt(
-  opts: AgentRunOptions,
-  evidence: PlanInspectionEvidence,
+  _opts: AgentRunOptions,
+  _evidence: PlanInspectionEvidence,
   actionName: string,
   repeatedActionCount: number,
 ): string {
-  const missingEvidence =
-    opts.mode === "code" && isHostToolRequest(opts.prompt)
-      ? findMissingHostToolInspectionEvidence(evidence, opts.prompt)
-      : [];
-  if (missingEvidence.length > 0) {
-    return [
-      `You repeated the same ${actionName} action ${repeatedActionCount} times.`,
-      `Missing inspection evidence: ${missingEvidence.join(", ")}.`,
-      "Your next response must be exactly this action tag and nothing else:",
-      ...buildInspectionActionForMissing(missingEvidence, opts.prompt),
-    ].join("\n");
-  }
   return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action. Do not emit a YAML plan while recovering from a repeated action. Do not call ${actionName} with the same parameters again.`;
 }
 
@@ -376,73 +211,24 @@ export function hasSatisfiedReadOnlyStepEvidence(
 }
 
 export function buildCodeNoProgressPrompt(
-  opts: AgentRunOptions,
-  evidence: PlanInspectionEvidence,
+  _opts: AgentRunOptions,
+  _evidence: PlanInspectionEvidence,
 ): string {
-  const missingEvidence =
-    opts.mode === "code" && isHostToolRequest(opts.prompt)
-      ? findMissingHostToolInspectionEvidence(evidence, opts.prompt)
-      : [];
-  if (missingEvidence.length > 0) {
-    return [
-      "You stopped without an action or YAML plan, but the host-project tool plan still needs concrete inspection evidence.",
-      `Missing inspection evidence: ${missingEvidence.join(", ")}.`,
-      "Your next response must be exactly this action tag and nothing else:",
-      ...buildInspectionActionForMissing(missingEvidence, opts.prompt),
-    ].join("\n");
-  }
-  if (opts.mode === "code" && isHostToolRequest(opts.prompt)) {
-    return [
-      "All required host-project tool inspection evidence has been gathered.",
-      "Do not use tools. Emit exactly one well-formed YAML plan step now.",
-      "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
-      "When there are no more steps, stop without emitting another YAML plan.",
-    ].join("\n");
-  }
   return CODE_PLAN_NUDGE;
-}
-
-function testFileName(testPath: string): string {
-  return testPath.split("/").at(-1) ?? testPath;
 }
 
 export function buildPlanAmendmentPrompt(
   reason: string,
-  exactTestPaths: string[] = [],
-  exactToolNames: string[] = [],
 ): string {
-  const testPathGuidance =
-    exactTestPaths.length > 0
-      ? [
-          "",
-          `Use the already inspected test path exactly: ${exactTestPaths.join(", ")}.`,
-          `Use the focused test command exactly: ${exactTestPaths
-            .map((path) => `pnpm test ${path}`)
-            .join(", ")}.`,
-          "Do not invent a new test path.",
-          "If the new step creates or updates that test path, its prompt and verify fields must both include the exact focused test command.",
-        ]
-      : [];
-  const toolNameGuidance =
-    exactToolNames.length > 0
-      ? [
-          "",
-          `Keep the requested tool name exactly: ${exactToolNames.join(", ")}.`,
-          "Do not replace it with a different tool name.",
-          "Use project instructions and grounded file evidence to derive placement, tests, and commands.",
-        ]
-      : [];
   return [
     `The assembled plan is not executable yet: ${reason}`,
-    ...testPathGuidance,
-    ...toolNameGuidance,
     "",
     "Executable-plan validation gates:",
     ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
     "",
     "Do not use tools. Emit exactly one additional well-formed YAML plan step now.",
     "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
-    "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+    "The new step's prompt and verify fields must contain exact task-specific files, artifacts, commands, or verification evidence.",
     "Do not return plan: done; the assembled plan did not pass validation yet.",
   ].join("\n");
 }
@@ -693,7 +479,7 @@ async function runAgentLoop(
   let nestedPlanRejections = 0;
   let planAssemblyState: PlanAssemblyState | null =
     opts.mode === "code" && !initialPlan ? createPlanAssemblyState() : null;
-  let planAssemblyValidationActive = false;
+  let planSemanticReviewPlan: ParsedPlan | null = null;
   let planAssemblyValidationRetries = 0;
   let lastActionKey: string | null = null;
   let repeatedActionCount = 0;
@@ -752,81 +538,12 @@ async function runAgentLoop(
   const handleAssembledPlan = (
     plan: ParsedPlan,
   ): AssembledPlanHandlingResult => {
-    const planTestPaths = [
-      ...new Set([...planInspectionEvidence.testPaths, ...findPlanTestPaths(plan.raw)]),
-    ];
     const validation = validatePlanForExecution(plan);
     if (!validation.valid) {
       pushHarnessPrompt(
         messages,
         "plan assembly validation",
-        buildPlanAmendmentPrompt(
-          validation.reason,
-          planTestPaths,
-          findRequestedToolNames(opts.prompt),
-        ),
-      );
-      return "retry";
-    }
-    const requestedToolNames = findRequestedToolNames(opts.prompt);
-    const missingGroundingReason = missingKnownHostToolGroundingReason(
-      plan,
-      requestedToolNames,
-    );
-    if (missingGroundingReason) {
-      pushHarnessPrompt(
-        messages,
-        "plan rejected - amend yaml",
-        buildPlanAmendmentPrompt(
-          missingGroundingReason,
-          planTestPaths,
-          requestedToolNames,
-        ),
-      );
-      return "retry";
-    }
-    const unsafeImplementationReason =
-      unsafeKnownHostToolImplementationReason(plan, requestedToolNames);
-    if (unsafeImplementationReason) {
-      pushHarnessPrompt(
-        messages,
-        "plan rejected - amend yaml",
-        buildPlanAmendmentPrompt(
-          unsafeImplementationReason,
-          planTestPaths,
-          requestedToolNames,
-        ),
-      );
-      return "retry";
-    }
-    const uninspectedPlanTestPaths =
-      planInspectionEvidence.testPaths.size > 0
-        ? findUninspectedPlanTestPaths(plan, planInspectionEvidence)
-        : [];
-    if (uninspectedPlanTestPaths.length > 0) {
-      pushHarnessPrompt(
-        messages,
-        "plan rejected - amend yaml",
-        buildPlanAmendmentPrompt(
-          `Plan names test paths that were not inspected: ${uninspectedPlanTestPaths.join(", ")}.`,
-          planTestPaths,
-          requestedToolNames,
-        ),
-      );
-      return "retry";
-    }
-    const missingRequestedToolNames = requestedToolNames.filter(
-      (name) => !plan.raw.includes(name),
-    );
-    if (missingRequestedToolNames.length > 0) {
-      pushHarnessPrompt(
-        messages,
-        "plan rejected - amend yaml",
-        buildPlanAmendmentPrompt(
-          `Plan switched away from the requested tool name: ${missingRequestedToolNames.join(", ")}.`,
-          planTestPaths,
-          missingRequestedToolNames,
-        ),
+        buildPlanAmendmentPrompt(validation.reason),
       );
       return "retry";
     }
@@ -840,26 +557,6 @@ async function runAgentLoop(
     planState = new PlanExecutionState(plan);
     usePlanExecutionPrompt();
     return "started";
-  };
-
-  const handleAssembledPlanWithFallback = (
-    plan: ParsedPlan,
-  ): AssembledPlanHandlingResult => {
-    const handling = handleAssembledPlan(plan);
-    if (handling !== "retry") {
-      planAssemblyValidationRetries = 0;
-      return handling;
-    }
-
-    planAssemblyValidationRetries += 1;
-    if (planAssemblyValidationRetries < MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES) {
-      return handling;
-    }
-
-    const fallbackPlan = buildFallbackPlanForTask(opts.prompt);
-    if (!fallbackPlan) return handling;
-    meta("using fallback host-tool plan after repeated invalid amendments");
-    return handleAssembledPlan(fallbackPlan);
   };
 
   const harnessMode = opts.harnessMode ?? "active";
@@ -1261,6 +958,38 @@ async function runAgentLoop(
       continue;
     }
 
+    if (planSemanticReviewPlan) {
+      messages.push({ role: "assistant", content: buffer });
+      const review = applyPlanSemanticReviewResponse(
+        planSemanticReviewPlan,
+        buffer,
+      );
+      if (review.kind === "rejected") {
+        pushHarnessPrompt(
+          messages,
+          "plan semantic review retry",
+          review.retryPrompt,
+        );
+        continue;
+      }
+      planSemanticReviewPlan = null;
+      planAssemblyState = null;
+      planAssemblyValidationRetries = 0;
+      const handling = handleAssembledPlan(review.plan);
+      if (handling === "retry") continue;
+      if (handling === "done") return;
+      logPlanEvents();
+      const next = planState?.nextPrompt();
+      if (!next) {
+        meta("done — plan complete");
+        return;
+      }
+      prepareStepEvidence(next);
+      pushHarnessPrompt(messages, next.kind, next.text);
+      awaitingVerify = next.kind === "verify";
+      continue;
+    }
+
     const planFound = findNextPlan(buffer);
     if (
       shouldHandlePlanAssemblyBuffer({
@@ -1298,68 +1027,50 @@ async function runAgentLoop(
           planAssemblyState = assembled.state;
           messages.push({ role: "assistant", content: buffer });
           if (assembled.kind === "accepted") {
-            if (planAssemblyValidationActive) {
-              const plan = finalizePlanAssembly(assembled.state);
-              if (!plan) {
-                pushHarnessPrompt(
-                  messages,
-                  "plan assembly",
-                  assembled.nextPrompt,
-                );
-                continue;
-              }
-              const handling = handleAssembledPlanWithFallback(plan);
-              planAssemblyValidationActive = handling === "retry";
-              if (handling === "retry") continue;
-              if (handling === "done") return;
-            }
-            if (opts.planCompletionMode !== "model-done") {
-              const executablePlan = finalizeExecutablePlanAssembly(
-                assembled.state,
-              );
-              if (executablePlan) {
-                const handling = handleAssembledPlanWithFallback(executablePlan);
-                planAssemblyValidationActive = handling === "retry";
-                if (handling === "retry") continue;
-                if (handling === "done") return;
-              } else {
-                pushHarnessPrompt(
-                  messages,
-                  "plan assembly",
-                  assembled.nextPrompt,
-                );
-                continue;
-              }
-            } else {
-              pushHarnessPrompt(messages, "plan assembly", assembled.nextPrompt);
-              continue;
-            }
+            planAssemblyValidationRetries = 0;
+            pushHarnessPrompt(messages, "plan assembly", assembled.nextPrompt);
+            continue;
           } else if (assembled.kind === "rejected") {
             planAssemblyValidationRetries += 1;
-            const fallbackPlan =
+            if (
               planAssemblyValidationRetries >=
               MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                ? buildFallbackPlanForTask(opts.prompt)
-                : null;
-            if (fallbackPlan) {
-              meta("using fallback host-tool plan after repeated assembly rejections");
-              const handling = handleAssembledPlan(fallbackPlan);
-              planAssemblyValidationActive = handling === "retry";
-              if (handling === "retry") continue;
-              if (handling === "done") return;
-            } else {
+            ) {
+              meta("done - plan assembly rejected too many responses");
+              return;
+            }
             pushHarnessPrompt(
               messages,
               "plan assembly retry",
               assembled.retryPrompt,
             );
             continue;
-            }
           } else {
-            const handling = handleAssembledPlanWithFallback(assembled.plan);
-            planAssemblyValidationActive = handling === "retry";
-            if (handling === "retry") continue;
-            if (handling === "done") return;
+            const validation = validatePlanForExecution(assembled.plan);
+            if (!validation.valid) {
+              planAssemblyValidationRetries += 1;
+              if (
+                planAssemblyValidationRetries >=
+                MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+              ) {
+                meta("done - assembled plan failed deterministic validation too many times");
+                return;
+              }
+              pushHarnessPrompt(
+                messages,
+                "plan assembly validation",
+                buildPlanAmendmentPrompt(validation.reason),
+              );
+              continue;
+            }
+            planAssemblyValidationRetries = 0;
+            planSemanticReviewPlan = assembled.plan;
+            pushHarnessPrompt(
+              messages,
+              "plan semantic review",
+              buildPlanSemanticReviewPrompt(assembled.plan, opts.prompt),
+            );
+            continue;
           }
         }
       } catch (e) {

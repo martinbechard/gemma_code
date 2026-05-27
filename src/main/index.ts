@@ -60,6 +60,7 @@ import {
   containsCompletePlan,
   findNextPlan,
   parseVerifyResult,
+  type ParsedPlan,
 } from "./plan/parser";
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
@@ -71,16 +72,11 @@ import {
 import {
   PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
-  buildFallbackPlanForTask,
+  applyPlanSemanticReviewResponse,
   buildPlanAssemblyInitialPrompt,
-  buildRequestedToolPlanningGuidance,
+  buildPlanSemanticReviewPrompt,
   createPlanAssemblyState,
-  finalizeExecutablePlanAssembly,
-  finalizePlanAssembly,
-  findRequestedToolNames,
   isPlanAssemblyDoneResponse,
-  missingKnownHostToolGroundingReason,
-  unsafeKnownHostToolImplementationReason,
   type PlanAssemblyState,
 } from "./plan/assembly";
 import {
@@ -676,19 +672,15 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       pushHarnessPrompt(label, content);
     };
     const buildPlanValidationPrompt = (reason: string): string => {
-      const requestedToolGuidance = buildRequestedToolPlanningGuidance(
-        findRequestedToolNames(planningTask),
-      ).trim();
       return [
         "The assembled plan is not executable yet: " + reason,
-        ...(requestedToolGuidance.length > 0 ? ["", requestedToolGuidance] : []),
         "",
         "Executable-plan validation gates:",
         ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
         "",
         "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
         "Do not describe rewriting, correcting, or ensuring a previous step.",
-        "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
+        "The new step's prompt and verify fields must contain exact task-specific files, artifacts, commands, or verification evidence.",
         "Do not return plan: done; the assembled plan did not pass validation yet.",
       ].join("\n");
     };
@@ -744,7 +736,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     let planAssemblyState: PlanAssemblyState | null = topLevelPlanHarnessEnabled
       ? createPlanAssemblyState()
       : null;
-    let planAssemblyValidationActive = false;
+    let planSemanticReviewPlan: ParsedPlan | null = null;
     let planAssemblyValidationRetries = 0;
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
@@ -1507,6 +1499,41 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       //     turn into a recursive loop where each sub-plan re-emits the same
       //     step prompt. Reject the plan and re-prompt the current step so
       //     the model does the work directly.
+      if (planSemanticReviewPlan) {
+        flushBufferToUI();
+        const review = applyPlanSemanticReviewResponse(
+          planSemanticReviewPlan,
+          buffer,
+        );
+        baseMessages.push({ role: "assistant", content: buffer });
+        if (review.kind === "rejected") {
+          pushPlanningHarnessPrompt(
+            "plan semantic review retry",
+            review.retryPrompt,
+          );
+          emit({
+            type: "activity",
+            activity: { kind: "thinking", chars: 0 },
+          });
+          continue;
+        }
+        planSemanticReviewPlan = null;
+        planAssemblyState = null;
+        planAssemblyValidationRetries = 0;
+        savePlan(req.conversationId, review.plan.raw);
+        emit({
+          type: "plan_proposed",
+          steps: review.plan.steps.map((s) => ({
+            name: s.name,
+            prompt: s.prompt,
+            verify: s.verify,
+          })),
+        });
+        emit({ type: "activity", activity: { kind: "idle" } });
+        emit({ type: "done" });
+        return;
+      }
+
       const planFound =
         planState || topLevelPlanHarnessEnabled ? findNextPlan(buffer) : null;
       const planAssemblyDone =
@@ -1544,157 +1571,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           );
           planAssemblyState = assembled.state;
           if (assembled.kind === "accepted") {
-            if (planAssemblyValidationActive) {
-              const amendedPlan = finalizePlanAssembly(assembled.state);
-              if (amendedPlan) {
-                const validation = validatePlanForExecution(amendedPlan);
-                if (!validation.valid) {
-                  planAssemblyValidationRetries += 1;
-                  const fallbackPlan =
-                    planAssemblyValidationRetries >=
-                    MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                      ? buildFallbackPlanForTask(planningTask)
-                      : null;
-                  if (fallbackPlan) {
-                    planAssemblyValidationActive = false;
-                    planAssemblyValidationRetries = 0;
-                    savePlan(req.conversationId, fallbackPlan.raw);
-                    emit({
-                      type: "plan_proposed",
-                      steps: fallbackPlan.steps.map((s) => ({
-                        name: s.name,
-                        prompt: s.prompt,
-                        verify: s.verify,
-                      })),
-                    });
-                    emit({ type: "activity", activity: { kind: "idle" } });
-                    emit({ type: "done" });
-                    return;
-                  }
-                  const validationPrompt = buildPlanValidationPrompt(
-                    validation.reason,
-                  );
-                  baseMessages.push({ role: "assistant", content: buffer });
-                  pushPlanningHarnessPrompt(
-                    "plan assembly validation",
-                    validationPrompt,
-                  );
-                  emit({
-                    type: "activity",
-                    activity: { kind: "thinking", chars: 0 },
-                  });
-                  continue;
-                }
-                const requestedToolNames = findRequestedToolNames(planningTask);
-                const missingGroundingReason =
-                  missingKnownHostToolGroundingReason(
-                    amendedPlan,
-                    requestedToolNames,
-                  );
-                if (missingGroundingReason) {
-                  planAssemblyValidationRetries += 1;
-                  const fallbackPlan =
-                    planAssemblyValidationRetries >=
-                    MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                      ? buildFallbackPlanForTask(planningTask)
-                      : null;
-                  if (fallbackPlan) {
-                    planAssemblyValidationActive = false;
-                    planAssemblyValidationRetries = 0;
-                    savePlan(req.conversationId, fallbackPlan.raw);
-                    emit({
-                      type: "plan_proposed",
-                      steps: fallbackPlan.steps.map((s) => ({
-                        name: s.name,
-                        prompt: s.prompt,
-                        verify: s.verify,
-                      })),
-                    });
-                    emit({ type: "activity", activity: { kind: "idle" } });
-                    emit({ type: "done" });
-                    return;
-                  }
-                  baseMessages.push({ role: "assistant", content: buffer });
-                  pushPlanningHarnessPrompt(
-                    "plan assembly validation",
-                    buildPlanValidationPrompt(missingGroundingReason),
-                  );
-                  emit({
-                    type: "activity",
-                    activity: { kind: "thinking", chars: 0 },
-                  });
-                  continue;
-                }
-                const unsafeImplementationReason =
-                  unsafeKnownHostToolImplementationReason(
-                    amendedPlan,
-                    requestedToolNames,
-                  );
-                if (unsafeImplementationReason) {
-                  planAssemblyValidationRetries += 1;
-                  const fallbackPlan =
-                    planAssemblyValidationRetries >=
-                    MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                      ? buildFallbackPlanForTask(planningTask)
-                      : null;
-                  if (fallbackPlan) {
-                    planAssemblyValidationActive = false;
-                    planAssemblyValidationRetries = 0;
-                    savePlan(req.conversationId, fallbackPlan.raw);
-                    emit({
-                      type: "plan_proposed",
-                      steps: fallbackPlan.steps.map((s) => ({
-                        name: s.name,
-                        prompt: s.prompt,
-                        verify: s.verify,
-                      })),
-                    });
-                    emit({ type: "activity", activity: { kind: "idle" } });
-                    emit({ type: "done" });
-                    return;
-                  }
-                  baseMessages.push({ role: "assistant", content: buffer });
-                  pushPlanningHarnessPrompt(
-                    "plan assembly validation",
-                    buildPlanValidationPrompt(unsafeImplementationReason),
-                  );
-                  emit({
-                    type: "activity",
-                    activity: { kind: "thinking", chars: 0 },
-                  });
-                  continue;
-                }
-                planAssemblyValidationActive = false;
-                savePlan(req.conversationId, amendedPlan.raw);
-                emit({
-                  type: "plan_proposed",
-                  steps: amendedPlan.steps.map((s) => ({
-                    name: s.name,
-                    prompt: s.prompt,
-                    verify: s.verify,
-                  })),
-                });
-                emit({ type: "activity", activity: { kind: "idle" } });
-                emit({ type: "done" });
-                return;
-              }
-            }
-            const executablePlan = finalizeExecutablePlanAssembly(assembled.state);
-            if (executablePlan) {
-              baseMessages.push({ role: "assistant", content: buffer });
-              savePlan(req.conversationId, executablePlan.raw);
-              emit({
-                type: "plan_proposed",
-                steps: executablePlan.steps.map((s) => ({
-                  name: s.name,
-                  prompt: s.prompt,
-                  verify: s.verify,
-                })),
-              });
-              emit({ type: "activity", activity: { kind: "idle" } });
-              emit({ type: "done" });
-              return;
-            }
+            planAssemblyValidationRetries = 0;
             baseMessages.push({ role: "assistant", content: buffer });
             pushPlanningHarnessPrompt("plan assembly", assembled.nextPrompt);
             emit({
@@ -1705,22 +1582,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
           if (assembled.kind === "rejected") {
             planAssemblyValidationRetries += 1;
-            const fallbackPlan =
+            if (
               planAssemblyValidationRetries >=
               MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                ? buildFallbackPlanForTask(planningTask)
-                : null;
-            if (fallbackPlan) {
-              planAssemblyValidationActive = false;
-              planAssemblyValidationRetries = 0;
-              savePlan(req.conversationId, fallbackPlan.raw);
+            ) {
               emit({
-                type: "plan_proposed",
-                steps: fallbackPlan.steps.map((s) => ({
-                  name: s.name,
-                  prompt: s.prompt,
-                  verify: s.verify,
-                })),
+                type: "error",
+                error: "Plan assembly rejected too many responses.",
               });
               emit({ type: "activity", activity: { kind: "idle" } });
               emit({ type: "done" });
@@ -1739,24 +1607,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           }
           const validation = validatePlanForExecution(assembled.plan);
           if (!validation.valid) {
-            planAssemblyValidationActive = true;
             planAssemblyValidationRetries += 1;
-            const fallbackPlan =
+            if (
               planAssemblyValidationRetries >=
               MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                ? buildFallbackPlanForTask(planningTask)
-                : null;
-            if (fallbackPlan) {
-              planAssemblyValidationActive = false;
-              planAssemblyValidationRetries = 0;
-              savePlan(req.conversationId, fallbackPlan.raw);
+            ) {
               emit({
-                type: "plan_proposed",
-                steps: fallbackPlan.steps.map((s) => ({
-                  name: s.name,
-                  prompt: s.prompt,
-                  verify: s.verify,
-                })),
+                type: "error",
+                error: "Assembled plan failed deterministic validation too many times.",
               });
               emit({ type: "activity", activity: { kind: "idle" } });
               emit({ type: "done" });
@@ -1773,98 +1631,18 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             continue;
           }
-          const requestedToolNames = findRequestedToolNames(planningTask);
-          const missingGroundingReason = missingKnownHostToolGroundingReason(
-            assembled.plan,
-            requestedToolNames,
+          planAssemblyValidationRetries = 0;
+          planSemanticReviewPlan = assembled.plan;
+          baseMessages.push({ role: "assistant", content: buffer });
+          pushPlanningHarnessPrompt(
+            "plan semantic review",
+            buildPlanSemanticReviewPrompt(assembled.plan, planningTask),
           );
-          if (missingGroundingReason) {
-            planAssemblyValidationActive = true;
-            planAssemblyValidationRetries += 1;
-            const fallbackPlan =
-              planAssemblyValidationRetries >=
-              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                ? buildFallbackPlanForTask(planningTask)
-                : null;
-            if (fallbackPlan) {
-              planAssemblyValidationActive = false;
-              planAssemblyValidationRetries = 0;
-              savePlan(req.conversationId, fallbackPlan.raw);
-              emit({
-                type: "plan_proposed",
-                steps: fallbackPlan.steps.map((s) => ({
-                  name: s.name,
-                  prompt: s.prompt,
-                  verify: s.verify,
-                })),
-              });
-              emit({ type: "activity", activity: { kind: "idle" } });
-              emit({ type: "done" });
-              return;
-            }
-            baseMessages.push({ role: "assistant", content: buffer });
-            pushPlanningHarnessPrompt(
-              "plan assembly validation",
-              buildPlanValidationPrompt(missingGroundingReason),
-            );
-            emit({
-              type: "activity",
-              activity: { kind: "thinking", chars: 0 },
-            });
-            continue;
-          }
-          const unsafeImplementationReason =
-            unsafeKnownHostToolImplementationReason(
-              assembled.plan,
-              requestedToolNames,
-            );
-          if (unsafeImplementationReason) {
-            planAssemblyValidationActive = true;
-            planAssemblyValidationRetries += 1;
-            const fallbackPlan =
-              planAssemblyValidationRetries >=
-              MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
-                ? buildFallbackPlanForTask(planningTask)
-                : null;
-            if (fallbackPlan) {
-              planAssemblyValidationActive = false;
-              planAssemblyValidationRetries = 0;
-              savePlan(req.conversationId, fallbackPlan.raw);
-              emit({
-                type: "plan_proposed",
-                steps: fallbackPlan.steps.map((s) => ({
-                  name: s.name,
-                  prompt: s.prompt,
-                  verify: s.verify,
-                })),
-              });
-              emit({ type: "activity", activity: { kind: "idle" } });
-              emit({ type: "done" });
-              return;
-            }
-            baseMessages.push({ role: "assistant", content: buffer });
-            pushPlanningHarnessPrompt(
-              "plan assembly validation",
-              buildPlanValidationPrompt(unsafeImplementationReason),
-            );
-            emit({
-              type: "activity",
-              activity: { kind: "thinking", chars: 0 },
-            });
-            continue;
-          }
-          savePlan(req.conversationId, assembled.plan.raw);
           emit({
-            type: "plan_proposed",
-            steps: assembled.plan.steps.map((s) => ({
-              name: s.name,
-              prompt: s.prompt,
-              verify: s.verify,
-            })),
+            type: "activity",
+            activity: { kind: "thinking", chars: 0 },
           });
-          emit({ type: "activity", activity: { kind: "idle" } });
-          emit({ type: "done" });
-          return;
+          continue;
         }
         // Nested plan inside an active step: reject and re-prompt the same
         // step. The state machine is left untouched (still in step phase),

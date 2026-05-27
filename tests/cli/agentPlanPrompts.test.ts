@@ -10,8 +10,6 @@ import {
   buildRepeatedEditFailureRecoveryPrompt,
   buildRepeatedRecoveryReadPrompt,
   createPlanInspectionEvidence,
-  findPlanTestPaths,
-  findRequestedToolNames,
   recordPlanInspectionEvidence,
   shouldHandlePlanAssemblyBuffer,
   type AgentRunOptions,
@@ -26,146 +24,81 @@ import {
 } from "../../src/main/plan/assembly";
 import { EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES } from "../../src/main/plan/validation";
 
-const hostToolOpts: AgentRunOptions = {
+const codeOpts: AgentRunOptions = {
   mode: "code",
   model: "mlx-community/gemma-4-e2b-it-4bit",
-  prompt: "Create a tool to obtain the current date time.",
+  prompt: "Add keyboard shortcuts to the composer.",
   enableBash: true,
   worktree: true,
 };
 
-describe("buildRepeatedActionPrompt", () => {
-  it("does not treat failed read_file results as inspected test evidence", () => {
+describe("plan inspection evidence", () => {
+  it("ignores failed tool results", () => {
     const evidence = createPlanInspectionEvidence();
+
     recordPlanInspectionEvidence(
       evidence,
       "read_file",
-      { path: "tests/main/exampleTool.test.ts" },
-      "Error reading tests/main/exampleTool.test.ts: ENOENT",
+      { path: "src/main/tools.ts" },
+      "Error reading src/main/tools.ts: ENOENT",
     );
 
-    const prompt = buildCodeNoProgressPrompt(hostToolOpts, evidence);
-
-    expect(prompt).toContain("one exact tests/main/currentDatetimeTool.test.ts");
+    expect(evidence.readPaths.size).toBe(0);
   });
 
-  it("forces the next missing host-tool inspection path after a repeated action", () => {
+  it("records successful file and command evidence without deriving fixed paths", () => {
     const evidence = createPlanInspectionEvidence();
+
     recordPlanInspectionEvidence(
       evidence,
       "read_file",
-      { path: "tests/main/currentDatetimeTool.test.ts" },
+      { path: "src/renderer/src/components/Composer.tsx" },
       "ok",
     );
-
-    const prompt = buildRepeatedActionPrompt(
-      hostToolOpts,
+    recordPlanInspectionEvidence(
       evidence,
-      "read_file",
-      2,
+      "run_bash",
+      { command: "npm test tests/renderer/components/Message.test.ts" },
+      "pass",
     );
 
-    expect(prompt).toContain("src/main/tools.ts");
-    expect(prompt).toContain("<action name=\"read_file\">");
-    expect(prompt).toContain("<path>src/main/tools.ts</path>");
-    expect(prompt).not.toContain("emit exactly one YAML plan step");
+    expect(evidence.readPaths.has("src/renderer/src/components/Composer.tsx")).toBe(
+      true,
+    );
+    expect(evidence.bashCommands).toEqual([
+      "npm test tests/renderer/components/Message.test.ts",
+    ]);
   });
+});
 
-  it("falls back to a generic nudge when no host-tool evidence is missing", () => {
-    const evidence = createPlanInspectionEvidence();
-    for (const path of [
-      "src/main/tools.ts",
-      "Gemma.md",
-      "package.json",
-      "tests/main/currentDatetimeTool.test.ts",
-    ]) {
-      recordPlanInspectionEvidence(evidence, "read_file", { path }, "ok");
-    }
-
+describe("buildRepeatedActionPrompt", () => {
+  it("uses a generic repeated action recovery prompt", () => {
     const prompt = buildRepeatedActionPrompt(
-      hostToolOpts,
-      evidence,
+      codeOpts,
+      createPlanInspectionEvidence(),
       "read_file",
       2,
     );
 
+    expect(prompt).toContain("read_file");
     expect(prompt).toContain("move to the next distinct action");
     expect(prompt).toContain("Do not emit a YAML plan");
-    expect(prompt).not.toContain("Your next response must be exactly this action tag");
-  });
-
-  it("forces a tests/main search when only test evidence is missing", () => {
-    const evidence = createPlanInspectionEvidence();
-    for (const path of ["src/main/tools.ts", "Gemma.md", "package.json"]) {
-      recordPlanInspectionEvidence(evidence, "read_file", { path }, "ok");
-    }
-
-    const prompt = buildRepeatedActionPrompt(
-      hostToolOpts,
-      evidence,
-      "read_file",
-      2,
-    );
-
-    expect(prompt).toContain("<action name=\"run_bash\">");
-    expect(prompt).toContain("rg --files tests/main");
-    expect(prompt).toContain("currentDatetimeTool.test.ts");
+    expect(prompt).not.toContain("src/main/tools.ts");
+    expect(prompt).not.toContain("tests/main");
   });
 });
 
 describe("buildCodeNoProgressPrompt", () => {
-  it("forces src/main/tools.ts as the first host-tool inspection path", () => {
-    const evidence = createPlanInspectionEvidence();
-
-    const prompt = buildCodeNoProgressPrompt(hostToolOpts, evidence);
-
-    expect(prompt).toContain("src/main/tools.ts");
-    expect(prompt).toContain("<action name=\"read_file\">");
-    expect(prompt).toContain("<path>src/main/tools.ts</path>");
-  });
-
-  it("recognizes current working directory tool requests", () => {
-    const evidence = createPlanInspectionEvidence();
+  it("nudges generic planning progress without injecting files or commands", () => {
     const prompt = buildCodeNoProgressPrompt(
-      {
-        ...hostToolOpts,
-        prompt:
-          "Create get_current_working_directory for the process current working directory.",
-      },
-      evidence,
+      codeOpts,
+      createPlanInspectionEvidence(),
     );
 
-    expect(prompt).toContain("<path>src/main/tools.ts</path>");
-  });
-
-  it("asks for tests/main discovery when canonical files are already inspected", () => {
-    const evidence = createPlanInspectionEvidence();
-    for (const path of ["src/main/tools.ts", "Gemma.md", "package.json"]) {
-      recordPlanInspectionEvidence(evidence, "read_file", { path }, "ok");
-    }
-
-    const prompt = buildCodeNoProgressPrompt(hostToolOpts, evidence);
-
-    expect(prompt).toContain("<action name=\"run_bash\">");
-    expect(prompt).toContain("rg --files tests/main");
-  });
-
-  it("asks for a YAML plan when all host-tool evidence is already inspected", () => {
-    const evidence = createPlanInspectionEvidence();
-    for (const path of [
-      "src/main/tools.ts",
-      "Gemma.md",
-      "package.json",
-      "tests/main/currentDatetimeTool.test.ts",
-    ]) {
-      recordPlanInspectionEvidence(evidence, "read_file", { path }, "ok");
-    }
-
-    const prompt = buildCodeNoProgressPrompt(hostToolOpts, evidence);
-
-    expect(prompt).toContain("Emit exactly one well-formed YAML plan step");
-    expect(prompt).toContain("Do not use tools");
-    expect(prompt).not.toContain("<action");
+    expect(prompt).toContain("Continue in planning mode");
+    expect(prompt).toContain("emit exactly one YAML plan step");
+    expect(prompt).not.toContain("src/main/tools.ts");
+    expect(prompt).not.toContain("tests/main");
   });
 });
 
@@ -216,7 +149,7 @@ describe("hasSatisfiedReadOnlyStepEvidence", () => {
 describe("buildPlanAmendmentPrompt", () => {
   it("asks for one additional YAML plan step without more tools", () => {
     const prompt = buildPlanAmendmentPrompt(
-      "Plan must include grounding, test, implementation, and verification steps.",
+      "Plan has no executable steps.",
     );
 
     expect(prompt).toContain("Do not use tools");
@@ -224,80 +157,16 @@ describe("buildPlanAmendmentPrompt", () => {
     expect(prompt).toContain("name, prompt, and verify");
   });
 
-  it("includes the executable-plan validation gates when amending a rejected plan", () => {
+  it("includes generic deterministic validation guidance", () => {
     const prompt = buildPlanAmendmentPrompt(
-      "Plan must name the exact tests/main test file path it will create or update.",
+      "Plan has no executable steps.",
     );
 
     for (const line of EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES) {
       expect(prompt).toContain(line);
     }
-  });
-
-  it("names the inspected test path when amending a bad test path", () => {
-    const prompt = buildPlanAmendmentPrompt(
-      "Plan must name the exact tests/main test file path it will create or update.",
-      ["tests/main/currentDatetimeTool.test.ts"],
-    );
-
-    expect(prompt).toContain(
-      "Use the already inspected test path exactly: tests/main/currentDatetimeTool.test.ts.",
-    );
-    expect(prompt).toContain(
-      "Use the focused test command exactly: pnpm test tests/main/currentDatetimeTool.test.ts.",
-    );
-    expect(prompt).toContain("Do not invent a new test path");
-  });
-
-  it("names the requested tool when amending a plan that switched tasks", () => {
-    const prompt = buildPlanAmendmentPrompt(
-      "Plan switched away from the requested tool name: get_current_working_directory.",
-      ["tests/main/currentDatetimeTool.test.ts"],
-      ["get_current_working_directory"],
-    );
-
-    expect(prompt).toContain(
-      "Keep the requested tool name exactly: get_current_working_directory.",
-    );
-    expect(prompt).toContain("Do not replace it with a different tool name");
-    expect(prompt).toContain(
-      "Use project instructions and grounded file evidence to derive placement, tests, and commands.",
-    );
-    expect(prompt).not.toContain("tests/main/currentWorkingDirectoryTool.test.ts");
-    expect(prompt).not.toContain(
-      "pnpm test tests/main/currentWorkingDirectoryTool.test.ts",
-    );
-  });
-
-  it("does not inject derived host-tool amendment facts for arbitrary get_current names", () => {
-    const prompt = buildPlanAmendmentPrompt(
-      "Plan switched away from the requested tool name: get_current_hostname.",
-      [],
-      ["get_current_hostname"],
-    );
-
-    expect(prompt).toContain("get_current_hostname");
-    expect(prompt).toContain(
-      "Use project instructions and grounded file evidence to derive placement, tests, and commands.",
-    );
-    expect(prompt).not.toContain("tests/main/currentHostnameTool.test.ts");
-    expect(prompt).not.toContain("pnpm test tests/main/currentHostnameTool.test.ts");
-    expect(prompt).not.toContain(
-      "Apply the get_current_ host-tool planning convention from the plan system prompt.",
-    );
-  });
-
-  it("requires exact missing commands in both prompt and verify fields", () => {
-    const prompt = buildPlanAmendmentPrompt(
-      "Plan must name the exact test command it will run.",
-    );
-
-    expect(prompt).toContain(
-      "The new step's prompt and verify fields must both contain each exact missing command or file path text.",
-    );
-    expect(prompt).toContain(
-      "Do not return plan: done; the assembled plan did not pass validation yet.",
-    );
+    expect(prompt).not.toContain("focused test command");
+    expect(prompt).not.toContain("tests/main");
   });
 });
 
@@ -334,34 +203,6 @@ describe("shouldHandlePlanAssemblyBuffer", () => {
         buffer: "I need more context.",
       }),
     ).toBe(false);
-  });
-});
-
-describe("findRequestedToolNames", () => {
-  it("extracts requested get_current tool names from the prompt", () => {
-    expect(
-      findRequestedToolNames(
-        "Name the tool get_current_working_directory, not a generic one.",
-      ),
-    ).toEqual(["get_current_working_directory"]);
-  });
-
-  it("infers the current working directory tool name from plain language", () => {
-    expect(
-      findRequestedToolNames(
-        "create a new LLM tool to retrieve the current working directory",
-      ),
-    ).toEqual(["get_current_working_directory"]);
-  });
-});
-
-describe("findPlanTestPaths", () => {
-  it("extracts normalized tests/main test paths from a plan", () => {
-    expect(
-      findPlanTestPaths(
-        "Run pnpm test tests//main/currentDatetimeTool.test.ts and read tests/main/currentDatetimeTool.test.ts.",
-      ),
-    ).toEqual(["tests/main/currentDatetimeTool.test.ts"]);
   });
 });
 

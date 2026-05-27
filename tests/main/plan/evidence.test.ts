@@ -473,6 +473,24 @@ describe("plan step evidence", () => {
     ).toBeNull();
   });
 
+  it("allows exact test commands outside tests/main when run_bash succeeds", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "run_bash",
+      "exit=0 stdout: pass",
+      { command: "npm test tests/renderer/components/Message.test.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "npm test tests/renderer/components/Message.test.ts passes.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
   it("allows required exact commands when a successful run_bash command chains them", () => {
     const evidence = createPlanStepEvidence();
 
