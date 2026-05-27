@@ -70,7 +70,13 @@ describe("iterative plan assembly", () => {
     );
 
     expect(prompt).toContain(
-      "Our task: create a new LLM tool to retrieve the current working directory.",
+      "Our task is to create clear, executable instructions for an AI coding agent.",
+    );
+    expect(prompt).toContain(
+      "Here is the user request to be realized by the AI agent: <UserRequest>create a new LLM tool to retrieve the current working directory.</UserRequest>",
+    );
+    expect(prompt).toContain(
+      "What should I tell the AI coding agent first? YAML only, no extra explanations, just the prompt.",
     );
     expect(prompt).not.toContain("get_current_working_directory");
     expect(prompt).not.toContain("tests/main/currentWorkingDirectoryTool.test.ts");
@@ -423,11 +429,21 @@ describe("iterative plan assembly", () => {
 
   it("does not wrap an already formatted expert prompt", () => {
     const prompt = buildPlanAssemblyInitialPrompt(
-      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory in this project. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+      "Our task is to create clear, executable instructions for an AI coding agent.\n\nHere is the user request to be realized by the AI agent: <UserRequest>create a new LLM tool to retrieve the current working directory in this project.</UserRequest>\n\nWhat should I tell the AI coding agent first? YAML only, no extra explanations, just the prompt.",
     );
 
     expect(prompt).toBe(
-      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory in this project. What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+      "Our task is to create clear, executable instructions for an AI coding agent.\n\nHere is the user request to be realized by the AI agent: <UserRequest>create a new LLM tool to retrieve the current working directory in this project.</UserRequest>\n\nWhat should I tell the AI coding agent first? YAML only, no extra explanations, just the prompt.",
+    );
+  });
+
+  it("rewrites a legacy expert prompt without dropping request punctuation", () => {
+    const prompt = buildPlanAssemblyInitialPrompt(
+      "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: create a new LLM tool to retrieve the current working directory in this project What should I start by telling the agent? in YAML only no extra explanations, just the prompt?",
+    );
+
+    expect(prompt).toContain(
+      "<UserRequest>create a new LLM tool to retrieve the current working directory in this project.</UserRequest>",
     );
   });
 

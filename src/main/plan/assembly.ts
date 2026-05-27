@@ -7,10 +7,16 @@ const WHOLE_RESPONSE_YAML_FENCE_RE =
   /^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
-const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
+const PLAN_ASSEMBLY_USER_REQUEST_OPEN = "<UserRequest>";
+const PLAN_ASSEMBLY_USER_REQUEST_CLOSE = "</UserRequest>";
+const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: ";
-const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
+const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
   " What should I start by telling the agent? in YAML only no extra explanations, just the prompt?";
+const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
+  "Our task is to create clear, executable instructions for an AI coding agent.";
+const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
+  "What should I tell the AI coding agent first? YAML only, no extra explanations, just the prompt.";
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
   "What should I tell the agent next? Continue the same plan with exactly one additional YAML step.",
   "Return plan: done only after the accepted steps visibly include grounding, test, implementation, the exact focused test command, and the exact build command.",
@@ -62,20 +68,56 @@ export function createPlanAssemblyState(): PlanAssemblyState {
 
 export function buildPlanAssemblyInitialPrompt(task: string): string {
   const trimmedTask = task.trim();
-  if (
-    trimmedTask.startsWith(PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX) &&
-    trimmedTask.endsWith(PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX.trimStart())
-  ) {
+  const existingUserRequest = extractPlanAssemblyUserRequest(trimmedTask);
+  if (existingUserRequest && isStructuredPlanAssemblyPrompt(trimmedTask)) {
     return trimmedTask;
   }
-  const taskSentence = /[.!?]$/.test(trimmedTask)
-    ? trimmedTask
-    : trimmedTask + ".";
+  const userRequest = existingUserRequest ?? extractLegacyPlanAssemblyTask(trimmedTask) ?? trimmedTask;
+  const trimmedUserRequest = userRequest.trim();
+  const taskSentence = /[.!?]$/.test(trimmedUserRequest)
+    ? trimmedUserRequest
+    : trimmedUserRequest + ".";
+  return [
+    PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX,
+    "",
+    "Here is the user request to be realized by the AI agent: " +
+      PLAN_ASSEMBLY_USER_REQUEST_OPEN +
+      taskSentence +
+      PLAN_ASSEMBLY_USER_REQUEST_CLOSE,
+    "",
+    PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
+  ].join("\n");
+}
+
+function isStructuredPlanAssemblyPrompt(text: string): boolean {
   return (
-    PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX +
-    taskSentence +
-    PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX
+    text.startsWith(PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX) &&
+    text.endsWith(PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX)
   );
+}
+
+function extractPlanAssemblyUserRequest(text: string): string | null {
+  const start = text.indexOf(PLAN_ASSEMBLY_USER_REQUEST_OPEN);
+  if (start < 0) return null;
+  const contentStart = start + PLAN_ASSEMBLY_USER_REQUEST_OPEN.length;
+  const end = text.indexOf(PLAN_ASSEMBLY_USER_REQUEST_CLOSE, contentStart);
+  if (end < 0) return null;
+  const userRequest = text.slice(contentStart, end).trim();
+  return userRequest.length > 0 ? userRequest : null;
+}
+
+function extractLegacyPlanAssemblyTask(text: string): string | null {
+  if (
+    !text.startsWith(LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX) ||
+    !text.endsWith(LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX.trimStart())
+  ) {
+    return null;
+  }
+  const userRequest = text.slice(
+    LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX.length,
+    text.length - LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX.trimStart().length,
+  ).trim();
+  return userRequest.length > 0 ? userRequest : null;
 }
 
 export function findRequestedToolNames(text: string): string[] {
