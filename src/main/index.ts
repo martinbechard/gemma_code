@@ -57,11 +57,11 @@ import type {
 } from "../shared/types";
 import { setRuntimePaths } from "./runtimePaths";
 import {
-  containsCompletePlan,
   findNextPlan,
   parseVerifyResult,
   type ParsedPlan,
 } from "./plan/parser";
+import { replayRequestMessages } from "./chatHistory";
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 import { clearPlan, loadPlan, savePlan } from "./plan/planStore";
@@ -70,7 +70,6 @@ import {
   validatePlanForExecution,
 } from "./plan/validation";
 import {
-  PLAN_ASSEMBLY_DONE_TEXT,
   applyPlanAssemblyResponse,
   applyPlanSemanticReviewResponse,
   buildPlanAssemblyInitialPrompt,
@@ -545,13 +544,11 @@ function promptModeForCodeSubmode(
 
 function labelForCodePromptMode(
   codePromptMode: CodePromptMode,
-  codeSubmode: CodeSubmode | undefined,
   hasWorkingDir: boolean,
   executePlan?: boolean,
 ): string {
   if (!hasWorkingDir) return "build";
   if (executePlan) return "code execute";
-  if (codeSubmode === "auto" || !codeSubmode) return "code auto";
   if (codePromptMode === "code") return "code discuss";
   return `code ${codePromptMode}`;
 }
@@ -573,7 +570,6 @@ async function resolveSystemPrompt(
     return {
       label: labelForCodePromptMode(
         codePromptMode,
-        req.codeSubmode,
         !!req.workingDir,
         req.executePlan,
       ),
@@ -655,6 +651,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     const topLevelPlanHarnessEnabled =
       req.mode === "code" &&
       !!req.workingDir &&
+      !req.executePlan &&
       (codeSubmode === "plan" || codeSubmode === "auto");
     const planningTaskMessageIndex =
       topLevelPlanHarnessEnabled && !req.executePlan
@@ -685,32 +682,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       ].join("\n");
     };
 
-    for (const [messageIndex, m] of req.messages.entries()) {
-      if (
-        req.executePlan &&
-        m.role === "assistant" &&
-        (containsCompletePlan(m.content) ||
-          m.content.trim() === PLAN_ASSEMBLY_DONE_TEXT)
-      ) {
-        continue;
-      }
-      if (m.role === "system") continue;
-      if (messageIndex === planningTaskMessageIndex) continue;
-      const messageRole = m.role === "harness" ? "user" : m.role;
-      baseMessages.push({
-        role: messageRole as MLXChatMessage["role"],
-        content: m.content,
-      });
-      if (m.toolCalls) {
-        for (const tc of m.toolCalls) {
-          if (tc.result != null) {
-            baseMessages.push({
-              role: "tool",
-              content: `Result of <action name="${tc.name}">: ${tc.result}`,
-            });
-          }
-        }
-      }
+    for (const message of replayRequestMessages({
+      ...req,
+      planningTaskMessageIndex,
+    })) {
+      baseMessages.push(message);
     }
     if (planningTask) {
       pushPlanningHarnessPrompt(

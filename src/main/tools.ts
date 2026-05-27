@@ -885,8 +885,8 @@ export function codeSystemPrompt(
 function instructionModesForCodePrompt(
   codeMode: "code" | "build" | "plan" | "execute",
 ): PromptMode[] {
-  if (codeMode === "plan") return ["code", "plan"];
-  if (codeMode === "execute") return ["code", "execute"];
+  if (codeMode === "plan") return ["plan"];
+  if (codeMode === "execute") return ["execute"];
   return [codeMode];
 }
 

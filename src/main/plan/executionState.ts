@@ -88,7 +88,7 @@ export class PlanExecutionState {
         `Execute step "${step.name}" now. Use <action> tags to do the work. ` +
         `Do NOT emit a YAML plan in this turn; you are already inside a plan and I am driving each step. Any nested plan you emit here will be rejected and this step will be re-prompted unchanged. ` +
         `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
-        `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making (see "Where to add things" in Gemma.md) so your edit fits the project's existing shape. ` +
+        `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making so your edit fits the project's existing shape. ` +
         `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
         `If this step says to add something only if missing or avoid editing when it is already present, and the latest file evidence shows it is already present, summarize that evidence and do not edit the file. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +

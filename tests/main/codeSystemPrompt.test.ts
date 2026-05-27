@@ -52,6 +52,8 @@ describe("codeSystemPrompt", () => {
     expect(planPrompt).toContain(
       "exactly one YAML plan containing exactly one step",
     );
+    expect(planPrompt).toContain("This phase is only for planning");
+    expect(planPrompt).toContain("fresh model context");
     expect(planPrompt).toContain("Do not emit action tags");
     expect(planPrompt).toContain("Do not add stop, conclude, cleanup");
     expect(planPrompt).toContain("plan: done");
@@ -72,6 +74,7 @@ describe("codeSystemPrompt", () => {
     );
     expect(executePrompt).toContain("do not retry the same old_string");
     expect(executePrompt).toContain("Do not invent tool results");
+    expect(executePrompt).toContain("Execution starts with a fresh model context");
     expect(executePrompt).toContain(
       "use run_bash with that exact command",
     );
@@ -137,7 +140,7 @@ describe("codeSystemPrompt", () => {
     }
   });
 
-  it("loads code and plan instructions for code planning mode", () => {
+  it("loads only plan instructions for code planning mode", () => {
     writeGemma("Gemma.md", "COMMON_MARKER");
     writeGemma("Gemma.code.md", "CODE_MARKER");
     writeGemma("Gemma.plan.md", "PLAN_MARKER");
@@ -146,7 +149,7 @@ describe("codeSystemPrompt", () => {
     const prompt = codeSystemPrompt("/workspace", "http://preview", "plan");
 
     expect(prompt).not.toContain("COMMON_MARKER");
-    expect(prompt).toContain("CODE_MARKER");
+    expect(prompt).not.toContain("CODE_MARKER");
     expect(prompt).toContain("PLAN_MARKER");
     expect(prompt).not.toContain("EXECUTE_MARKER");
     expect(prompt.indexOf("MODE AND PROJECT INSTRUCTIONS")).toBeLessThan(
@@ -156,7 +159,7 @@ describe("codeSystemPrompt", () => {
     expect(prompt).not.toContain("AVAILABLE TOOLS");
   });
 
-  it("loads code and execute instructions for plan execution mode", () => {
+  it("loads only execute instructions for plan execution mode", () => {
     writeGemma("Gemma.md", "COMMON_MARKER");
     writeGemma("Gemma.code.md", "CODE_MARKER");
     writeGemma("Gemma.plan.md", "PLAN_MARKER");
@@ -165,7 +168,7 @@ describe("codeSystemPrompt", () => {
     const prompt = codeSystemPrompt("/workspace", "http://preview", "execute");
 
     expect(prompt).not.toContain("COMMON_MARKER");
-    expect(prompt).toContain("CODE_MARKER");
+    expect(prompt).not.toContain("CODE_MARKER");
     expect(prompt).toContain("EXECUTE_MARKER");
     expect(prompt).not.toContain("PLAN_MARKER");
   });
