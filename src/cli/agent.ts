@@ -66,6 +66,7 @@ const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
 const MAX_NESTED_PLAN_REJECTIONS = 3;
 const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
+const MAX_PLAN_SEMANTIC_REVIEW_RETRIES = 4;
 const CODE_PLAN_NUDGE =
   "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ONLY_CONTINUE_NUDGE =
@@ -474,6 +475,7 @@ async function runAgentLoop(
     opts.mode === "code" && !initialPlan ? createPlanAssemblyState() : null;
   let planSemanticReviewPlan: ParsedPlan | null = null;
   let planSemanticReviewMessages: MLXChatMessage[] | null = null;
+  let planSemanticReviewRetries = 0;
   let planAssemblyValidationRetries = 0;
   let lastActionKey: string | null = null;
   let repeatedActionCount = 0;
@@ -541,6 +543,7 @@ async function runAgentLoop(
     );
     planSemanticReviewPlan = plan;
     planSemanticReviewMessages = reviewMessages;
+    planSemanticReviewRetries = 0;
     const [systemMessage, userMessage] = reviewMessages;
     displaySystemPrompt("plan semantic review", systemMessage.content);
     displayHarnessPrompt("plan semantic review", userMessage.content);
@@ -985,12 +988,23 @@ async function runAgentLoop(
         buffer,
       );
       if (review.kind === "rejected") {
+        planSemanticReviewRetries += 1;
+        meta(
+          `plan semantic review rejected ${planSemanticReviewRetries}/${MAX_PLAN_SEMANTIC_REVIEW_RETRIES}: ${review.reason}`,
+        );
+        if (
+          planSemanticReviewRetries >= MAX_PLAN_SEMANTIC_REVIEW_RETRIES
+        ) {
+          meta("done - plan semantic review rejected too many responses");
+          return;
+        }
         displayHarnessPrompt("plan semantic review retry", review.retryPrompt);
         reviewMessages.push({ role: "user", content: review.retryPrompt });
         continue;
       }
       planSemanticReviewPlan = null;
       planSemanticReviewMessages = null;
+      planSemanticReviewRetries = 0;
       planAssemblyState = null;
       planAssemblyValidationRetries = 0;
       const handling = handleAssembledPlan(review.plan);

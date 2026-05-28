@@ -336,6 +336,8 @@ describe("prompt display helpers", () => {
     expect(mainSource).toContain("readExecutionLogSnapshot");
     expect(mainSource).toContain("plan_blocked");
     expect(mainSource).toContain("plan_step_failed");
+    expect(mainSource).toContain("plan_semantic_review_rejected");
+    expect(mainSource).toContain("MAX_PLAN_SEMANTIC_REVIEW_RETRIES");
     expect(mainSource).toContain("step_evidence_check");
     expect(mainSource).toContain("step_evidence_reset");
     expect(mainSource).toContain("summarizePlanStepEvidence");

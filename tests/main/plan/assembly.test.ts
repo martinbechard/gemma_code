@@ -272,6 +272,8 @@ describe("semantic plan review", () => {
     expect(prompt).toContain("verdict: pass | needs_correction");
     expect(prompt).toContain("answer: true | false");
     expect(prompt).toContain("additional_info");
+    expect(prompt).toContain("top-level plan key named plan");
+    expect(prompt).toContain("Do not use corrected_plan");
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
     expect(prompt).not.toContain("get_current");
@@ -302,6 +304,8 @@ describe("semantic plan review", () => {
     expect(messages[0].content).toContain("do not return plan: done");
     expect(messages[0].content).toContain("structured review checklist");
     expect(messages[0].content).toContain("old review: pass shorthand");
+    expect(messages[0].content).toContain("top-level key named plan");
+    expect(messages[0].content).toContain("Do not use corrected_plan");
     expect(messages[1].role).toBe("user");
     expect(messages[1].content).toContain("<OriginalRequest>");
     expect(messages[1].content).toContain("add keyboard shortcuts to the composer");
@@ -358,6 +362,41 @@ describe("semantic plan review", () => {
       "inspect_renderer",
       "test_renderer",
     ]);
+  });
+
+  it("accepts corrected_plan nested under review as a corrected plan alias", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const plan = finalizePlanAssembly(first.state);
+    if (!plan) throw new Error("expected plan");
+
+    const nestedCorrection = [
+      passingReview.replace("verdict: pass", "verdict: needs_correction"),
+      "  corrected_plan:",
+      "    plan:",
+      "      steps:",
+      "        - name: inspect_renderer",
+      "          prompt: Read src/renderer/src/components/Composer.tsx.",
+      "          verify: src/renderer/src/components/Composer.tsx has been read.",
+      "        - name: test_renderer",
+      "          prompt: Update tests/renderer/components/Message.test.ts and run npm test tests/renderer/components/Message.test.ts.",
+      "          verify: npm test tests/renderer/components/Message.test.ts passes.",
+    ].join("\n");
+
+    const result = applyPlanSemanticReviewResponse(plan, nestedCorrection);
+
+    expect(result.kind).toBe("corrected");
+    if (result.kind !== "corrected") return;
+    expect(result.plan.steps.map((step) => step.name)).toEqual([
+      "inspect_renderer",
+      "test_renderer",
+    ]);
+    expect(result.plan.raw).toContain("plan:");
+    expect(result.plan.raw).not.toContain("corrected_plan");
   });
 
   it("rejects semantic review corrections that fail deterministic validation", () => {

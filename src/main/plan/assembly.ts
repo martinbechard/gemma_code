@@ -65,7 +65,8 @@ export const PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT = [
   "Do not return the old review: pass shorthand.",
   "Use only the original request and assembled plan supplied by the user message.",
   "Return exactly one YAML document containing a structured review checklist.",
-  "If the review verdict is needs_correction, also return one complete corrected top-level plan.",
+  "If the review verdict is needs_correction, also return one complete corrected plan under the top-level key named plan.",
+  "Do not use corrected_plan, correctedPlan, or a nested review.corrected_plan key.",
   "Return no prose.",
 ].join("\n");
 const PLAN_ASSEMBLY_USER_REQUEST_OPEN = "<UserRequest>";
@@ -297,7 +298,8 @@ export function buildPlanSemanticReviewPrompt(
     "      additional_info: Task-specific reason for this answer.",
     "",
     "If verdict is pass, do not include a plan key.",
-    "If verdict is needs_correction, include one complete corrected top-level plan key after review, with all steps, not just an added step.",
+    "If verdict is needs_correction, include one complete corrected top-level plan key named plan after review, with all steps, not just an added step.",
+    "Do not use corrected_plan, correctedPlan, or review.corrected_plan.",
     "Return no prose.",
   ].join("\n");
 }
@@ -401,7 +403,7 @@ function parseStructuredPlanSemanticReviewResponse(
     return { kind: "accepted", review };
   }
 
-  const correctedPlan = findNextPlan(text);
+  const correctedPlan = findCorrectedPlan(text, doc);
   if (correctedPlan === "incomplete") {
     return {
       kind: "rejected",
@@ -496,6 +498,45 @@ function parsePlanReviewChecklist(
   }
 
   return checklist;
+}
+
+function findCorrectedPlan(
+  text: string,
+  doc: unknown,
+): ParsedPlan | "incomplete" | null {
+  const topLevelPlan = findNextPlan(text);
+  if (topLevelPlan) return topLevelPlan;
+  if (!isRecord(doc)) return null;
+
+  const raw = correctedPlanRawFromRecord(doc);
+  if (!raw) return null;
+  return findNextPlan(raw);
+}
+
+function correctedPlanRawFromRecord(
+  doc: Record<string, unknown>,
+): string | null {
+  return (
+    rawPlanFromCandidate(doc) ??
+    rawPlanFromCandidate(doc.corrected_plan) ??
+    rawPlanFromCandidate(doc.correctedPlan) ??
+    (isRecord(doc.review)
+      ? rawPlanFromCandidate(doc.review.plan) ??
+        rawPlanFromCandidate(doc.review.corrected_plan) ??
+        rawPlanFromCandidate(doc.review.correctedPlan)
+      : null)
+  );
+}
+
+function rawPlanFromCandidate(candidate: unknown): string | null {
+  if (!isRecord(candidate)) return null;
+  if (isRecord(candidate.plan)) {
+    return stringify({ plan: candidate.plan }).trimEnd();
+  }
+  if (Array.isArray(candidate.steps)) {
+    return stringify({ plan: { steps: candidate.steps } }).trimEnd();
+  }
+  return null;
 }
 
 function isPlanReviewVerdict(value: string): value is PlanReviewVerdict {
@@ -629,7 +670,8 @@ function semanticReviewRejected(reason: string): PlanSemanticReviewResult {
       "The semantic review response was rejected: " + reason,
       "Return the structured review YAML with verdict, summary, and every checklist item.",
       "If verdict is pass, do not include a plan key.",
-      "If verdict is needs_correction, include one complete corrected top-level plan key after review, with all steps.",
+      "If verdict is needs_correction, include one complete corrected top-level plan key named plan after review, with all steps.",
+      "Do not use corrected_plan, correctedPlan, or review.corrected_plan.",
       "Return no prose.",
     ].join("\n"),
   };

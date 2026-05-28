@@ -427,6 +427,7 @@ async function handleRepairModel(model: string): Promise<void> {
 const MAX_TOOL_ROUNDS_CHAT = 6;
 const MAX_TOOL_ROUNDS_CODE = 40;
 const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
+const MAX_PLAN_SEMANTIC_REVIEW_RETRIES = 4;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
@@ -722,6 +723,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       : null;
     let planSemanticReviewPlan: ParsedPlan | null = null;
     let planSemanticReviewMessages: MLXChatMessage[] | null = null;
+    let planSemanticReviewRetries = 0;
     let planAssemblyValidationRetries = 0;
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
@@ -807,6 +809,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       );
       planSemanticReviewPlan = plan;
       planSemanticReviewMessages = reviewMessages;
+      planSemanticReviewRetries = 0;
       const [systemMessage, userMessage] = reviewMessages;
       emitSystemPrompt("plan semantic review", systemMessage.content);
       emit({
@@ -1647,6 +1650,25 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         );
         reviewMessages.push({ role: "assistant", content: buffer });
         if (review.kind === "rejected") {
+          planSemanticReviewRetries += 1;
+          logExecution("plan_semantic_review_rejected", {
+            reason: review.reason,
+            retryCount: planSemanticReviewRetries,
+            maxRetries: MAX_PLAN_SEMANTIC_REVIEW_RETRIES,
+          });
+          if (
+            planSemanticReviewRetries >= MAX_PLAN_SEMANTIC_REVIEW_RETRIES
+          ) {
+            emit({
+              type: "error",
+              error:
+                "Plan semantic review rejected too many responses: " +
+                review.reason,
+            });
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
           emit({
             type: "harness_message",
             label: "plan semantic review retry",
@@ -1662,6 +1684,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         }
         planSemanticReviewPlan = null;
         planSemanticReviewMessages = null;
+        planSemanticReviewRetries = 0;
         planAssemblyState = null;
         planAssemblyValidationRetries = 0;
         emit({ type: "set_assistant_content", text: "" });
