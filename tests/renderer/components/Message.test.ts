@@ -81,4 +81,32 @@ describe("Message", () => {
     expect(html).toContain("Writing");
     expect(html).toContain("src/main/tools.ts");
   });
+
+  it("renders an expandable structured plan review bubble", () => {
+    const html = renderMessage({
+      id: "assistant-review",
+      role: "assistant",
+      content: "",
+      createdAt: 1,
+      planReview: {
+        verdict: "needs_correction",
+        summary: "The plan matches the request.",
+        checklist: [
+          {
+            id: "request_fit",
+            question: "Does the plan directly address the original request?",
+            allowedAnswers: ["yes", "no", "partial"],
+            answer: "yes",
+            additionalInfo: "The steps all target the requested behavior.",
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain("Plan review");
+    expect(html).toContain("The plan matches the request.");
+    expect(html).toContain("Does the plan directly address");
+    expect(html).toContain("The steps all target the requested behavior.");
+    expect(html).toContain("aria-expanded");
+  });
 });

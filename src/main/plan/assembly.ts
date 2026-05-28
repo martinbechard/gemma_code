@@ -1,4 +1,9 @@
 import { parse, stringify } from "yaml";
+import type {
+  PlanReview,
+  PlanReviewChecklistItem,
+  PlanReviewVerdict,
+} from "../../shared/types";
 import { findNextPlan, type ParsedPlan, type ParsedStep } from "./parser";
 import { validatePlanForExecution, validatePlanStepText } from "./validation";
 
@@ -7,16 +12,60 @@ const WHOLE_RESPONSE_YAML_FENCE_RE =
   /^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
-export const PLAN_SEMANTIC_REVIEW_PASS_TEXT = "review: pass";
+const PLAN_SEMANTIC_REVIEW_VERDICT_PASS = "pass";
+const PLAN_SEMANTIC_REVIEW_VERDICT_NEEDS_CORRECTION = "needs_correction";
+const PLAN_SEMANTIC_REVIEW_VERDICTS: readonly PlanReviewVerdict[] = [
+  PLAN_SEMANTIC_REVIEW_VERDICT_PASS,
+  PLAN_SEMANTIC_REVIEW_VERDICT_NEEDS_CORRECTION,
+];
+
+interface PlanSemanticReviewChecklistPromptItem {
+  id: string;
+  question: string;
+  allowedAnswers: readonly string[];
+}
+
+const PLAN_SEMANTIC_REVIEW_CHECKLIST_ITEMS: readonly PlanSemanticReviewChecklistPromptItem[] = [
+  {
+    id: "request_fit",
+    question: "Does the plan directly address the original request?",
+    allowedAnswers: ["yes", "no", "partial"],
+  },
+  {
+    id: "grounding",
+    question: "Does the plan include enough project grounding before edits?",
+    allowedAnswers: ["yes", "no", "not_applicable"],
+  },
+  {
+    id: "specificity",
+    question:
+      "Are files, commands, artifacts, and verification evidence task-specific?",
+    allowedAnswers: ["yes", "no", "partial"],
+  },
+  {
+    id: "placeholder_present",
+    question: "Does the plan contain placeholder wording or made-up examples?",
+    allowedAnswers: ["true", "false"],
+  },
+  {
+    id: "verification",
+    question: "Does the plan include appropriate verification for the request?",
+    allowedAnswers: ["yes", "no", "not_applicable"],
+  },
+  {
+    id: "residual_risk",
+    question: "What residual risk remains if this plan is executed?",
+    allowedAnswers: ["low", "medium", "high"],
+  },
+];
 export const PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT = [
   "You are validating an assembled implementation plan.",
   "This is a fresh review context after plan construction has ended.",
   "Do not continue plan construction and do not return plan: done.",
+  "Do not return the old review: pass shorthand.",
   "Use only the original request and assembled plan supplied by the user message.",
-  "If the plan is semantically complete, return exactly " +
-    PLAN_SEMANTIC_REVIEW_PASS_TEXT +
-    ".",
-  "If the plan needs correction, return one complete corrected YAML plan with all steps.",
+  "Return exactly one YAML document containing a structured review checklist.",
+  "If the review verdict is needs_correction, also return one complete corrected top-level plan.",
   "Return no prose.",
 ].join("\n");
 const PLAN_ASSEMBLY_USER_REQUEST_OPEN = "<UserRequest>";
@@ -67,10 +116,12 @@ export type PlanSemanticReviewResult =
   | {
       kind: "accepted";
       plan: ParsedPlan;
+      review: PlanReview;
     }
   | {
       kind: "corrected";
       plan: ParsedPlan;
+      review: PlanReview;
     }
   | {
       kind: "rejected";
@@ -215,10 +266,38 @@ export function buildPlanSemanticReviewPrompt(
     "Check whether the plan has enough concrete grounding, implementation, test, documentation, and verification work for this specific request. Some requests may not need every category.",
     "Check that files, folders, commands, and artifacts are task-specific choices made by the plan, not placeholders.",
     "",
-    "If the plan is semantically complete, return exactly:",
-    PLAN_SEMANTIC_REVIEW_PASS_TEXT,
+    "Return exactly one YAML document using this schema:",
+    "review:",
+    "  verdict: pass | needs_correction",
+    "  summary: Short review summary.",
+    "  checklist:",
+    "    - id: request_fit",
+    "      question: Does the plan directly address the original request?",
+    "      answer: yes | no | partial",
+    "      additional_info: Task-specific reason for this answer.",
+    "    - id: grounding",
+    "      question: Does the plan include enough project grounding before edits?",
+    "      answer: yes | no | not_applicable",
+    "      additional_info: Task-specific reason for this answer.",
+    "    - id: specificity",
+    "      question: Are files, commands, artifacts, and verification evidence task-specific?",
+    "      answer: yes | no | partial",
+    "      additional_info: Task-specific reason for this answer.",
+    "    - id: placeholder_present",
+    "      question: Does the plan contain placeholder wording or made-up examples?",
+    "      answer: true | false",
+    "      additional_info: Task-specific reason for this answer.",
+    "    - id: verification",
+    "      question: Does the plan include appropriate verification for the request?",
+    "      answer: yes | no | not_applicable",
+    "      additional_info: Task-specific reason for this answer.",
+    "    - id: residual_risk",
+    "      question: What residual risk remains if this plan is executed?",
+    "      answer: low | medium | high",
+    "      additional_info: Task-specific reason for this answer.",
     "",
-    "If the plan needs correction, return one complete corrected YAML plan with all steps, not just an added step.",
+    "If verdict is pass, do not include a plan key.",
+    "If verdict is needs_correction, include one complete corrected top-level plan key after review, with all steps, not just an added step.",
     "Return no prose.",
   ].join("\n");
 }
@@ -237,30 +316,190 @@ export function applyPlanSemanticReviewResponse(
   currentPlan: ParsedPlan,
   response: string,
 ): PlanSemanticReviewResult {
-  if (isPlanSemanticReviewPassResponse(response)) {
-    return { kind: "accepted", plan: currentPlan };
+  const structuredReview = parseStructuredPlanSemanticReviewResponse(response);
+  if (structuredReview.kind === "rejected") {
+    return semanticReviewRejected(structuredReview.reason);
+  }
+  if (structuredReview.kind === "accepted") {
+    return {
+      kind: "accepted",
+      plan: currentPlan,
+      review: structuredReview.review,
+    };
+  }
+  return {
+    kind: "corrected",
+    plan: structuredReview.plan,
+    review: structuredReview.review,
+  };
+}
+
+type StructuredPlanSemanticReviewResult =
+  | {
+      kind: "accepted";
+      review: PlanReview;
+    }
+  | {
+      kind: "corrected";
+      review: PlanReview;
+      plan: ParsedPlan;
+    }
+  | {
+      kind: "rejected";
+      reason: string;
+    };
+
+function parseStructuredPlanSemanticReviewResponse(
+  response: string,
+): StructuredPlanSemanticReviewResult {
+  const text = normalizeWholeResponseYaml(response);
+  let doc: unknown;
+  try {
+    doc = parse(text);
+  } catch {
+    return {
+      kind: "rejected",
+      reason: "Semantic review response must be valid YAML.",
+    };
   }
 
-  const correctedPlan = findNextPlan(response);
+  if (!isRecord(doc) || !isRecord(doc.review)) {
+    return {
+      kind: "rejected",
+      reason: "Semantic review must contain a review object.",
+    };
+  }
+
+  const verdict = stringField(doc.review, "verdict")?.trim();
+  if (!verdict || !isPlanReviewVerdict(verdict)) {
+    return {
+      kind: "rejected",
+      reason: "Semantic review verdict must be pass or needs_correction.",
+    };
+  }
+
+  const summary = stringField(doc.review, "summary");
+  if (!summary) {
+    return {
+      kind: "rejected",
+      reason: "Semantic review summary must be a non-empty string.",
+    };
+  }
+
+  const checklist = parsePlanReviewChecklist(doc.review.checklist);
+  if (typeof checklist === "string") {
+    return { kind: "rejected", reason: checklist };
+  }
+
+  const review: PlanReview = {
+    verdict,
+    summary: summary.trim(),
+    checklist,
+  };
+
+  if (verdict === PLAN_SEMANTIC_REVIEW_VERDICT_PASS) {
+    return { kind: "accepted", review };
+  }
+
+  const correctedPlan = findNextPlan(text);
   if (correctedPlan === "incomplete") {
-    return semanticReviewRejected("The corrected plan contains incomplete YAML.");
+    return {
+      kind: "rejected",
+      reason: "The corrected plan contains incomplete YAML.",
+    };
   }
   if (!correctedPlan || correctedPlan.steps.length === 0) {
-    return semanticReviewRejected(
-      "Semantic review must return review: pass or one complete corrected YAML plan.",
-    );
+    return {
+      kind: "rejected",
+      reason:
+        "A needs_correction review must include one complete corrected top-level plan.",
+    };
   }
   const planShapeReason = validateRawPlanDocumentShape(correctedPlan.raw);
   if (planShapeReason) {
-    return semanticReviewRejected(planShapeReason);
+    return { kind: "rejected", reason: planShapeReason };
   }
-
   const validation = validatePlanForExecution(correctedPlan);
   if (!validation.valid) {
-    return semanticReviewRejected(validation.reason);
+    return { kind: "rejected", reason: validation.reason };
   }
 
-  return { kind: "corrected", plan: correctedPlan };
+  return { kind: "corrected", review, plan: correctedPlan };
+}
+
+function parsePlanReviewChecklist(
+  value: unknown,
+): PlanReviewChecklistItem[] | string {
+  if (!Array.isArray(value)) {
+    return "Semantic review checklist must be an array.";
+  }
+
+  const expectedItems = new Map(
+    PLAN_SEMANTIC_REVIEW_CHECKLIST_ITEMS.map((item) => [item.id, item]),
+  );
+  const seen = new Set<string>();
+  const checklist: PlanReviewChecklistItem[] = [];
+
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return "Each semantic review checklist item must be an object.";
+    }
+    const id = stringField(item, "id");
+    if (!id) {
+      return "Each semantic review checklist item must have a non-empty id.";
+    }
+    const expected = expectedItems.get(id.trim());
+    if (!expected) {
+      return `Unknown semantic review checklist id "${id.trim()}".`;
+    }
+    if (seen.has(expected.id)) {
+      return `Duplicate semantic review checklist id "${expected.id}".`;
+    }
+    seen.add(expected.id);
+
+    const question = stringField(item, "question");
+    if (question?.trim() !== expected.question) {
+      return `Checklist item "${expected.id}" must use the expected question text.`;
+    }
+
+    const answer = enumField(item, "answer");
+    if (!answer) {
+      return `Checklist item "${expected.id}" answer must be a non-empty string.`;
+    }
+    const trimmedAnswer = answer.trim();
+    if (!expected.allowedAnswers.includes(trimmedAnswer)) {
+      return (
+        `Checklist item "${expected.id}" answer must be one of: ` +
+        expected.allowedAnswers.join(", ") +
+        "."
+      );
+    }
+
+    const additionalInfo = stringField(item, "additional_info");
+    if (!additionalInfo) {
+      return `Checklist item "${expected.id}" additional_info must be a non-empty string.`;
+    }
+
+    checklist.push({
+      id: expected.id,
+      question: expected.question,
+      allowedAnswers: [...expected.allowedAnswers],
+      answer: trimmedAnswer,
+      additionalInfo: additionalInfo.trim(),
+    });
+  }
+
+  for (const expected of PLAN_SEMANTIC_REVIEW_CHECKLIST_ITEMS) {
+    if (!seen.has(expected.id)) {
+      return `Semantic review checklist is missing "${expected.id}".`;
+    }
+  }
+
+  return checklist;
+}
+
+function isPlanReviewVerdict(value: string): value is PlanReviewVerdict {
+  return PLAN_SEMANTIC_REVIEW_VERDICTS.includes(value as PlanReviewVerdict);
 }
 
 export function isPlanAssemblyDoneResponse(response: string): boolean {
@@ -276,21 +515,6 @@ export function isPlanAssemblyDoneResponse(response: string): boolean {
   if (!isRecord(doc)) return false;
   const keys = Object.keys(doc);
   return keys.length === 1 && doc.plan === "done";
-}
-
-export function isPlanSemanticReviewPassResponse(response: string): boolean {
-  const text = normalizeWholeResponseYaml(response);
-  if (text === PLAN_SEMANTIC_REVIEW_PASS_TEXT) return true;
-
-  let doc: unknown;
-  try {
-    doc = parse(text);
-  } catch {
-    return false;
-  }
-  if (!isRecord(doc)) return false;
-  const keys = Object.keys(doc);
-  return keys.length === 1 && doc.review === "pass";
 }
 
 export function finalizePlanAssembly(
@@ -403,8 +627,9 @@ function semanticReviewRejected(reason: string): PlanSemanticReviewResult {
     reason,
     retryPrompt: [
       "The semantic review response was rejected: " + reason,
-      "Return exactly " + PLAN_SEMANTIC_REVIEW_PASS_TEXT + " if the current plan is semantically complete.",
-      "Otherwise return one complete corrected YAML plan with all steps.",
+      "Return the structured review YAML with verdict, summary, and every checklist item.",
+      "If verdict is pass, do not include a plan key.",
+      "If verdict is needs_correction, include one complete corrected top-level plan key after review, with all steps.",
       "Return no prose.",
     ].join("\n"),
   };
@@ -460,4 +685,25 @@ function normalizeWholeResponseYaml(response: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? value : null;
+}
+
+function enumField(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = source[key];
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? value : null;
 }

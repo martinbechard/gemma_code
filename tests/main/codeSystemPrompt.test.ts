@@ -105,7 +105,10 @@ describe("codeSystemPrompt", () => {
       "I pass the original request in an OriginalRequest XML block",
     );
     expect(planPrompt).toContain(
-      "return one complete corrected YAML plan with all steps",
+      "answer the structured checklist with the requested enum values",
+    );
+    expect(planPrompt).toContain(
+      "return a review verdict of needs_correction and one complete corrected YAML plan with all steps",
     );
     expect(planPrompt).toContain(
       "Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.",

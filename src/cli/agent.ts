@@ -979,7 +979,9 @@ async function runAgentLoop(
     }
 
     if (planSemanticReviewPlan) {
-      const reviewMessages = planSemanticReviewMessages;
+      const reviewMessages = planSemanticReviewMessages as
+        | MLXChatMessage[]
+        | null;
       if (!reviewMessages) {
         meta("done - plan semantic review context is missing");
         return;

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   PLAN_ASSEMBLY_DONE_TEXT,
   PLAN_ASSEMBLY_NEXT_PROMPT,
-  PLAN_SEMANTIC_REVIEW_PASS_TEXT,
   PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT,
   applyPlanAssemblyResponse,
   applyPlanSemanticReviewResponse,
@@ -40,6 +39,69 @@ const correctedPlan = [
   "    - name: test_renderer",
   "      prompt: Update tests/renderer/components/Message.test.ts and run npm test tests/renderer/components/Message.test.ts.",
   "      verify: npm test tests/renderer/components/Message.test.ts passes.",
+].join("\n");
+
+const passingReview = [
+  "review:",
+  "  verdict: pass",
+  "  summary: The plan has enough concrete steps for the request.",
+  "  checklist:",
+  "    - id: request_fit",
+  "      question: Does the plan directly address the original request?",
+  "      answer: yes",
+  "      additional_info: The accepted steps inspect and test the plan assembly flow.",
+  "    - id: grounding",
+  "      question: Does the plan include enough project grounding before edits?",
+  "      answer: yes",
+  "      additional_info: The first step reads src/main/plan/parser.ts before changes.",
+  "    - id: specificity",
+  "      question: Are files, commands, artifacts, and verification evidence task-specific?",
+  "      answer: yes",
+  "      additional_info: The steps name src/main/plan/parser.ts and the focused assembly test command.",
+  "    - id: placeholder_present",
+  "      question: Does the plan contain placeholder wording or made-up examples?",
+  "      answer: false",
+  "      additional_info: No placeholder terms are present in the accepted steps.",
+  "    - id: verification",
+  "      question: Does the plan include appropriate verification for the request?",
+  "      answer: yes",
+  "      additional_info: The plan includes npm test tests/main/plan/assembly.test.ts.",
+  "    - id: residual_risk",
+  "      question: What residual risk remains if this plan is executed?",
+  "      answer: low",
+  "      additional_info: The change is scoped to plan assembly tests and parser inspection.",
+].join("\n");
+
+const correctionReview = [
+  "review:",
+  "  verdict: needs_correction",
+  "  summary: The plan must target the renderer shortcut request instead.",
+  "  checklist:",
+  "    - id: request_fit",
+  "      question: Does the plan directly address the original request?",
+  "      answer: no",
+  "      additional_info: The accepted plan inspects plan assembly instead of renderer shortcuts.",
+  "    - id: grounding",
+  "      question: Does the plan include enough project grounding before edits?",
+  "      answer: no",
+  "      additional_info: It reads a project file but not the renderer composer.",
+  "    - id: specificity",
+  "      question: Are files, commands, artifacts, and verification evidence task-specific?",
+  "      answer: partial",
+  "      additional_info: The test command is exact but targets the wrong subsystem.",
+  "    - id: placeholder_present",
+  "      question: Does the plan contain placeholder wording or made-up examples?",
+  "      answer: false",
+  "      additional_info: The issue is task fit, not placeholder wording.",
+  "    - id: verification",
+  "      question: Does the plan include appropriate verification for the request?",
+  "      answer: no",
+  "      additional_info: It does not test the renderer shortcut behavior.",
+  "    - id: residual_risk",
+  "      question: What residual risk remains if this plan is executed?",
+  "      answer: medium",
+  "      additional_info: Executing the wrong subsystem plan would not satisfy the user request.",
+  correctedPlan,
 ].join("\n");
 
 describe("iterative plan assembly", () => {
@@ -207,7 +269,9 @@ describe("semantic plan review", () => {
     expect(prompt).toContain("<AssembledPlan>");
     expect(prompt).toContain("name: explore");
     expect(prompt).toContain("</AssembledPlan>");
-    expect(prompt).toContain(PLAN_SEMANTIC_REVIEW_PASS_TEXT);
+    expect(prompt).toContain("verdict: pass | needs_correction");
+    expect(prompt).toContain("answer: true | false");
+    expect(prompt).toContain("additional_info");
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
     expect(prompt).not.toContain("get_current");
@@ -236,7 +300,8 @@ describe("semantic plan review", () => {
     expect(messages[0].content).toContain("fresh review context");
     expect(messages[0].content).toContain("Do not continue plan construction");
     expect(messages[0].content).toContain("do not return plan: done");
-    expect(messages[0].content).toContain(PLAN_SEMANTIC_REVIEW_PASS_TEXT);
+    expect(messages[0].content).toContain("structured review checklist");
+    expect(messages[0].content).toContain("old review: pass shorthand");
     expect(messages[1].role).toBe("user");
     expect(messages[1].content).toContain("<OriginalRequest>");
     expect(messages[1].content).toContain("add keyboard shortcuts to the composer");
@@ -256,12 +321,22 @@ describe("semantic plan review", () => {
 
     const result = applyPlanSemanticReviewResponse(
       plan,
-      PLAN_SEMANTIC_REVIEW_PASS_TEXT,
+      passingReview,
     );
 
     expect(result.kind).toBe("accepted");
     if (result.kind !== "accepted") return;
     expect(result.plan).toEqual(plan);
+    expect(result.review.verdict).toBe("pass");
+    expect(result.review.checklist.map((item) => item.id)).toEqual([
+      "request_fit",
+      "grounding",
+      "specificity",
+      "placeholder_present",
+      "verification",
+      "residual_risk",
+    ]);
+    expect(result.review.checklist[3].answer).toBe("false");
   });
 
   it("accepts a complete corrected plan from semantic review", () => {
@@ -274,10 +349,11 @@ describe("semantic plan review", () => {
     const plan = finalizePlanAssembly(first.state);
     if (!plan) throw new Error("expected plan");
 
-    const result = applyPlanSemanticReviewResponse(plan, correctedPlan);
+    const result = applyPlanSemanticReviewResponse(plan, correctionReview);
 
     expect(result.kind).toBe("corrected");
     if (result.kind !== "corrected") return;
+    expect(result.review.verdict).toBe("needs_correction");
     expect(result.plan.steps.map((step) => step.name)).toEqual([
       "inspect_renderer",
       "test_renderer",
@@ -297,6 +373,7 @@ describe("semantic plan review", () => {
     const result = applyPlanSemanticReviewResponse(
       plan,
       [
+        correctionReview.split("\nplan:")[0],
         "plan:",
         "  steps:",
         "    - name: test",
@@ -323,6 +400,7 @@ describe("semantic plan review", () => {
     const result = applyPlanSemanticReviewResponse(
       plan,
       [
+        correctionReview.split("\nplan:")[0],
         "plan:",
         "  steps:",
         "    - name: inspect",
@@ -336,5 +414,25 @@ describe("semantic plan review", () => {
     expect(result.kind).toBe("rejected");
     if (result.kind !== "rejected") return;
     expect(result.reason).toContain("must have name, prompt, and verify");
+  });
+
+  it("rejects semantic review responses without the structured checklist", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const plan = finalizePlanAssembly(first.state);
+    if (!plan) throw new Error("expected plan");
+
+    const result = applyPlanSemanticReviewResponse(
+      plan,
+      "review: pass",
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.reason).toContain("review object");
   });
 });

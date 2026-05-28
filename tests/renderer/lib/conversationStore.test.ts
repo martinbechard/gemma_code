@@ -243,6 +243,27 @@ describe("prompt display helpers", () => {
     ).toContain("hasSystemPromptSnapshot");
   });
 
+  it("wires structured plan review results into the proposal message", () => {
+    const chatSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+      "utf8",
+    );
+    const messageSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Message.tsx"),
+      "utf8",
+    );
+    const sharedSource = readFileSync(
+      join(process.cwd(), "src/shared/types.ts"),
+      "utf8",
+    );
+
+    expect(sharedSource).toContain('type: "plan_reviewed"');
+    expect(chatSource).toContain('chunk.type === "plan_reviewed"');
+    expect(chatSource).toContain("planReview: chunk.review");
+    expect(messageSource).toContain("PlanReviewView");
+    expect(messageSource).toContain("aria-expanded");
+  });
+
   it("keeps plan-step tool calls visible outside collapsed prompt details", () => {
     const messageSource = readFileSync(
       join(process.cwd(), "src/renderer/src/components/Message.tsx"),

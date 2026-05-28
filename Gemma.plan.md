@@ -29,7 +29,7 @@ I perform deterministic validation of plan shape only:
 - Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.
 - Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.
 
-After the assembled plan passes deterministic validation, I start a fresh validation context with a system prompt focused only on validating the plan. I pass the original request in an OriginalRequest XML block and pass the assembled plan in the same review request. In that review, check whether the assembled steps fit the user request, contain enough concrete grounding and verification, and avoid placeholders. If the plan is complete, return the exact review pass response I requested. If it needs correction, return one complete corrected YAML plan with all steps.
+After the assembled plan passes deterministic validation, I start a fresh validation context with a system prompt focused only on validating the plan. I pass the original request in an OriginalRequest XML block and pass the assembled plan in the same review request. In that review, answer the structured checklist with the requested enum values and fill in each additional_info field. If the plan is complete, return a review verdict of pass. If it needs correction, return a review verdict of needs_correction and one complete corrected YAML plan with all steps.
 
 ## Planning rules
 

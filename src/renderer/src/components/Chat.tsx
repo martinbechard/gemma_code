@@ -409,6 +409,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
             ...last,
             proposedPlan: chunk.steps,
           };
+        } else if (chunk.type === "plan_reviewed") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            planReview: chunk.review,
+          };
         } else if (chunk.type === "activity") {
           msgs[msgs.length - 1] = { ...last, activity: chunk.activity };
         } else if (chunk.type === "done") {

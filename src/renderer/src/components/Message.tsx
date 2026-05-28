@@ -4,6 +4,8 @@ import type {
   AgentActivity,
   ChatMessage,
   PlanNode,
+  PlanReview,
+  PlanReviewChecklistItem,
   ProposedStep,
   ToolCall,
 } from "@shared/types";
@@ -120,7 +122,10 @@ export default function Message({
   }
 
   const isEmpty =
-    !parsed.visible && !parsed.thinking && !message.toolCalls?.length;
+    !parsed.visible &&
+    !parsed.thinking &&
+    !message.toolCalls?.length &&
+    !message.planReview;
   const showCursor = streaming && !message.done;
   const showActivity =
     streaming &&
@@ -150,6 +155,8 @@ export default function Message({
             content={prompt.content}
           />
         ))}
+
+        {message.planReview && <PlanReviewView review={message.planReview} />}
 
         {message.proposedPlan && message.proposedPlan.length > 0 && (
           <PlanProposalView
@@ -749,6 +756,110 @@ function PlanView({
       ))}
     </div>
   );
+}
+
+function PlanReviewView({ review }: { review: PlanReview }) {
+  const [open, setOpen] = React.useState(review.verdict !== "pass");
+  const passed = review.verdict === "pass";
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-sky-300/15 bg-sky-300/[0.04]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.025]"
+        aria-expanded={open}
+      >
+        <span
+          className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1.5 text-[10.5px] font-medium uppercase ${
+            passed
+              ? "border-emerald-300/25 text-emerald-300"
+              : "border-amber-300/30 text-amber-200"
+          }`}
+        >
+          {passed ? "pass" : "fix"}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-medium text-sky-100">
+            Plan review
+            <span className="ml-1.5 text-[11px] font-normal text-ink-400">
+              ({review.checklist.length} checks)
+            </span>
+          </span>
+          <span className="block truncate text-[11.5px] text-ink-400">
+            {review.summary}
+          </span>
+        </span>
+        <svg
+          viewBox="0 0 12 12"
+          className={`h-2.5 w-2.5 shrink-0 text-ink-400 transition ${open ? "rotate-90" : ""}`}
+          fill="currentColor"
+        >
+          <path d="M4 2l4 4-4 4V2z" />
+        </svg>
+      </button>
+      {open && (
+        <div className="border-t border-white/5 px-3 py-2">
+          <div className="mb-2 whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-200">
+            {review.summary}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {review.checklist.map((item) => (
+              <PlanReviewChecklistRow key={item.id} item={item} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanReviewChecklistRow({
+  item,
+}: {
+  item: PlanReviewChecklistItem;
+}) {
+  return (
+    <div className="rounded-md border border-white/5 bg-black/20 px-2.5 py-2">
+      <div className="flex items-start gap-2">
+        <span
+          className={`mt-0.5 inline-flex min-w-[4.5rem] justify-center rounded border px-1.5 py-0.5 text-[10.5px] font-medium uppercase ${reviewAnswerClass(item.answer)}`}
+          title={`Allowed: ${item.allowedAnswers.join(" | ")}`}
+        >
+          {formatReviewAnswer(item.answer)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] leading-snug text-ink-100">
+            {item.question}
+          </div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-ink-400">
+            {item.additionalInfo}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function reviewAnswerClass(answer: string): string {
+  switch (answer) {
+    case "yes":
+    case "false":
+    case "low":
+      return "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-300";
+    case "no":
+    case "true":
+    case "high":
+      return "border-red-300/20 bg-red-300/[0.06] text-red-300";
+    case "partial":
+    case "medium":
+      return "border-amber-300/20 bg-amber-300/[0.06] text-amber-200";
+    default:
+      return "border-white/10 bg-white/[0.04] text-ink-300";
+  }
+}
+
+function formatReviewAnswer(answer: string): string {
+  return answer.replaceAll("_", " ");
 }
 
 function PlanProposalView({

@@ -1501,7 +1501,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       //     the model does the work directly.
       if (planSemanticReviewPlan) {
         flushBufferToUI();
-        const reviewMessages = planSemanticReviewMessages;
+        const reviewMessages = planSemanticReviewMessages as
+          | MLXChatMessage[]
+          | null;
         if (!reviewMessages) {
           emit({
             type: "error",
@@ -1534,6 +1536,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         planSemanticReviewMessages = null;
         planAssemblyState = null;
         planAssemblyValidationRetries = 0;
+        emit({ type: "set_assistant_content", text: "" });
+        emit({ type: "plan_reviewed", review: review.review });
         savePlan(req.conversationId, review.plan.raw);
         emit({
           type: "plan_proposed",

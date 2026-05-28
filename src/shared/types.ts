@@ -84,6 +84,8 @@ export interface ChatMessage {
   // steps are surfaced here so the renderer can show the proposal alongside
   // an Execute Plan button.
   proposedPlan?: ProposedStep[];
+  // Structured semantic review result for the proposed plan.
+  planReview?: PlanReview;
   // True once the user has approved the proposedPlan; suppresses further
   // Execute clicks and lets the renderer mark it as approved.
   planExecuted?: boolean;
@@ -119,6 +121,22 @@ export interface ProposedStep {
   name: string;
   prompt: string;
   verify: string;
+}
+
+export type PlanReviewVerdict = "pass" | "needs_correction";
+
+export interface PlanReviewChecklistItem {
+  id: string;
+  question: string;
+  allowedAnswers: string[];
+  answer: string;
+  additionalInfo: string;
+}
+
+export interface PlanReview {
+  verdict: PlanReviewVerdict;
+  summary: string;
+  checklist: PlanReviewChecklistItem[];
 }
 
 export interface WorkspaceInfo {
@@ -184,6 +202,7 @@ export type StreamChunk =
   // shows the proposal and an Execute Plan affordance that fires
   // window.api.executePlan(conversationId).
   | { type: "plan_proposed"; steps: ProposedStep[] }
+  | { type: "plan_reviewed"; review: PlanReview }
   | { type: "done" }
   | { type: "error"; error: string };
 
