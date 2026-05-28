@@ -5,6 +5,7 @@ import { join } from "path";
 import { setRuntimePaths } from "../../src/main/runtimePaths";
 import {
   createExecutionLogger,
+  ensureExecutionLogFile,
   executionLogPath,
 } from "../../src/main/executionLog";
 
@@ -55,5 +56,13 @@ describe("executionLog", () => {
     log("tool_call", { id: "call-1" });
 
     expect(existsSync(executionLogPath())).toBe(false);
+  });
+
+  it("creates an empty execution log file for opening", () => {
+    const path = ensureExecutionLogFile();
+
+    expect(path).toBe(executionLogPath());
+    expect(existsSync(path)).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe("");
   });
 });

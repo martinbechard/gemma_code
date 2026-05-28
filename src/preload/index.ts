@@ -54,6 +54,9 @@ const api = {
   executionLogPath: (): Promise<string> =>
     ipcRenderer.invoke("debug:execution-log-path"),
 
+  openExecutionLog: (): Promise<void> =>
+    ipcRenderer.invoke("debug:open-execution-log"),
+
   listTools: (): Promise<
     Array<{ name: string; description: string; mode: string }>
   > => ipcRenderer.invoke("tools:list"),

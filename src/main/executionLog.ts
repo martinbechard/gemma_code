@@ -14,6 +14,14 @@ export function executionLogPath(): string {
   return join(userDataDir(), "debug", "execution-log.jsonl");
 }
 
+export function ensureExecutionLogFile(): string {
+  const path = executionLogPath();
+  const dir = join(userDataDir(), "debug");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  appendFileSync(path, "", "utf8");
+  return path;
+}
+
 export function createExecutionLogger(
   enabled: boolean,
   meta: ExecutionLogMeta,

@@ -309,10 +309,24 @@ describe("prompt display helpers", () => {
       join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
       "utf8",
     );
+    const preloadSource = readFileSync(
+      join(process.cwd(), "src/preload/index.ts"),
+      "utf8",
+    );
+    const mainSource = readFileSync(
+      join(process.cwd(), "src/main/index.ts"),
+      "utf8",
+    );
 
     expect(chatSource).toContain("executionLogging");
     expect(chatSource).toContain("debugLogging: executionLogging");
     expect(chatSource).toContain("onToggleExecutionLogging");
+    expect(chatSource).toContain("onOpenExecutionLog");
+    expect(chatSource).toContain("Open execution log");
+    expect(preloadSource).toContain("openExecutionLog");
+    expect(preloadSource).toContain("debug:open-execution-log");
+    expect(mainSource).toContain("debug:open-execution-log");
+    expect(mainSource).toContain("ensureExecutionLogFile");
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

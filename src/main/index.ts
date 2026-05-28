@@ -94,6 +94,7 @@ import {
 import { killAllBackgroundTasks } from "./backgroundTasks";
 import {
   createExecutionLogger,
+  ensureExecutionLogFile,
   executionLogPath,
 } from "./executionLog";
 
@@ -2059,6 +2060,12 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("debug:execution-log-path", async () => executionLogPath());
+
+  ipcMain.handle("debug:open-execution-log", async () => {
+    const path = ensureExecutionLogFile();
+    const error = await shell.openPath(path);
+    if (error) throw new Error(error);
+  });
 
   ipcMain.handle("tools:list", async () => {
     return Object.values(TOOLS).map((t) => ({

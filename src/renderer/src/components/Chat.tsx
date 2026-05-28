@@ -135,6 +135,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
     }
   });
   const [executionLogPath, setExecutionLogPath] = useState("");
+  const [executionLogOpenError, setExecutionLogOpenError] = useState("");
   const streamRef = useRef<{ abort: boolean }>({ abort: false });
 
   const activeConversation = useMemo(
@@ -162,6 +163,17 @@ export default function Chat({ model, onSwitchModel }: Props) {
       .executionLogPath()
       .then(setExecutionLogPath)
       .catch(() => setExecutionLogPath(""));
+  }, []);
+
+  const handleOpenExecutionLog = useCallback(async (): Promise<void> => {
+    setExecutionLogOpenError("");
+    try {
+      await window.api.openExecutionLog();
+    } catch (error) {
+      setExecutionLogOpenError(
+        error instanceof Error ? error.message : "Could not open execution log.",
+      );
+    }
   }, []);
 
   function updateActive(fn: (c: Conversation) => Conversation): void {
@@ -562,9 +574,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
             onSwitchModel={onSwitchModel}
             executionLogging={executionLogging}
             executionLogPath={executionLogPath}
+            executionLogOpenError={executionLogOpenError}
             onToggleExecutionLogging={() =>
               setExecutionLogging((current) => !current)
             }
+            onOpenExecutionLog={handleOpenExecutionLog}
           />
           <MessageList
             messages={activeConversation.messages}
@@ -667,7 +681,9 @@ function Header({
   onSwitchModel,
   executionLogging,
   executionLogPath,
+  executionLogOpenError,
   onToggleExecutionLogging,
+  onOpenExecutionLog,
 }: {
   model: string;
   pillKey: PillKey;
@@ -681,7 +697,9 @@ function Header({
   onSwitchModel: (model: string) => void;
   executionLogging: boolean;
   executionLogPath: string;
+  executionLogOpenError: string;
   onToggleExecutionLogging: () => void;
+  onOpenExecutionLog: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -787,6 +805,33 @@ function Header({
           />
           Log
         </button>
+        {executionLogging && (
+          <button
+            type="button"
+            onClick={onOpenExecutionLog}
+            disabled={!executionLogPath}
+            aria-label="Open execution log"
+            title={
+              executionLogOpenError ||
+              (executionLogPath
+                ? `Open execution log: ${executionLogPath}`
+                : "Execution log path unavailable")
+            }
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-400/25 bg-emerald-400/10 text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:border-white/[0.08] disabled:bg-white/[0.03] disabled:text-ink-500"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M5 2.5h4l3 3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z" />
+              <path d="M9 2.5V6h3" />
+              <path d="M6.5 9h3M6.5 11h2" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
         <div className="relative" ref={pickerRef}>
           <button
             onClick={() => setPickerOpen((o) => !o)}
