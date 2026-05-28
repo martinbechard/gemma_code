@@ -96,15 +96,23 @@ export function buildMessageRenderItems(
 
   const items: MessageRenderItem[] = [];
   const planningMessages: ChatMessage[] = [];
+  let initialPlanningRequest: ChatMessage | null = null;
   let separatorInserted = false;
 
   for (const message of visibleMessages) {
     if (!separatorInserted && message.phase === "planning") {
+      if (!initialPlanningRequest && message.role === "user") {
+        initialPlanningRequest = message;
+        continue;
+      }
       planningMessages.push(message);
       continue;
     }
 
     if (!separatorInserted && message.phase === "execution") {
+      if (initialPlanningRequest) {
+        items.push({ kind: "message", message: initialPlanningRequest });
+      }
       if (planningMessages.length > 0) {
         const expanded = expandedPlanningSummaryIds.has(
           AUTO_PLANNING_SUMMARY_ID,

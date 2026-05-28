@@ -157,13 +157,18 @@ describe("prompt display helpers", () => {
     );
 
     expect(items.map((item) => item.kind)).toEqual([
+      "message",
       "planning-summary",
       "execution-separator",
       "message",
     ]);
     expect(items[0]).toMatchObject({
+      kind: "message",
+      message: { id: "u1" },
+    });
+    expect(items[1]).toMatchObject({
       kind: "planning-summary",
-      messages: [{ id: "u1" }, { id: "h1" }, { id: "a1" }],
+      messages: [{ id: "h1" }, { id: "a1" }],
     });
   });
 
@@ -180,14 +185,18 @@ describe("prompt display helpers", () => {
     );
 
     expect(items.map((item) => item.kind)).toEqual([
-      "planning-summary",
       "message",
+      "planning-summary",
       "message",
       "message",
       "execution-separator",
       "message",
     ]);
     expect(items[0]).toMatchObject({
+      kind: "message",
+      message: { id: "u1" },
+    });
+    expect(items[1]).toMatchObject({
       kind: "planning-summary",
       expanded: true,
     });
@@ -196,6 +205,26 @@ describe("prompt display helpers", () => {
         .filter((item) => item.kind === "message")
         .map((item) => item.message.id),
     ).toEqual(["u1", "h1", "a1", "a2"]);
+  });
+
+  it("keeps the initial request visible without adding an empty planning summary", () => {
+    const items = buildMessageRenderItems(
+      [
+        message("u1", "user", "planning"),
+        message("a2", "assistant", "execution"),
+      ],
+      true,
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "message",
+      "execution-separator",
+      "message",
+    ]);
+    expect(items[0]).toMatchObject({
+      kind: "message",
+      message: { id: "u1" },
+    });
   });
 
   it("wires the planning summary row as an expandable control", () => {
