@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { setRuntimePaths } from "../../src/main/runtimePaths";
@@ -7,6 +13,7 @@ import {
   createExecutionLogger,
   ensureExecutionLogFile,
   executionLogPath,
+  readExecutionLogSnapshot,
 } from "../../src/main/executionLog";
 
 let dir = "";
@@ -64,5 +71,33 @@ describe("executionLog", () => {
     expect(path).toBe(executionLogPath());
     expect(existsSync(path)).toBe(true);
     expect(readFileSync(path, "utf8")).toBe("");
+  });
+
+  it("reads execution log entries for the in-app viewer", () => {
+    const log = createExecutionLogger(true, {
+      conversationId: "c1",
+      mode: "code",
+      model: "gemma-test",
+    });
+
+    log("plan_blocked", { reason: "grep command was killed" });
+    appendFileSync(executionLogPath(), "not json\n", "utf8");
+
+    const snapshot = readExecutionLogSnapshot();
+
+    expect(snapshot.path).toBe(executionLogPath());
+    expect(snapshot.totalLines).toBe(2);
+    expect(snapshot.truncated).toBe(false);
+    expect(snapshot.entries[0]).toMatchObject({
+      line: 1,
+      event: "plan_blocked",
+      conversationId: "c1",
+      data: { reason: "grep command was killed" },
+    });
+    expect(snapshot.entries[1]).toMatchObject({
+      line: 2,
+      event: "invalid_json",
+      raw: "not json",
+    });
   });
 });

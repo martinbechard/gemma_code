@@ -28,6 +28,24 @@ const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
 const DESTRUCTIVE_EDIT_MIN_OLD_STRING_CHARS = 20;
 const DESTRUCTIVE_EDIT_MIN_NEW_STRING_CHARS = 200;
 const DESTRUCTIVE_EDIT_MAX_NEW_TO_OLD_RATIO = 10;
+const SEARCH_FILES_DEFAULT_PATH = ".";
+const SEARCH_FILES_DEFAULT_MAX_RESULTS = 200;
+const SEARCH_FILES_ABSOLUTE_MAX_RESULTS = 500;
+const SEARCH_FILES_TIMEOUT_MS = 20_000;
+const SEARCH_FILES_IGNORED_GLOBS = [
+  "!node_modules/**",
+  "!out/**",
+  "!dist/**",
+  "!build/**",
+  "!.git/**",
+  "!.gemma-cli/**",
+  "!.next/**",
+  "!coverage/**",
+  "!.turbo/**",
+  "!.vite/**",
+  "!.cache/**",
+  "!*.tsbuildinfo",
+] as const;
 const PROTECTED_OVERWRITE_PATH_RE =
   /^(?:src|tests)\/|^Gemma(?:\.[A-Za-z]+)?\.md$|^package\.json$/;
 
@@ -404,6 +422,85 @@ async function listFiles(
     .join("\n");
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function safeSearchPath(args: Record<string, unknown>): string | null {
+  const rawPath = String(args.path ?? SEARCH_FILES_DEFAULT_PATH).trim();
+  const path = rawPath || SEARCH_FILES_DEFAULT_PATH;
+  if (path.startsWith("/") || path.split(/[\\/]+/).includes("..")) return null;
+  return path;
+}
+
+function boundedSearchResultLimit(args: Record<string, unknown>): number {
+  const raw =
+    typeof args.max_results === "number"
+      ? args.max_results
+      : SEARCH_FILES_DEFAULT_MAX_RESULTS;
+  const integer = Number.isFinite(raw)
+    ? Math.floor(raw)
+    : SEARCH_FILES_DEFAULT_MAX_RESULTS;
+  return Math.max(1, Math.min(integer, SEARCH_FILES_ABSOLUTE_MAX_RESULTS));
+}
+
+async function searchFiles(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const query = String(args.query ?? "").trim();
+  if (!query) return "Error: missing <query>";
+  const path = safeSearchPath(args);
+  if (!path) {
+    return "Error: search_files path must be relative to the workspace and cannot contain ..";
+  }
+  const maxResults = boundedSearchResultLimit(args);
+  const fileGlob = String(args.file_glob ?? "").trim();
+  const ignoreArgs = SEARCH_FILES_IGNORED_GLOBS.map(
+    (glob) => `--glob ${shellQuote(glob)}`,
+  );
+  const fileGlobArgs = fileGlob ? [`--glob ${shellQuote(fileGlob)}`] : [];
+  const command = [
+    "command -v rg >/dev/null 2>&1 || { echo 'rg is required for search_files but was not found on PATH.' >&2; exit 127; }",
+    [
+      "rg",
+      "--line-number",
+      "--hidden",
+      "--fixed-strings",
+      "--no-heading",
+      "--color",
+      "never",
+      ...ignoreArgs,
+      ...fileGlobArgs,
+      "--",
+      shellQuote(query),
+      shellQuote(path),
+    ].join(" "),
+  ].join(" && ");
+  const r = await wsRunBash(
+    ctx.conversationId,
+    command,
+    SEARCH_FILES_TIMEOUT_MS,
+  );
+  if (r.exitCode === 1 && !r.stdout.trim()) {
+    return `No matches found for ${JSON.stringify(query)} in ${path}.`;
+  }
+  if (r.exitCode !== 0) {
+    const detail = (r.stderr || r.stdout || `exit=${r.exitCode}`).trim();
+    return `Error searching files: ${detail}`;
+  }
+  const lines = r.stdout.split(/\r?\n/).filter((line) => line.trim() !== "");
+  const limited = lines.slice(0, maxResults);
+  const parts = [
+    `Found ${lines.length} match${lines.length === 1 ? "" : "es"} for ${JSON.stringify(query)} in ${path}.`,
+    ...limited,
+  ];
+  if (lines.length > limited.length || r.truncated) {
+    parts.push("[results were truncated]");
+  }
+  return parts.join("\n");
+}
+
 async function deleteFile(
   args: Record<string, unknown>,
   ctx: ToolContext,
@@ -655,10 +752,38 @@ export const TOOLS: Record<string, ToolSpec> = {
     mode: "code",
     run: editFile,
   },
+  search_files: {
+    name: "search_files",
+    description:
+      "Search workspace files for a literal query using rg with generated directories excluded. Use this before run_bash for finding references, usages, symbols, or text.",
+    params: [
+      {
+        name: "query",
+        description: "literal text to search for",
+        required: true,
+      },
+      {
+        name: "path",
+        description: "relative file or directory to search; defaults to .",
+      },
+      {
+        name: "file_glob",
+        description: "optional file glob such as *.ts or src/**/*.tsx",
+      },
+      {
+        name: "max_results",
+        description: "maximum matching lines to return; default 200, max 500",
+      },
+    ],
+    example:
+      '<action name="search_files">\n<query>get_current_working_directory</query>\n<path>.</path>\n<file_glob>*.ts</file_glob>\n</action>',
+    mode: "code",
+    run: searchFiles,
+  },
   list_files: {
     name: "list_files",
     description:
-      "List the workspace tree, including root files and nested directories. This tool has no path parameter; use run_bash for narrower directory listings.",
+      "List the workspace tree only; it does not search file contents. This tool has no path parameter. Use search_files for references or text, and use run_bash for narrower directory listings.",
     params: [],
     example: '<action name="list_files"></action>',
     mode: "code",

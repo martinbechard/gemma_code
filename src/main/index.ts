@@ -97,6 +97,7 @@ import {
   createExecutionLogger,
   ensureExecutionLogFile,
   executionLogPath,
+  readExecutionLogSnapshot,
 } from "./executionLog";
 
 const COMMAND_TARGET_MAX_CHARS = 80;
@@ -748,6 +749,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       pendingEditRecoveryPath = null;
     };
 
+    const pushStepIncompletePrompt = (reason: string): void => {
+      logExecution("step_incomplete", {
+        reason,
+        stepId: planState?.currentStepId ?? null,
+      });
+      pushHarnessPrompt("step incomplete", buildIncompleteStepPrompt(reason));
+    };
+
     const startPlanSemanticReview = (plan: ParsedPlan): void => {
       const reviewMessages = buildPlanSemanticReviewMessages(
         plan,
@@ -787,6 +796,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     const drainPlanEvents = (): void => {
       if (!planState) return;
       for (const ev of planState.drainEvents()) {
+        logExecution("plan_event", ev);
+        if (ev.type === "plan_node_end" && ev.status === "failed") {
+          logExecution("plan_step_failed", {
+            kind: ev.kind,
+            id: ev.id,
+            reason: ev.reason ?? "",
+          });
+        }
         if (ev.type === "plan_node_start") {
           emit({
             type: "plan_node_start",
@@ -1051,10 +1068,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                   ? found.args.reason
                   : undefined;
               if (resultText === "fail" && forcedReason) {
-                pushHarnessPrompt(
-                  "step incomplete",
-                  buildIncompleteStepPrompt(forcedReason),
-                );
+                pushStepIncompletePrompt(forcedReason);
               } else if (
                 resultText === "fail" &&
                 reason &&
@@ -1500,6 +1514,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           flushBufferToUI();
           replaceBodyStripped();
           baseMessages.push({ role: "assistant", content: buffer });
+          logExecution("verify_result", {
+            result: vr.result,
+            reason: "reason" in vr ? vr.reason : "",
+            criterion: planState.currentVerifyCriterion() ?? "",
+            stepId: planState.currentStepId,
+          });
           const outcome = planState.applyVerify(vr);
           drainPlanEvents();
           awaitingVerify = false;
@@ -1741,10 +1761,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           ) {
             replaceBodyStripped();
             if (forcedReason) {
-              pushHarnessPrompt(
-                "step incomplete",
-                buildIncompleteStepPrompt(forcedReason),
-              );
+              pushStepIncompletePrompt(forcedReason);
               emit({
                 type: "activity",
                 activity: { kind: "thinking", chars: 0 },
@@ -1882,6 +1899,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         if (blockedReason) {
           flushBufferToUI();
           baseMessages.push({ role: "assistant", content: buffer });
+          logExecution("plan_blocked", {
+            reason: blockedReason,
+            stepId: planState.currentStepId,
+          });
           const outcome = planState.failCurrentStepAttempt(
             `blocked: ${blockedReason}`,
           );
@@ -1919,10 +1940,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           flushBufferToUI();
           emit({ type: "set_assistant_content", text: "" });
           baseMessages.push({ role: "assistant", content: buffer });
-          pushHarnessPrompt(
-            "step incomplete",
-            buildIncompleteStepPrompt(incompleteReason),
-          );
+          pushStepIncompletePrompt(incompleteReason);
           emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
           continue;
         }
@@ -2094,6 +2112,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("debug:execution-log-path", async () => executionLogPath());
+
+  ipcMain.handle("debug:execution-log-read", async () =>
+    readExecutionLogSnapshot(),
+  );
 
   ipcMain.handle("debug:open-execution-log", async () => {
     const path = ensureExecutionLogFile();

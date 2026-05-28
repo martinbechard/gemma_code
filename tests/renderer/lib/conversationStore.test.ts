@@ -322,11 +322,20 @@ describe("prompt display helpers", () => {
     expect(chatSource).toContain("debugLogging: executionLogging");
     expect(chatSource).toContain("onToggleExecutionLogging");
     expect(chatSource).toContain("onOpenExecutionLog");
-    expect(chatSource).toContain("Open execution log");
+    expect(chatSource).toContain("Open execution log viewer");
+    expect(chatSource).toContain("ExecutionLogViewer");
+    expect(chatSource).toContain("Auto-scroll");
+    expect(chatSource).toContain("readExecutionLog");
     expect(preloadSource).toContain("openExecutionLog");
+    expect(preloadSource).toContain("readExecutionLog");
     expect(preloadSource).toContain("debug:open-execution-log");
+    expect(preloadSource).toContain("debug:execution-log-read");
     expect(mainSource).toContain("debug:open-execution-log");
+    expect(mainSource).toContain("debug:execution-log-read");
     expect(mainSource).toContain("ensureExecutionLogFile");
+    expect(mainSource).toContain("readExecutionLogSnapshot");
+    expect(mainSource).toContain("plan_blocked");
+    expect(mainSource).toContain("plan_step_failed");
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

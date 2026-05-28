@@ -117,6 +117,24 @@ export interface ChatRequest {
   debugLogging?: boolean;
 }
 
+export interface ExecutionLogEntry {
+  line: number;
+  timestamp: string;
+  conversationId?: string;
+  mode?: string;
+  model?: string;
+  event: string;
+  data: unknown;
+  raw?: string;
+}
+
+export interface ExecutionLogSnapshot {
+  path: string;
+  entries: ExecutionLogEntry[];
+  totalLines: number;
+  truncated: boolean;
+}
+
 export interface ProposedStep {
   name: string;
   prompt: string;

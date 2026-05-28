@@ -78,6 +78,10 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain("reply exactly BLOCKED:");
     expect(executePrompt).toContain("Do not write waiting prose");
     expect(executePrompt).toContain("list_files returns the workspace tree");
+    expect(executePrompt).toContain("search_files searches file contents");
+    expect(executePrompt).toContain(
+      "use search_files before list_files or run_bash",
+    );
     expect(executePrompt).toContain("Execution starts with a fresh model context");
     expect(codeSystemPrompt("/workspace", "http://preview", "execute")).toContain(
       '<action name="tool_name"/> is also valid',
@@ -205,8 +209,23 @@ describe("codeSystemPrompt", () => {
   it("describes list_files as a full workspace tree tool", () => {
     const prompt = codeSystemPrompt("/workspace", "http://preview", "execute");
 
-    expect(prompt).toContain("List the workspace tree");
+    expect(prompt).toContain("List the workspace tree only");
+    expect(prompt).toContain("it does not search file contents");
     expect(prompt).toContain("This tool has no path parameter");
+    expect(prompt).toContain("Use search_files for references or text");
     expect(prompt).toContain("use run_bash for narrower directory listings");
+  });
+
+  it("advertises search_files as the first choice for reference searches", () => {
+    const prompt = codeSystemPrompt("/workspace", "http://preview", "execute");
+
+    expect(prompt).toContain("### search_files");
+    expect(prompt).toContain("Search workspace files for a literal query");
+    expect(prompt).toContain(
+      "Use this before run_bash for finding references, usages, symbols, or text.",
+    );
+    expect(prompt.indexOf("### search_files")).toBeLessThan(
+      prompt.indexOf("### list_files"),
+    );
   });
 });

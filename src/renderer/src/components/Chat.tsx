@@ -4,6 +4,8 @@ import {
   type AgentMode,
   type ChatMessage,
   type CodeSubmode,
+  type ExecutionLogEntry,
+  type ExecutionLogSnapshot,
   type ToolCall,
   type StreamChunk,
 } from "@shared/types";
@@ -47,6 +49,8 @@ interface Conversation {
 type PillKey = "chat" | "build" | "code";
 const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
 const EXECUTION_LOGGING_STORAGE_KEY = "gemma-chat:execution-logging";
+const LOG_VIEWER_REFRESH_MS = 2_000;
+const LOG_DETAIL_PREVIEW_MAX_CHARS = 220;
 
 function pillKeyOf(c: Pick<Conversation, "mode" | "workingDir">): PillKey {
   if (c.mode === "chat") return "chat";
@@ -135,7 +139,12 @@ export default function Chat({ model, onSwitchModel }: Props) {
     }
   });
   const [executionLogPath, setExecutionLogPath] = useState("");
-  const [executionLogOpenError, setExecutionLogOpenError] = useState("");
+  const [executionLogViewerError, setExecutionLogViewerError] = useState("");
+  const [logViewerOpen, setLogViewerOpen] = useState(false);
+  const [logViewerAutoScroll, setLogViewerAutoScroll] = useState(true);
+  const [executionLogSnapshot, setExecutionLogSnapshot] =
+    useState<ExecutionLogSnapshot | null>(null);
+  const logViewerEndRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<{ abort: boolean }>({ abort: false });
 
   const activeConversation = useMemo(
@@ -165,16 +174,41 @@ export default function Chat({ model, onSwitchModel }: Props) {
       .catch(() => setExecutionLogPath(""));
   }, []);
 
-  const handleOpenExecutionLog = useCallback(async (): Promise<void> => {
-    setExecutionLogOpenError("");
+  const loadExecutionLog = useCallback(async (): Promise<void> => {
+    setExecutionLogViewerError("");
     try {
-      await window.api.openExecutionLog();
+      const snapshot = await window.api.readExecutionLog();
+      setExecutionLogSnapshot(snapshot);
+      setExecutionLogPath(snapshot.path);
     } catch (error) {
-      setExecutionLogOpenError(
-        error instanceof Error ? error.message : "Could not open execution log.",
+      setExecutionLogViewerError(
+        error instanceof Error ? error.message : "Could not read execution log.",
       );
     }
   }, []);
+
+  const handleOpenExecutionLog = useCallback(async (): Promise<void> => {
+    setLogViewerOpen(true);
+    await loadExecutionLog();
+  }, [loadExecutionLog]);
+
+  useEffect(() => {
+    if (!logViewerOpen) return;
+    void loadExecutionLog();
+    const refresh = window.setInterval(() => {
+      void loadExecutionLog();
+    }, LOG_VIEWER_REFRESH_MS);
+    return () => window.clearInterval(refresh);
+  }, [loadExecutionLog, logViewerOpen]);
+
+  useEffect(() => {
+    if (!logViewerOpen || !logViewerAutoScroll) return;
+    logViewerEndRef.current?.scrollIntoView({ block: "end" });
+  }, [
+    executionLogSnapshot?.entries.length,
+    logViewerAutoScroll,
+    logViewerOpen,
+  ]);
 
   function updateActive(fn: (c: Conversation) => Conversation): void {
     setConversations((cs) => cs.map((c) => (c.id === activeId ? fn(c) : c)));
@@ -574,7 +608,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
             onSwitchModel={onSwitchModel}
             executionLogging={executionLogging}
             executionLogPath={executionLogPath}
-            executionLogOpenError={executionLogOpenError}
+            executionLogOpenError={executionLogViewerError}
             onToggleExecutionLogging={() =>
               setExecutionLogging((current) => !current)
             }
@@ -609,6 +643,17 @@ export default function Chat({ model, onSwitchModel }: Props) {
           />
         )}
       </div>
+      {logViewerOpen && (
+        <ExecutionLogViewer
+          snapshot={executionLogSnapshot}
+          error={executionLogViewerError}
+          autoScroll={logViewerAutoScroll}
+          onAutoScrollChange={setLogViewerAutoScroll}
+          onRefresh={loadExecutionLog}
+          onClose={() => setLogViewerOpen(false)}
+          endRef={logViewerEndRef}
+        />
+      )}
     </div>
   );
 }
@@ -666,6 +711,224 @@ function ResizableCanvas({
       />
     </div>
   );
+}
+
+function ExecutionLogViewer({
+  snapshot,
+  error,
+  autoScroll,
+  onAutoScrollChange,
+  onRefresh,
+  onClose,
+  endRef,
+}: {
+  snapshot: ExecutionLogSnapshot | null;
+  error: string;
+  autoScroll: boolean;
+  onAutoScrollChange: (enabled: boolean) => void;
+  onRefresh: () => void;
+  onClose: () => void;
+  endRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const entries = snapshot?.entries ?? [];
+  return (
+    <div className="no-drag fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="flex h-[78vh] w-[min(980px,calc(100vw-2rem))] flex-col rounded-lg border border-white/10 bg-[#111111] shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.08] px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-ink-100">
+              Execution log
+            </div>
+            <div className="mt-0.5 truncate text-[11px] text-ink-500">
+              {snapshot?.path ?? "Loading log path..."}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <label className="flex h-7 items-center gap-2 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-[11.5px] text-ink-300">
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={(event) =>
+                  onAutoScrollChange(event.currentTarget.checked)
+                }
+                className="h-3.5 w-3.5 accent-emerald-400"
+              />
+              Auto-scroll
+            </label>
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="h-7 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-[11.5px] text-ink-300 transition hover:bg-white/[0.06] hover:text-ink-100"
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close execution log viewer"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.03] text-ink-300 transition hover:bg-white/[0.06] hover:text-ink-100"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+              >
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-4 py-2 text-[11px] text-ink-500">
+          <span>{snapshot?.totalLines ?? 0} lines</span>
+          <span>{entries.length} shown</span>
+          {snapshot?.truncated && (
+            <span className="text-amber-200">Older entries hidden</span>
+          )}
+          {error && <span className="text-red-200">{error}</span>}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {entries.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-white/10 p-6 text-center text-[12px] text-ink-500">
+              No execution log entries yet.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {entries.map((entry) => (
+                <details
+                  key={entry.line}
+                  className={`group rounded-lg border bg-white/[0.025] ${executionLogEventClass(entry)}`}
+                >
+                  <summary className="grid cursor-pointer grid-cols-[76px_150px_minmax(0,1fr)_56px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
+                    <span className="font-mono text-ink-500">
+                      {entryTimeLabel(entry)}
+                    </span>
+                    <span className="truncate font-medium text-ink-100">
+                      {entry.event}
+                    </span>
+                    <span className="truncate text-ink-300">
+                      {executionLogSummary(entry)}
+                    </span>
+                    <span className="text-right font-mono text-ink-600">
+                      #{entry.line}
+                    </span>
+                  </summary>
+                  <pre className="selectable mx-3 mb-3 max-h-80 overflow-auto rounded-md border border-white/[0.07] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
+                    {executionLogDetails(entry)}
+                  </pre>
+                </details>
+              ))}
+              <div ref={endRef} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isLogRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function logStringField(
+  record: Record<string, unknown>,
+  key: string,
+): string {
+  const value = record[key];
+  return typeof value === "string" ? value : "";
+}
+
+function compactLogText(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= LOG_DETAIL_PREVIEW_MAX_CHARS) return oneLine;
+  return `${oneLine.slice(0, LOG_DETAIL_PREVIEW_MAX_CHARS)}...`;
+}
+
+function executionLogSummary(entry: ExecutionLogEntry): string {
+  const data = isLogRecord(entry.data) ? entry.data : null;
+  if (!data) return compactLogText(String(entry.data ?? ""));
+  switch (entry.event) {
+    case "tool_call":
+      return compactLogText(
+        `${logStringField(data, "name")} ${JSON.stringify(data.args ?? {})}`,
+      );
+    case "tool_result":
+      return compactLogText(
+        `${logStringField(data, "tool")} ${logStringField(data, "error") || logStringField(data, "result")}`,
+      );
+    case "plan_blocked":
+    case "plan_step_failed":
+    case "step_incomplete":
+      return compactLogText(logStringField(data, "reason"));
+    case "verify_result":
+      return compactLogText(
+        `${logStringField(data, "result")} ${logStringField(data, "reason")}`,
+      );
+    case "harness_prompt":
+    case "system_prompt":
+      return compactLogText(
+        `${logStringField(data, "label")} ${logStringField(data, "content")}`,
+      );
+    case "model_request":
+      return compactLogText(
+        `${String(data.messageCount ?? "")} messages ${logStringField(data, "promptPath")}`,
+      );
+    case "model_chunk":
+      return compactLogText(logStringField(data, "content"));
+    case "stream_chunk":
+      return compactLogText(
+        `${logStringField(data, "type")} ${logStringField(data, "reason")}`,
+      );
+    default:
+      return compactLogText(JSON.stringify(data));
+  }
+}
+
+function executionLogDetails(entry: ExecutionLogEntry): string {
+  return JSON.stringify(
+    {
+      line: entry.line,
+      timestamp: entry.timestamp,
+      conversationId: entry.conversationId,
+      mode: entry.mode,
+      model: entry.model,
+      event: entry.event,
+      data: entry.data,
+      raw: entry.raw,
+    },
+    null,
+    2,
+  );
+}
+
+function entryTimeLabel(entry: ExecutionLogEntry): string {
+  if (!entry.timestamp) return "--:--:--";
+  const date = new Date(entry.timestamp);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function executionLogEventClass(entry: ExecutionLogEntry): string {
+  if (
+    entry.event.includes("blocked") ||
+    entry.event.includes("failed") ||
+    entry.event.includes("error")
+  ) {
+    return "border-red-400/20";
+  }
+  if (entry.event === "tool_call" || entry.event === "tool_result") {
+    return "border-sky-300/15";
+  }
+  if (entry.event === "verify_result" || entry.event === "plan_event") {
+    return "border-amber-300/15";
+  }
+  return "border-white/[0.07]";
 }
 
 function Header({
@@ -810,11 +1073,11 @@ function Header({
             type="button"
             onClick={onOpenExecutionLog}
             disabled={!executionLogPath}
-            aria-label="Open execution log"
+            aria-label="Open execution log viewer"
             title={
               executionLogOpenError ||
               (executionLogPath
-                ? `Open execution log: ${executionLogPath}`
+                ? `Open execution log viewer: ${executionLogPath}`
                 : "Execution log path unavailable")
             }
             className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-400/25 bg-emerald-400/10 text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:border-white/[0.08] disabled:bg-white/[0.03] disabled:text-ink-500"

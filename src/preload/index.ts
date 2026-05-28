@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
 import type {
   ChatRequest,
+  ExecutionLogSnapshot,
   SetupStatus,
   StreamChunk,
   WorkspaceInfo,
@@ -56,6 +57,9 @@ const api = {
 
   openExecutionLog: (): Promise<void> =>
     ipcRenderer.invoke("debug:open-execution-log"),
+
+  readExecutionLog: (): Promise<ExecutionLogSnapshot> =>
+    ipcRenderer.invoke("debug:execution-log-read"),
 
   listTools: (): Promise<
     Array<{ name: string; description: string; mode: string }>
