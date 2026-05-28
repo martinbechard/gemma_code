@@ -99,7 +99,10 @@ describe("codeSystemPrompt", () => {
     );
     expect(planPrompt).toContain("Every step name must be unique.");
     expect(planPrompt).toContain(
-      "After the assembled plan passes deterministic validation, I ask for semantic review.",
+      "After the assembled plan passes deterministic validation, I start a fresh validation context",
+    );
+    expect(planPrompt).toContain(
+      "I pass the original request in an OriginalRequest XML block",
     );
     expect(planPrompt).toContain(
       "return one complete corrected YAML plan with all steps",

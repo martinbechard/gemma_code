@@ -32,7 +32,7 @@ import {
   applyPlanAssemblyResponse,
   buildPlanAssemblyInitialPrompt,
   applyPlanSemanticReviewResponse,
-  buildPlanSemanticReviewPrompt,
+  buildPlanSemanticReviewMessages,
   createPlanAssemblyState,
   isPlanAssemblyDoneResponse,
   type PlanAssemblyState,
@@ -480,6 +480,7 @@ async function runAgentLoop(
   let planAssemblyState: PlanAssemblyState | null =
     opts.mode === "code" && !initialPlan ? createPlanAssemblyState() : null;
   let planSemanticReviewPlan: ParsedPlan | null = null;
+  let planSemanticReviewMessages: MLXChatMessage[] | null = null;
   let planAssemblyValidationRetries = 0;
   let lastActionKey: string | null = null;
   let repeatedActionCount = 0;
@@ -535,6 +536,24 @@ async function runAgentLoop(
     meta("system prompt: plan execution");
   };
 
+  const startPlanSemanticReview = (plan: ParsedPlan): void => {
+    const reviewMessages = buildPlanSemanticReviewMessages(
+      plan,
+      opts.prompt,
+    ).map(
+      (message): MLXChatMessage => ({
+        role: message.role,
+        content: message.content,
+      }),
+    );
+    planSemanticReviewPlan = plan;
+    planSemanticReviewMessages = reviewMessages;
+    const [systemMessage, userMessage] = reviewMessages;
+    displaySystemPrompt("plan semantic review", systemMessage.content);
+    displayHarnessPrompt("plan semantic review", userMessage.content);
+    meta("system prompt: plan semantic review");
+  };
+
   const handleAssembledPlan = (
     plan: ParsedPlan,
   ): AssembledPlanHandlingResult => {
@@ -581,14 +600,15 @@ async function runAgentLoop(
   for (let round = 0; round < maxRounds; round++) {
     meta(`--- round ${round + 1} ---`);
     let buffer = "";
+    const requestMessages = planSemanticReviewMessages ?? messages;
     try {
-      saveLastPrompt(messages, { mode: opts.mode, model: opts.model });
+      saveLastPrompt(requestMessages, { mode: opts.mode, model: opts.model });
     } catch {
       /* debug aid only */
     }
     for await (const chunk of chatStream({
       model: opts.model,
-      messages,
+      messages: requestMessages,
     })) {
       if (chunk.content) {
         buffer += chunk.content;
@@ -959,20 +979,23 @@ async function runAgentLoop(
     }
 
     if (planSemanticReviewPlan) {
-      messages.push({ role: "assistant", content: buffer });
+      const reviewMessages = planSemanticReviewMessages;
+      if (!reviewMessages) {
+        meta("done - plan semantic review context is missing");
+        return;
+      }
+      reviewMessages.push({ role: "assistant", content: buffer });
       const review = applyPlanSemanticReviewResponse(
         planSemanticReviewPlan,
         buffer,
       );
       if (review.kind === "rejected") {
-        pushHarnessPrompt(
-          messages,
-          "plan semantic review retry",
-          review.retryPrompt,
-        );
+        displayHarnessPrompt("plan semantic review retry", review.retryPrompt);
+        reviewMessages.push({ role: "user", content: review.retryPrompt });
         continue;
       }
       planSemanticReviewPlan = null;
+      planSemanticReviewMessages = null;
       planAssemblyState = null;
       planAssemblyValidationRetries = 0;
       const handling = handleAssembledPlan(review.plan);
@@ -1064,12 +1087,7 @@ async function runAgentLoop(
               continue;
             }
             planAssemblyValidationRetries = 0;
-            planSemanticReviewPlan = assembled.plan;
-            pushHarnessPrompt(
-              messages,
-              "plan semantic review",
-              buildPlanSemanticReviewPrompt(assembled.plan, opts.prompt),
-            );
+            startPlanSemanticReview(assembled.plan);
             continue;
           }
         }

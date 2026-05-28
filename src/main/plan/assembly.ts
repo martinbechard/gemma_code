@@ -8,8 +8,23 @@ const WHOLE_RESPONSE_YAML_FENCE_RE =
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
 export const PLAN_SEMANTIC_REVIEW_PASS_TEXT = "review: pass";
+export const PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT = [
+  "You are validating an assembled implementation plan.",
+  "This is a fresh review context after plan construction has ended.",
+  "Do not continue plan construction and do not return plan: done.",
+  "Use only the original request and assembled plan supplied by the user message.",
+  "If the plan is semantically complete, return exactly " +
+    PLAN_SEMANTIC_REVIEW_PASS_TEXT +
+    ".",
+  "If the plan needs correction, return one complete corrected YAML plan with all steps.",
+  "Return no prose.",
+].join("\n");
 const PLAN_ASSEMBLY_USER_REQUEST_OPEN = "<UserRequest>";
 const PLAN_ASSEMBLY_USER_REQUEST_CLOSE = "</UserRequest>";
+const PLAN_SEMANTIC_REVIEW_ORIGINAL_REQUEST_OPEN = "<OriginalRequest>";
+const PLAN_SEMANTIC_REVIEW_ORIGINAL_REQUEST_CLOSE = "</OriginalRequest>";
+const PLAN_SEMANTIC_REVIEW_PLAN_OPEN = "<AssembledPlan>";
+const PLAN_SEMANTIC_REVIEW_PLAN_CLOSE = "</AssembledPlan>";
 const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "As an expert in software development and AI-assisted coding, I need your help in instructing an AI coding agent. Our task: ";
 const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
@@ -62,6 +77,11 @@ export type PlanSemanticReviewResult =
       reason: string;
       retryPrompt: string;
     };
+
+export interface PlanSemanticReviewMessage {
+  role: "system" | "user";
+  content: string;
+}
 
 export function createPlanAssemblyState(): PlanAssemblyState {
   return { steps: [] };
@@ -181,13 +201,15 @@ export function buildPlanSemanticReviewPrompt(
   task: string,
 ): string {
   return [
-    "Review the assembled plan for semantic fit to the user request.",
+    "Validate the assembled plan against the original user request.",
     "",
-    "User request:",
+    PLAN_SEMANTIC_REVIEW_ORIGINAL_REQUEST_OPEN,
     task.trim(),
+    PLAN_SEMANTIC_REVIEW_ORIGINAL_REQUEST_CLOSE,
     "",
-    "Assembled plan:",
+    PLAN_SEMANTIC_REVIEW_PLAN_OPEN,
     plan.raw,
+    PLAN_SEMANTIC_REVIEW_PLAN_CLOSE,
     "",
     "Deterministic syntax validation has already passed. Do not critique YAML formatting unless the corrected plan you return would fail the documented shape.",
     "Check whether the plan has enough concrete grounding, implementation, test, documentation, and verification work for this specific request. Some requests may not need every category.",
@@ -199,6 +221,16 @@ export function buildPlanSemanticReviewPrompt(
     "If the plan needs correction, return one complete corrected YAML plan with all steps, not just an added step.",
     "Return no prose.",
   ].join("\n");
+}
+
+export function buildPlanSemanticReviewMessages(
+  plan: ParsedPlan,
+  task: string,
+): PlanSemanticReviewMessage[] {
+  return [
+    { role: "system", content: PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT },
+    { role: "user", content: buildPlanSemanticReviewPrompt(plan, task) },
+  ];
 }
 
 export function applyPlanSemanticReviewResponse(

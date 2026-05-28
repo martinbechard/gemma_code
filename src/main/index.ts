@@ -73,7 +73,7 @@ import {
   applyPlanAssemblyResponse,
   applyPlanSemanticReviewResponse,
   buildPlanAssemblyInitialPrompt,
-  buildPlanSemanticReviewPrompt,
+  buildPlanSemanticReviewMessages,
   createPlanAssemblyState,
   isPlanAssemblyDoneResponse,
   type PlanAssemblyState,
@@ -713,6 +713,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       ? createPlanAssemblyState()
       : null;
     let planSemanticReviewPlan: ParsedPlan | null = null;
+    let planSemanticReviewMessages: MLXChatMessage[] | null = null;
     let planAssemblyValidationRetries = 0;
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
@@ -740,6 +741,28 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       stepEvidence = createPlanStepEvidence();
       stepEvidenceStepId = null;
       pendingEditRecoveryPath = null;
+    };
+
+    const startPlanSemanticReview = (plan: ParsedPlan): void => {
+      const reviewMessages = buildPlanSemanticReviewMessages(
+        plan,
+        planningTask,
+      ).map(
+        (message): MLXChatMessage => ({
+          role: message.role,
+          content: message.content,
+        }),
+      );
+      planSemanticReviewPlan = plan;
+      planSemanticReviewMessages = reviewMessages;
+      const [systemMessage, userMessage] = reviewMessages;
+      emitSystemPrompt("plan semantic review", systemMessage.content);
+      emit({
+        type: "harness_message",
+        label: "plan semantic review",
+        content: userMessage.content,
+        phase: "planning",
+      });
     };
 
     const usePlanExecutionPrompt = (): void => {
@@ -874,24 +897,25 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
       emitRuntimeActivity("connecting to MLX");
       emitRuntimeActivity("waiting for first token");
+      const requestMessages = planSemanticReviewMessages ?? baseMessages;
       // Persist the assembled conversation to <userData>/debug/last-system-prompt.txt
       // so the human can inspect what the model actually receives. Overwritten
       // every round so the file always reflects the latest call.
       try {
-        const promptPath = saveLastPrompt(baseMessages, {
+        const promptPath = saveLastPrompt(requestMessages, {
           mode: req.mode,
           model: req.model,
         });
         logExecution("model_request", {
           promptPath,
-          messageCount: baseMessages.length,
+          messageCount: requestMessages.length,
         });
       } catch {
         // debug aid only; never let a write failure abort the chat round
       }
       streamLoop: for await (const chunk of chatStream({
         model: req.model,
-        messages: baseMessages,
+        messages: requestMessages,
         signal: abort.signal,
       })) {
         logExecution("model_chunk", chunk);
@@ -1477,16 +1501,29 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       //     the model does the work directly.
       if (planSemanticReviewPlan) {
         flushBufferToUI();
+        const reviewMessages = planSemanticReviewMessages;
+        if (!reviewMessages) {
+          emit({
+            type: "error",
+            error: "Plan semantic review context is missing.",
+          });
+          emit({ type: "activity", activity: { kind: "idle" } });
+          emit({ type: "done" });
+          return;
+        }
         const review = applyPlanSemanticReviewResponse(
           planSemanticReviewPlan,
           buffer,
         );
-        baseMessages.push({ role: "assistant", content: buffer });
+        reviewMessages.push({ role: "assistant", content: buffer });
         if (review.kind === "rejected") {
-          pushPlanningHarnessPrompt(
-            "plan semantic review retry",
-            review.retryPrompt,
-          );
+          emit({
+            type: "harness_message",
+            label: "plan semantic review retry",
+            content: review.retryPrompt,
+            phase: "planning",
+          });
+          reviewMessages.push({ role: "user", content: review.retryPrompt });
           emit({
             type: "activity",
             activity: { kind: "thinking", chars: 0 },
@@ -1494,6 +1531,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           continue;
         }
         planSemanticReviewPlan = null;
+        planSemanticReviewMessages = null;
         planAssemblyState = null;
         planAssemblyValidationRetries = 0;
         savePlan(req.conversationId, review.plan.raw);
@@ -1608,12 +1646,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             continue;
           }
           planAssemblyValidationRetries = 0;
-          planSemanticReviewPlan = assembled.plan;
           baseMessages.push({ role: "assistant", content: buffer });
-          pushPlanningHarnessPrompt(
-            "plan semantic review",
-            buildPlanSemanticReviewPrompt(assembled.plan, planningTask),
-          );
+          startPlanSemanticReview(assembled.plan);
           emit({
             type: "activity",
             activity: { kind: "thinking", chars: 0 },

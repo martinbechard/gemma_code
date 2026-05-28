@@ -3,9 +3,11 @@ import {
   PLAN_ASSEMBLY_DONE_TEXT,
   PLAN_ASSEMBLY_NEXT_PROMPT,
   PLAN_SEMANTIC_REVIEW_PASS_TEXT,
+  PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT,
   applyPlanAssemblyResponse,
   applyPlanSemanticReviewResponse,
   buildPlanAssemblyInitialPrompt,
+  buildPlanSemanticReviewMessages,
   buildPlanSemanticReviewPrompt,
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
@@ -198,13 +200,48 @@ describe("semantic plan review", () => {
       "add keyboard shortcuts to the composer",
     );
 
-    expect(prompt).toContain("Review the assembled plan for semantic fit");
-    expect(prompt).toContain("add keyboard shortcuts to the composer");
+    expect(prompt).toContain("Validate the assembled plan");
+    expect(prompt).toContain(
+      "<OriginalRequest>\nadd keyboard shortcuts to the composer\n</OriginalRequest>",
+    );
+    expect(prompt).toContain("<AssembledPlan>");
     expect(prompt).toContain("name: explore");
+    expect(prompt).toContain("</AssembledPlan>");
     expect(prompt).toContain(PLAN_SEMANTIC_REVIEW_PASS_TEXT);
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
     expect(prompt).not.toContain("get_current");
+  });
+
+  it("builds semantic review messages with a fresh validation system prompt", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const plan = finalizePlanAssembly(first.state);
+    if (!plan) throw new Error("expected plan");
+
+    const messages = buildPlanSemanticReviewMessages(
+      plan,
+      "add keyboard shortcuts to the composer",
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toEqual({
+      role: "system",
+      content: PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT,
+    });
+    expect(messages[0].content).toContain("fresh review context");
+    expect(messages[0].content).toContain("Do not continue plan construction");
+    expect(messages[0].content).toContain("do not return plan: done");
+    expect(messages[0].content).toContain(PLAN_SEMANTIC_REVIEW_PASS_TEXT);
+    expect(messages[1].role).toBe("user");
+    expect(messages[1].content).toContain("<OriginalRequest>");
+    expect(messages[1].content).toContain("add keyboard shortcuts to the composer");
+    expect(messages[1].content).toContain("<AssembledPlan>");
+    expect(messages[1].content).toContain("name: explore");
   });
 
   it("accepts a semantic review pass response", () => {
