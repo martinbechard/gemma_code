@@ -39,6 +39,153 @@ describe("plan step evidence", () => {
     ).toContain("tool failure during step");
   });
 
+  it("blocks mutation steps when only read evidence was gathered", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "function getCurrentWorkingDirectory() {}",
+      { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        'Remove the identified code implementing the "LLM tool to get the current working directory" from the codebase.\nThe code implementing the "LLM tool to get the current working directory" has been successfully removed from the application files.',
+        evidence,
+      ),
+    ).toContain("missing mutation evidence");
+  });
+
+  it("blocks removal steps without post-mutation absence evidence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "edit_file",
+      "Edited src/main/tools.ts (2 replacements).",
+      { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "Remove get_current_working_directory from the application files.",
+        evidence,
+      ),
+    ).toContain("missing post-mutation absence evidence");
+  });
+
+  it("accepts removal steps with a post-mutation no-match search", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "edit_file",
+      "Edited src/main/tools.ts (2 replacements).",
+      { path: "src/main/tools.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "search_files",
+      'No matches found for "get_current_working_directory" in src.',
+      { query: "get_current_working_directory", path: "src" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "Remove get_current_working_directory from the application files.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("accepts current-working-directory removal after post-mutation read absence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "write_file",
+      "Wrote src/main/tools.ts (100 bytes, 5 lines).",
+      { path: "src/main/tools.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "export const tools = { get_current_datetime: {} };",
+      { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        'The code implementing the "LLM tool to get the current working directory" has been successfully removed from the application files.',
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("does not accept truncated read output as removal absence evidence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "write_file",
+      "Wrote src/main/tools.ts (100 bytes, 5 lines).",
+      { path: "src/main/tools.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "export const tools = {};\n[…truncated]",
+      { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        'The code implementing the "LLM tool to get the current working directory" has been successfully removed from the application files.',
+        evidence,
+      ),
+    ).toContain("missing post-mutation absence evidence");
+  });
+
+  it("does not accept unrelated file reads as removal absence evidence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "edit_file",
+      "Edited src/main/tools.ts (2 replacements).",
+      { path: "src/main/tools.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "export const unrelated = true;",
+      { path: "src/main/index.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "Remove get_current_working_directory from src/main/tools.ts.",
+        evidence,
+      ),
+    ).toContain("missing post-mutation absence evidence");
+  });
+
+  it("allows non-removal mutation criteria after a successful mutation", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "write_file",
+      "Wrote src/main/tools.ts (100 bytes, 5 lines).",
+      { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason("src/main/tools.ts has been updated.", evidence),
+    ).toBeNull();
+  });
+
   it("treats ambiguous old_string edit failures as recoverable edit failures", () => {
     expect(
       isRecoverableEditFailureResult(

@@ -82,6 +82,10 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain(
       "use search_files before list_files or run_bash",
     );
+    expect(executePrompt).toContain(
+      "a read-only action is not enough",
+    );
+    expect(executePrompt).toContain("post-edit absence evidence");
     expect(executePrompt).toContain("Execution starts with a fresh model context");
     expect(codeSystemPrompt("/workspace", "http://preview", "execute")).toContain(
       '<action name="tool_name"/> is also valid',

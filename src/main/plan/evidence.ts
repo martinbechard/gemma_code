@@ -3,11 +3,37 @@ export interface PlanStepEvidence {
   readPaths: Set<string>;
   listedPaths: Set<string>;
   readResults: Map<string, string>;
+  readActions: ReadFileEvidence[];
+  searchActions: SearchEvidence[];
+  mutationActions: MutationEvidence[];
   commandRuns: CommandRunEvidence[];
   toolFailures: string[];
   recoverableEditFailures: Map<string, string>;
   commandResults: string[];
   commandFailures: string[];
+}
+
+export interface ReadFileEvidence {
+  path: string;
+  sequence: number;
+  truncated: boolean;
+  content: string;
+}
+
+export interface SearchEvidence {
+  query: string;
+  path: string;
+  sequence: number;
+  noMatches: boolean;
+  truncated: boolean;
+  summary: string;
+}
+
+export interface MutationEvidence {
+  tool: string;
+  path?: string;
+  sequence: number;
+  summary: string;
 }
 
 export interface CommandRunEvidence {
@@ -51,6 +77,15 @@ const GUARDED_ALREADY_PRESENT_RE =
   /\b(?:only\s+if\s+missing|already\s+present|avoid\s+editing|do\s+not\s+edit)\b/i;
 const GET_CURRENT_TOOL_RE = /\bget_current_[a-z0-9_]+\b/g;
 const BLOCKED_RESPONSE_RE = /^\s*BLOCKED:\s*(.+?)\s*$/is;
+const MUTATION_CRITERION_RE =
+  /\b(?:add|added|create|created|edit|edited|change|changed|update|updated|replace|replaced|remove|removed|removal|delete|deleted|modify|modified|write|written)\b/i;
+const REMOVAL_CRITERION_RE =
+  /\b(?:remove|removed|removal|delete|deleted|no longer|not present|absent|gone)\b/i;
+const MUTATION_TOOL_NAMES = ["edit_file", "write_file", "delete_file"] as const;
+const MUTATING_COMMAND_RE =
+  /\b(?:rm|mv|cp)\b|\b(?:sed|perl)\s+(?:-[A-Za-z]*i|[^\n]*\s-i\b)|(?:^|\s)>\s*\S+/i;
+const TRUNCATED_OUTPUT_RE = /\[(?:…|\.\.\.)?(?:output )?truncated\]/i;
+const NO_SEARCH_MATCHES_RE = /^No matches found for (.+?) in (.+?)\./;
 
 export function createPlanStepEvidence(): PlanStepEvidence {
   return {
@@ -58,6 +93,9 @@ export function createPlanStepEvidence(): PlanStepEvidence {
     readPaths: new Set(),
     listedPaths: new Set(),
     readResults: new Map(),
+    readActions: [],
+    searchActions: [],
+    mutationActions: [],
     commandRuns: [],
     toolFailures: [],
     recoverableEditFailures: new Map(),
@@ -159,6 +197,7 @@ export function recordPlanToolEvidence(
   evidence.actionCount += 1;
   const trimmedResult = result.trimStart();
   const path = actionArgs.path;
+  const sequence = evidence.actionCount;
 
   if (
     (toolName === "write_file" || toolName === "edit_file") &&
@@ -191,6 +230,12 @@ export function recordPlanToolEvidence(
   ) {
     evidence.readPaths.add(path);
     evidence.readResults.set(path, result);
+    evidence.readActions.push({
+      path,
+      sequence,
+      truncated: TRUNCATED_OUTPUT_RE.test(result),
+      content: result,
+    });
   }
 
   if (
@@ -205,6 +250,26 @@ export function recordPlanToolEvidence(
     }
   }
 
+  if (toolName === "search_files" && !TOOL_ERROR_RE.test(trimmedResult)) {
+    evidence.searchActions.push({
+      query: typeof actionArgs.query === "string" ? actionArgs.query : "",
+      path: typeof actionArgs.path === "string" ? actionArgs.path : ".",
+      sequence,
+      noMatches: NO_SEARCH_MATCHES_RE.test(trimmedResult),
+      truncated: TRUNCATED_OUTPUT_RE.test(result),
+      summary: formatFailure(toolName, result),
+    });
+  }
+
+  if (isSuccessfulMutationTool(toolName, trimmedResult)) {
+    evidence.mutationActions.push({
+      tool: toolName,
+      path: typeof path === "string" ? path : undefined,
+      sequence,
+      summary: formatFailure(toolName, result),
+    });
+  }
+
   if (isCommandTool(toolName) && COMMAND_EXIT_RE.test(result)) {
     const command = commandFromAction(toolName, actionArgs, result);
     const failed = FAILED_EXIT_RE.test(result);
@@ -217,6 +282,13 @@ export function recordPlanToolEvidence(
     evidence.commandResults.push(summary);
     if (FAILED_EXIT_RE.test(result)) {
       evidence.commandFailures.push(summary);
+    }
+    if (!failed && isMutatingCommand(command)) {
+      evidence.mutationActions.push({
+        tool: toolName,
+        sequence,
+        summary,
+      });
     }
   }
 }
@@ -237,6 +309,22 @@ export function forcedVerifyFailureReason(
 
   if (evidence.actionCount === 0) {
     return "no tool evidence was gathered during this step attempt";
+  }
+
+  if (hasGuardedAlreadyPresentEvidence(criterion, evidence)) {
+    return null;
+  }
+
+  if (requiresMutationEvidence(criterion) && evidence.mutationActions.length === 0) {
+    return "missing mutation evidence: no successful edit_file, write_file, delete_file, or modifying command ran during this step";
+  }
+
+  if (requiresRemovalEvidence(criterion)) {
+    const absenceReason = missingRemovalAbsenceEvidenceReason(
+      criterion,
+      evidence,
+    );
+    if (absenceReason) return absenceReason;
   }
 
   if (
@@ -291,6 +379,7 @@ export function hasSatisfiedReadOnlyStepEvidence(
   evidence: PlanStepEvidence,
 ): boolean {
   if (evidence.actionCount === 0) return false;
+  if (requiresMutationEvidence(criterion)) return false;
   if (!/\b(read|reading|inspect|inspected|inspection|list|listed|retrieve|retrieved)\b/i.test(criterion)) {
     return false;
   }
@@ -302,6 +391,184 @@ export function hasSatisfiedReadOnlyStepEvidence(
     return false;
   }
   return forcedVerifyFailureReason(criterion, evidence) === null;
+}
+
+export interface PlanStepEvidenceSummary {
+  actionCount: number;
+  readPaths: string[];
+  listedPaths: string[];
+  searches: Array<{
+    query: string;
+    path: string;
+    sequence: number;
+    noMatches: boolean;
+    truncated: boolean;
+  }>;
+  mutations: Array<{
+    tool: string;
+    path?: string;
+    sequence: number;
+  }>;
+  commandRuns: Array<{
+    command: string;
+    failed: boolean;
+  }>;
+  toolFailures: string[];
+  recoverableEditFailures: string[];
+  commandFailures: string[];
+}
+
+export function summarizePlanStepEvidence(
+  evidence: PlanStepEvidence,
+): PlanStepEvidenceSummary {
+  return {
+    actionCount: evidence.actionCount,
+    readPaths: [...evidence.readPaths],
+    listedPaths: [...evidence.listedPaths],
+    searches: evidence.searchActions.map((search) => ({
+      query: search.query,
+      path: search.path,
+      sequence: search.sequence,
+      noMatches: search.noMatches,
+      truncated: search.truncated,
+    })),
+    mutations: evidence.mutationActions.map((mutation) => ({
+      tool: mutation.tool,
+      path: mutation.path,
+      sequence: mutation.sequence,
+    })),
+    commandRuns: evidence.commandRuns.map((command) => ({
+      command: command.command,
+      failed: command.failed,
+    })),
+    toolFailures: [...evidence.toolFailures],
+    recoverableEditFailures: [...evidence.recoverableEditFailures.values()],
+    commandFailures: [...evidence.commandFailures],
+  };
+}
+
+function requiresMutationEvidence(criterion: string): boolean {
+  return MUTATION_CRITERION_RE.test(criterion);
+}
+
+function requiresRemovalEvidence(criterion: string): boolean {
+  return REMOVAL_CRITERION_RE.test(criterion);
+}
+
+function missingRemovalAbsenceEvidenceReason(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): string | null {
+  const lastMutationSequence = Math.max(
+    ...evidence.mutationActions.map((mutation) => mutation.sequence),
+  );
+  const targetTerms = removalTargetTerms(criterion);
+  const relevantReadPaths = removalReadPaths(criterion, evidence);
+  if (targetTerms.length === 0) {
+    const hasGenericPostMutationEvidence =
+      evidence.searchActions.some(
+        (search) =>
+          search.sequence > lastMutationSequence &&
+          search.noMatches &&
+          !search.truncated,
+      ) ||
+      evidence.readActions.some(
+        (read) =>
+          read.sequence > lastMutationSequence &&
+          !read.truncated &&
+          isRelevantRemovalRead(read.path, relevantReadPaths),
+      );
+    return hasGenericPostMutationEvidence
+      ? null
+      : "missing post-mutation absence evidence: run search_files for the removed symbol or read the affected file after the mutation";
+  }
+
+  const missingTerms = targetTerms.filter(
+    (term) =>
+      !hasPostMutationNoMatchSearch(evidence, term, lastMutationSequence) &&
+      !hasPostMutationReadAbsence(
+        evidence,
+        term,
+        lastMutationSequence,
+        relevantReadPaths,
+      ),
+  );
+  if (missingTerms.length === 0) return null;
+  return `missing post-mutation absence evidence for: ${missingTerms.join(", ")}. Run search_files after the mutation or read the affected file after the mutation`;
+}
+
+function removalTargetTerms(criterion: string): string[] {
+  const terms = new Set<string>();
+  for (const match of criterion.matchAll(GET_CURRENT_TOOL_RE)) {
+    terms.add(match[0]);
+  }
+  if (/\bcurrent\s+working\s+directory\b/i.test(criterion)) {
+    terms.add("get_current_working_directory");
+    terms.add("getCurrentWorkingDirectory");
+  }
+  return [...terms];
+}
+
+function hasPostMutationNoMatchSearch(
+  evidence: PlanStepEvidence,
+  term: string,
+  lastMutationSequence: number,
+): boolean {
+  return evidence.searchActions.some(
+    (search) =>
+      search.sequence > lastMutationSequence &&
+      search.noMatches &&
+      !search.truncated &&
+      search.query === term,
+  );
+}
+
+function hasPostMutationReadAbsence(
+  evidence: PlanStepEvidence,
+  term: string,
+  lastMutationSequence: number,
+  relevantReadPaths: Set<string>,
+): boolean {
+  return evidence.readActions.some(
+    (read) =>
+      read.sequence > lastMutationSequence &&
+      !read.truncated &&
+      isRelevantRemovalRead(read.path, relevantReadPaths) &&
+      !read.content.includes(term),
+  );
+}
+
+function removalReadPaths(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): Set<string> {
+  const paths = new Set(extractCriterionPaths(criterion));
+  for (const mutation of evidence.mutationActions) {
+    if (mutation.path) paths.add(mutation.path);
+  }
+  return paths;
+}
+
+function isRelevantRemovalRead(
+  path: string,
+  relevantReadPaths: Set<string>,
+): boolean {
+  return relevantReadPaths.size === 0 || relevantReadPaths.has(path);
+}
+
+function isSuccessfulMutationTool(
+  toolName: string,
+  trimmedResult: string,
+): boolean {
+  return (
+    MUTATION_TOOL_NAMES.includes(
+      toolName as (typeof MUTATION_TOOL_NAMES)[number],
+    ) && !TOOL_ERROR_RE.test(trimmedResult)
+  );
+}
+
+function isMutatingCommand(command: string): boolean {
+  return MUTATING_COMMAND_RE.test(command);
 }
 
 export function buildIncompleteStepPrompt(reason: string): string {

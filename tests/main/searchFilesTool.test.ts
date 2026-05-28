@@ -47,6 +47,10 @@ describe("search_files tool", () => {
       "node_modules/pkg/index.ts",
       "get_current_working_directory should also be ignored\n",
     );
+    writeWorkspaceFile(
+      ".worktrees/old-copy/src/main/tools.ts",
+      "get_current_working_directory should not pollute current workspace search\n",
+    );
 
     const result = await runTool(
       "search_files",
@@ -62,6 +66,7 @@ describe("search_files tool", () => {
     expect(result).toContain("src/main/tools.ts:1:");
     expect(result).not.toContain(".gemma-cli");
     expect(result).not.toContain("node_modules");
+    expect(result).not.toContain(".worktrees");
   });
 
   it("reports no matches as usable search evidence", async () => {

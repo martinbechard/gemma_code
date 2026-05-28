@@ -93,6 +93,8 @@ export class PlanExecutionState {
         `If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply exactly BLOCKED: followed by one short reason, then stop. Do not write waiting prose. Do not assume hidden tool output or continue from guessed information. ` +
         `If this step says to add something only if missing or avoid editing when it is already present, and the latest file evidence shows it is already present, summarize that evidence and do not edit the file. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
+        `If this step asks you to remove, edit, update, replace, delete, or modify code, a read-only action is not enough; run a successful edit_file, write_file, delete_file, or clearly modifying run_bash command before summarizing. ` +
+        `If this step asks you to remove code, gather post-edit absence evidence with search_files or read_file after the mutation before summarizing. ` +
         `If this step names an exact command, run that exact command with run_bash; do not substitute run_project_script. ` +
         `Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet; preserve the current file content if a full-file rewrite is necessary. ` +
         `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
@@ -110,6 +112,7 @@ export class PlanExecutionState {
       `Use only prior tool results and visible file evidence from this step. ` +
       `Do not guess, infer, or rely on intended behavior. If no tool result proves the condition, fail and name the missing evidence. ` +
       `A targeted search result with no match for the exact requested text is valid evidence that the text was not found in the searched files. ` +
+      `For remove, edit, update, replace, delete, or modify steps, pass only if the prior step includes successful mutation evidence; for removal steps, also require post-mutation absence evidence. ` +
       `If any required edit failed or any required command exited nonzero without a later successful rerun, fail and name that evidence. ` +
       `Reply with <verify result="pass"/> or <verify result="fail" reason="...">.`;
     return { kind: "verify", stepId: f.currentStepNodeId!, text };

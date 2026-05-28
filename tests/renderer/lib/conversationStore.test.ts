@@ -336,6 +336,11 @@ describe("prompt display helpers", () => {
     expect(mainSource).toContain("readExecutionLogSnapshot");
     expect(mainSource).toContain("plan_blocked");
     expect(mainSource).toContain("plan_step_failed");
+    expect(mainSource).toContain("step_evidence_check");
+    expect(mainSource).toContain("step_evidence_reset");
+    expect(mainSource).toContain("summarizePlanStepEvidence");
+    expect(mainSource).toContain("forcedStepReason");
+    expect(mainSource).toContain("forcedVerifyReason");
     expect(mainSource).toContain("isToolErrorResult(result)");
     expect(mainSource).toContain("args: found.args");
     expect(mainSource).toContain("output: result");

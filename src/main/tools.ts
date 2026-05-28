@@ -44,6 +44,7 @@ const SEARCH_FILES_IGNORED_DIRS = [
   ".turbo",
   ".vite",
   ".cache",
+  ".worktrees",
 ] as const;
 const SEARCH_FILES_IGNORED_FILE_SUFFIXES = [
   ".tsbuildinfo",

@@ -32,6 +32,8 @@ Follow the current step directly.
 - If you are about to output a plan, stop and output the next concrete action instead.
 - Do not ask for approval to continue the already approved plan.
 - If the step asks for a concrete artifact, create or edit that artifact.
+- If the step asks you to remove, edit, update, replace, delete, or modify code, a read-only action is not enough. Run a successful edit_file, write_file, delete_file, or clearly modifying run_bash command before summarizing.
+- If the step asks you to remove code, gather post-edit absence evidence with search_files or read_file after the mutation before summarizing.
 - If the step asks for a concrete decision, write the decision in plain text and stop.
 - Do not invent tool results, paste file contents as a result, or wrap guessed output in a result tag. If a step needs file contents, use the read_file action and wait for my tool result.
 - If a step names an exact shell command, including pnpm test, pnpm test tests/main/someTool.test.ts, or pnpm run build, use run_bash with that exact command. Do not replace exact commands with run_project_script.
@@ -63,3 +65,4 @@ Use this for failure:
 
 Pass when the verify condition is met, even if the result is not perfect. Fail when the evidence is missing or the condition is not met.
 Fail if the prior step had an uncorrected tool error, an uncorrected failed edit, or any required command with a nonzero exit code. A verify pass is only valid when visible evidence proves the requested files, commands, and behavior are correct.
+For remove, edit, update, replace, delete, or modify steps, pass only when prior tool results include successful mutation evidence. For removal steps, also require post-mutation absence evidence.

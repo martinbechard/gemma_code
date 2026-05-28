@@ -92,6 +92,7 @@ import {
   parseBlockedReason,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
+  summarizePlanStepEvidence,
 } from "./plan/evidence";
 import { killAllBackgroundTasks } from "./backgroundTasks";
 import {
@@ -740,6 +741,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       lastActionKey = null;
       repeatedActionCount = 0;
       pendingEditRecoveryPath = null;
+      logExecution("step_evidence_reset", {
+        stepId: prompt.stepId,
+        promptKind: prompt.kind,
+      });
     };
 
     const resetStepAttemptTracking = (): void => {
@@ -748,12 +753,44 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       stepEvidence = createPlanStepEvidence();
       stepEvidenceStepId = null;
       pendingEditRecoveryPath = null;
+      logExecution("step_evidence_reset", {
+        stepId: planState?.currentStepId ?? null,
+        reason: "retry",
+      });
+    };
+
+    const logStepEvidenceCheck = (
+      decision: string,
+      extra: Record<string, unknown> = {},
+    ): void => {
+      if (!planState?.currentStepId) return;
+      const stepCriterion = planState.currentStepEvidenceCriterion() ?? "";
+      const verifyCriterion = planState.currentVerifyCriterion() ?? "";
+      logExecution("step_evidence_check", {
+        decision,
+        stepId: planState.currentStepId,
+        stepCriterion,
+        verifyCriterion,
+        evidence: summarizePlanStepEvidence(stepEvidence),
+        forcedStepReason: forcedVerifyFailureReason(
+          stepCriterion,
+          stepEvidence,
+        ),
+        forcedVerifyReason: forcedVerifyFailureReason(
+          verifyCriterion,
+          stepEvidence,
+        ),
+        ...extra,
+      });
     };
 
     const pushStepIncompletePrompt = (reason: string): void => {
       logExecution("step_incomplete", {
         reason,
         stepId: planState?.currentStepId ?? null,
+        evidence: summarizePlanStepEvidence(stepEvidence),
+        stepCriterion: planState?.currentStepEvidenceCriterion() ?? "",
+        verifyCriterion: planState?.currentVerifyCriterion() ?? "",
       });
       pushHarnessPrompt("step incomplete", buildIncompleteStepPrompt(reason));
     };
@@ -1194,6 +1231,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             if (planState?.currentStepId) {
               recordPlanToolEvidence(stepEvidence, found.name, result, found.args);
+              logStepEvidenceCheck("after_tool_result", {
+                tool: found.name,
+                toolHadError: hadError,
+              });
             }
             if (
               planState?.currentStepId &&
@@ -1203,6 +1244,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 stepEvidence,
               )
             ) {
+              logStepEvidenceCheck("advance_read_only_step");
               planState.finishStepBody();
               drainPlanEvents();
               const next = planState.nextPrompt();
@@ -1236,6 +1278,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 stepEvidence,
               )
             ) {
+              logStepEvidenceCheck("advance_guarded_already_present");
               planState.finishStepBody();
               drainPlanEvents();
               const next = planState.nextPrompt();
@@ -1269,6 +1312,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 stepEvidence,
               )
             ) {
+              logStepEvidenceCheck("advance_successful_required_command");
               planState.finishStepBody();
               drainPlanEvents();
               const next = planState.nextPrompt();
@@ -1532,6 +1576,15 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             reason: "reason" in vr ? vr.reason : "",
             criterion: planState.currentVerifyCriterion() ?? "",
             stepId: planState.currentStepId,
+            evidence: summarizePlanStepEvidence(stepEvidence),
+            forcedReason: forcedVerifyFailureReason(
+              planState.currentVerifyCriterion() ?? "",
+              stepEvidence,
+            ),
+          });
+          logStepEvidenceCheck("before_apply_verify", {
+            verifyResult: vr.result,
+            verifyReason: "reason" in vr ? vr.reason : "",
           });
           const outcome = planState.applyVerify(vr);
           drainPlanEvents();
@@ -1950,6 +2003,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           stepEvidence,
         );
         if (incompleteReason) {
+          logStepEvidenceCheck("step_incomplete_no_action", {
+            reason: incompleteReason,
+          });
           flushBufferToUI();
           emit({ type: "set_assistant_content", text: "" });
           baseMessages.push({ role: "assistant", content: buffer });
@@ -1960,6 +2016,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         flushBufferToUI();
         replaceBodyStripped();
         baseMessages.push({ role: "assistant", content: buffer });
+        logStepEvidenceCheck("finish_step_body_no_forced_failure");
         planState.finishStepBody();
         drainPlanEvents();
         if (planState.state !== "running") {
