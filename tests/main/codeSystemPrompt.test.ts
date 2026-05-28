@@ -74,6 +74,9 @@ describe("codeSystemPrompt", () => {
     );
     expect(executePrompt).toContain("do not retry the same old_string");
     expect(executePrompt).toContain("Do not invent tool results");
+    expect(executePrompt).toContain("A visible tool result that begins with [ok] is usable output");
+    expect(executePrompt).toContain("BLOCKED error message");
+    expect(executePrompt).toContain("list_files returns the workspace tree");
     expect(executePrompt).toContain("Execution starts with a fresh model context");
     expect(executePrompt).toContain(
       "use run_bash with that exact command",
@@ -193,5 +196,13 @@ describe("codeSystemPrompt", () => {
     expect(prompt.indexOf("SESSION CONTEXT")).toBeLessThan(
       prompt.indexOf("CODE_MARKER"),
     );
+  });
+
+  it("describes list_files as a full workspace tree tool", () => {
+    const prompt = codeSystemPrompt("/workspace", "http://preview", "execute");
+
+    expect(prompt).toContain("List the workspace tree");
+    expect(prompt).toContain("This tool has no path parameter");
+    expect(prompt).toContain("use run_bash for narrower directory listings");
   });
 });

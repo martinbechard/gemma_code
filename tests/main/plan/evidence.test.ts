@@ -3,6 +3,7 @@ import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   hasGuardedAlreadyPresentEvidence,
+  hasSatisfiedReadOnlyStepEvidence,
   hasSuccessfulRequiredCommandEvidence,
   isContradictedBySuccessfulEvidence,
   isMalformedActionSelfReport,
@@ -320,6 +321,50 @@ describe("plan step evidence", () => {
         evidence,
       ),
     ).toBeNull();
+  });
+
+  it("accepts workspace tree output from list_files as listed path evidence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "list_files",
+      [
+        "src/",
+        "src/main/",
+        "src/main/index.ts (71754B)",
+        "src/main/tools.ts (32171B)",
+      ].join("\n"),
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "List src/main/index.ts and src/main/tools.ts.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("recognizes completed read-only listing steps", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "list_files",
+      [
+        "src/",
+        "src/main/",
+        "src/main/index.ts (71754B)",
+        "src/main/tools.ts (32171B)",
+      ].join("\n"),
+    );
+
+    expect(
+      hasSatisfiedReadOnlyStepEvidence(
+        "List src/main/index.ts and src/main/tools.ts for inspection.",
+        evidence,
+      ),
+    ).toBe(true);
   });
 
   it("allows a verify pass when every required read path is present", () => {

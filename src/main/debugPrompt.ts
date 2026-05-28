@@ -4,8 +4,8 @@ import { userDataDir } from "./runtimePaths";
 
 // Persists the most recent assembled chat prompt to disk so the human can
 // inspect what the model actually receives. Useful for confirming that
-// Gemma.md (the PROJECT INSTRUCTIONS block) is being threaded through and
-// that the conversation isn't silently truncated.
+// Gemma.md is being threaded through and that the conversation isn't silently
+// truncated.
 //
 // File path: <userData>/debug/last-system-prompt.txt
 // Overwritten on every call.
@@ -34,7 +34,7 @@ export function saveLastPrompt(
 
   const sysContent =
     messages.find((m) => m.role === "system")?.content ?? "";
-  const hasGemmaMd = sysContent.includes("PROJECT INSTRUCTIONS");
+  const hasGemmaMd = sysContent.includes("# Gemma");
 
   const sep = "=".repeat(80);
   const subSep = "-".repeat(80);

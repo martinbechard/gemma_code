@@ -83,6 +83,7 @@ import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   hasGuardedAlreadyPresentEvidence,
+  hasSatisfiedReadOnlyStepEvidence,
   hasSuccessfulRequiredCommandEvidence,
   isContradictedBySuccessfulEvidence,
   isMalformedActionSelfReport,
@@ -641,11 +642,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       req.workingDir &&
       resolvedSystemPrompt.workspacePath &&
       resolvedSystemPrompt.previewHref
-        ? codeSystemPrompt(
-            resolvedSystemPrompt.workspacePath,
-            resolvedSystemPrompt.previewHref,
-            "execute",
-          )
+        ? resolvedSystemPrompt.label === "code execute"
+          ? resolvedSystemPrompt.content
+          : codeSystemPrompt(
+              resolvedSystemPrompt.workspacePath,
+              resolvedSystemPrompt.previewHref,
+              "execute",
+            )
         : null;
     const codeSubmode = req.workingDir ? (req.codeSubmode ?? "auto") : null;
     const topLevelPlanHarnessEnabled =
@@ -776,7 +779,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         role: "system",
         content: planExecutionSystemPrompt,
       };
-      emitSystemPrompt("plan execution", planExecutionSystemPrompt);
+      emitSystemPrompt("code execute", planExecutionSystemPrompt);
     };
 
     const drainPlanEvents = (): void => {
@@ -1166,6 +1169,39 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             if (
               planState?.currentStepId &&
               !awaitingVerify &&
+              hasSatisfiedReadOnlyStepEvidence(
+                planState.currentStepEvidenceCriterion() ?? "",
+                stepEvidence,
+              )
+            ) {
+              planState.finishStepBody();
+              drainPlanEvents();
+              const next = planState.nextPrompt();
+              if (!next) {
+                emit({ type: "activity", activity: { kind: "idle" } });
+                emit({ type: "done" });
+                return;
+              }
+              prepareStepEvidence(next);
+              pushHarnessPrompt(
+                next.kind === "verify" ? "plan verify" : "plan step",
+                next.text,
+              );
+              awaitingVerify = next.kind === "verify";
+              executedAction = true;
+              pendingAction = null;
+              livePath = null;
+              liveContentStart = -1;
+              lastEmittedContent = "";
+              emit({
+                type: "activity",
+                activity: { kind: "thinking", chars: 0 },
+              });
+              break streamLoop;
+            }
+            if (
+              planState?.currentStepId &&
+              !awaitingVerify &&
               hasGuardedAlreadyPresentEvidence(
                 planState.currentStepEvidenceCriterion() ?? "",
                 stepEvidence,
@@ -1350,10 +1386,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               }
               pushHarnessPrompt(
                 "repeated action",
-                `You repeated the same ${found.name} action ${repeatedActionCount} times. ` +
-                  "Use the tool result already provided and move to the next distinct action. " +
-                  "Do not emit a YAML plan while executing a plan step. " +
+                [
+                  `You repeated the same ${found.name} action ${repeatedActionCount} times.`,
+                  "Use the existing tool result already provided in this conversation and move to the next distinct action.",
+                  "If the required tool result is not visible or is not usable, stop with a brief BLOCKED error message that names the missing or unusable evidence.",
+                  "Do not assume hidden output, wait silently, or continue from guessed file information.",
+                  "Do not emit a YAML plan while executing a plan step.",
                   `Do not call ${found.name} with the same parameters again.`,
+                ].join(" "),
               );
             }
             executedAction = true;

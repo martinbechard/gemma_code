@@ -36,6 +36,7 @@ const TOOL_ERROR_RE =
   /^(Error editing|Error writing|Error deleting|Error fetching|Error:|old_string not found)\b/i;
 const RECOVERABLE_EDIT_FAILURE_RE =
   /^Error editing\b[\s\S]*\bold_string\s+(?:not found|appears multiple times)\b/i;
+const LIST_FILE_SIZE_SUFFIX_RE = /\s+\(\d+B\)$/;
 const ALLOWS_FAILURE_RE = /\b(expected|acceptable|may fail|can fail|fails|failing)\b/i;
 const REQUIRES_SUCCESS_RE =
   /\b(exit(?:ed)? 0|pass|passes|all ran|green|succeeds|successful|successfully)\b/i;
@@ -187,11 +188,14 @@ export function recordPlanToolEvidence(
 
   if (
     toolName === "list_files" &&
-    typeof path === "string" &&
-    path.length > 0 &&
     !TOOL_ERROR_RE.test(trimmedResult)
   ) {
-    evidence.listedPaths.add(path);
+    if (typeof path === "string" && path.length > 0) {
+      evidence.listedPaths.add(normalizeListedPath(path));
+    }
+    for (const listedPath of extractListedPaths(result)) {
+      evidence.listedPaths.add(listedPath);
+    }
   }
 
   if (isCommandTool(toolName) && COMMAND_EXIT_RE.test(result)) {
@@ -275,6 +279,24 @@ export function forcedVerifyFailureReason(
   return null;
 }
 
+export function hasSatisfiedReadOnlyStepEvidence(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): boolean {
+  if (evidence.actionCount === 0) return false;
+  if (!/\b(read|reading|inspect|inspected|inspection|list|listed|retrieve|retrieved)\b/i.test(criterion)) {
+    return false;
+  }
+  if (
+    /\b(get_current_|tool|cover|covers|contain|contains|add|added|verify|verified|implement|implemented|implementation|confirm|confirmed|present|pnpm|npm|build)\b/i.test(
+      criterion,
+    )
+  ) {
+    return false;
+  }
+  return forcedVerifyFailureReason(criterion, evidence) === null;
+}
+
 export function buildIncompleteStepPrompt(reason: string): string {
   return [
     "The current plan step is not complete yet.",
@@ -306,6 +328,20 @@ function extractCriterionPaths(criterion: string): string[] {
 
 function last(values: string[]): string {
   return values[values.length - 1] ?? "unknown";
+}
+
+function extractListedPaths(result: string): string[] {
+  const paths = new Set<string>();
+  for (const line of result.split(/\r?\n/)) {
+    const path = normalizeListedPath(line);
+    if (!path || path.startsWith("(") || path.startsWith("[")) continue;
+    paths.add(path);
+  }
+  return [...paths];
+}
+
+function normalizeListedPath(path: string): string {
+  return path.trim().replace(LIST_FILE_SIZE_SUFFIX_RE, "").replace(/\/$/, "");
 }
 
 function isCommandTool(toolName: string): boolean {

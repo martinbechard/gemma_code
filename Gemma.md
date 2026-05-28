@@ -72,6 +72,7 @@ Specifically:
 
 - If `list_files` returns an empty workspace, say "the workspace is empty" — do NOT invent file or directory names.
 - If `read_file` fails or wasn't called, do not summarize or quote file contents from imagination.
+- If a requested tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, stop with a brief blocker or error message. Do not assume hidden output or continue from guessed information.
 - Before modifying or overwriting an existing file, you MUST `read_file` it first so your change is informed by what's actually there. Never `write_file` to a path that exists in `list_files` without having read it.
 - If `web_search` / `fetch_url` wasn't called, do not state "current" or "recent" facts as if you had verified them.
 - If a tool result is truncated, say so; don't fill in the rest from guesses.
@@ -219,7 +220,7 @@ Example:
 
 ### list_files
 
-List every file in the workspace.
+List the workspace tree, including root files and nested directories. This tool has no path parameter. If you need a narrower directory listing after the workspace tree is visible, use run_bash with an explicit command.
 
 No parameters.
 

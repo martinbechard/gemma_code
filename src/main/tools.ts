@@ -657,7 +657,8 @@ export const TOOLS: Record<string, ToolSpec> = {
   },
   list_files: {
     name: "list_files",
-    description: "List every file in the workspace.",
+    description:
+      "List the workspace tree, including root files and nested directories. This tool has no path parameter; use run_bash for narrower directory listings.",
     params: [],
     example: '<action name="list_files"></action>',
     mode: "code",

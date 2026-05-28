@@ -42,13 +42,13 @@ import {
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   hasGuardedAlreadyPresentEvidence,
+  hasSatisfiedReadOnlyStepEvidence,
   hasSuccessfulRequiredCommandEvidence,
   isContradictedBySuccessfulEvidence,
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
-  type PlanStepEvidence,
 } from "../main/plan/evidence";
 import { killBackgroundTasksForConversation } from "../main/backgroundTasks";
 import {
@@ -56,7 +56,10 @@ import {
   saveCliConversation,
 } from "./conversation";
 
-export { buildIncompleteStepPrompt } from "../main/plan/evidence";
+export {
+  buildIncompleteStepPrompt,
+  hasSatisfiedReadOnlyStepEvidence,
+} from "../main/plan/evidence";
 
 const MAX_ROUNDS_CHAT = 8;
 const MAX_ROUNDS_CODE = 40;
@@ -189,25 +192,14 @@ export function buildRepeatedActionPrompt(
   actionName: string,
   repeatedActionCount: number,
 ): string {
-  return `You repeated the same ${actionName} action ${repeatedActionCount} times. Use the tool result already provided and move to the next distinct action. Do not emit a YAML plan while recovering from a repeated action. Do not call ${actionName} with the same parameters again.`;
-}
-
-export function hasSatisfiedReadOnlyStepEvidence(
-  criterion: string,
-  evidence: PlanStepEvidence,
-): boolean {
-  if (evidence.actionCount === 0) return false;
-  if (!/\b(read|reading|inspect|inspected|inspection|retrieved)\b/i.test(criterion)) {
-    return false;
-  }
-  if (
-    /\b(get_current_|tool|cover|covers|contain|contains|add|added|verify|verified|implement|implemented|implementation|confirm|confirmed|present|pnpm|npm|build)\b/i.test(
-      criterion,
-    )
-  ) {
-    return false;
-  }
-  return forcedVerifyFailureReason(criterion, evidence) === null;
+  return [
+    `You repeated the same ${actionName} action ${repeatedActionCount} times.`,
+    "Use the existing tool result already provided in this conversation and move to the next distinct action.",
+    "If the required tool result is not visible or is not usable, stop with a brief BLOCKED error message that names the missing or unusable evidence.",
+    "Do not assume hidden output, wait silently, or continue from guessed file information.",
+    "Do not emit a YAML plan while recovering from a repeated action.",
+    `Do not call ${actionName} with the same parameters again.`,
+  ].join(" ");
 }
 
 export function buildCodeNoProgressPrompt(
@@ -532,8 +524,8 @@ async function runAgentLoop(
       role: "system",
       content: planExecutionSystemPrompt,
     };
-    displaySystemPrompt("plan execution", planExecutionSystemPrompt);
-    meta("system prompt: plan execution");
+    displaySystemPrompt("code execute", planExecutionSystemPrompt);
+    meta("system prompt: code execute");
   };
 
   const startPlanSemanticReview = (plan: ParsedPlan): void => {

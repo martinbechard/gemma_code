@@ -82,6 +82,8 @@ describe("buildRepeatedActionPrompt", () => {
 
     expect(prompt).toContain("read_file");
     expect(prompt).toContain("move to the next distinct action");
+    expect(prompt).toContain("BLOCKED error message");
+    expect(prompt).toContain("Do not assume hidden output");
     expect(prompt).toContain("Do not emit a YAML plan");
     expect(prompt).not.toContain("src/main/tools.ts");
     expect(prompt).not.toContain("tests/main");

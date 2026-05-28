@@ -76,6 +76,22 @@ describe("debugPrompt", () => {
     );
   });
 
+  it("does not count a mode-only project instructions heading as Gemma.md", () => {
+    saveLastPrompt(
+      [
+        {
+          role: "system",
+          content:
+            "MODE AND PROJECT INSTRUCTIONS\n=============================\n# Code execute mode",
+        },
+      ],
+      { mode: "code", model: "m" },
+    );
+    expect(readFileSync(debugPromptPath(), "utf8")).toMatch(
+      /Includes Gemma\.md: NO/,
+    );
+  });
+
   it("renders each message with role label and content", () => {
     saveLastPrompt(
       [
