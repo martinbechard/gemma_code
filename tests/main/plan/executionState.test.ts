@@ -48,7 +48,8 @@ describe("PlanExecutionState — single step happy path", () => {
     expect(p1?.text).toContain("run that exact command with run_bash");
     expect(p1?.text).toContain("preserve the current file content");
     expect(p1?.text).toMatch(/required write, edit, or command action fails/i);
-    expect(p1?.text).toContain("BLOCKED error message");
+    expect(p1?.text).toContain("reply exactly BLOCKED:");
+    expect(p1?.text).toContain("Do not write waiting prose");
     expect(p1?.text).toContain("Do not assume hidden tool output");
 
     s.finishStepBody();

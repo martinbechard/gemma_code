@@ -75,9 +75,13 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain("do not retry the same old_string");
     expect(executePrompt).toContain("Do not invent tool results");
     expect(executePrompt).toContain("A visible tool result that begins with [ok] is usable output");
-    expect(executePrompt).toContain("BLOCKED error message");
+    expect(executePrompt).toContain("reply exactly BLOCKED:");
+    expect(executePrompt).toContain("Do not write waiting prose");
     expect(executePrompt).toContain("list_files returns the workspace tree");
     expect(executePrompt).toContain("Execution starts with a fresh model context");
+    expect(codeSystemPrompt("/workspace", "http://preview", "execute")).toContain(
+      '<action name="tool_name"/> is also valid',
+    );
     expect(executePrompt).toContain(
       "use run_bash with that exact command",
     );

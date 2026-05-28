@@ -47,6 +47,7 @@ import {
   isContradictedBySuccessfulEvidence,
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
+  parseBlockedReason,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
 } from "../main/plan/evidence";
@@ -70,7 +71,7 @@ const CODE_PLAN_NUDGE =
 const PLAN_ONLY_CONTINUE_NUDGE =
   "Continue in plan-only mode. Emit exactly one YAML plan step when another executable instruction is needed. Do not write files, do not emit verify tags, and do not stop with plain prose until the plan has enough concrete steps.";
 const INCOMPLETE_ACTION_NUDGE =
-  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed. Do not emit a verify tag about the malformed response.";
+  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly BLOCKED: followed by one short reason. Do not emit a verify tag about the malformed response.";
 const MAX_PLAN_ONLY_NUDGES = 3;
 const MAX_CODE_NO_PROGRESS_NUDGES = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
@@ -195,7 +196,7 @@ export function buildRepeatedActionPrompt(
   return [
     `You repeated the same ${actionName} action ${repeatedActionCount} times.`,
     "Use the existing tool result already provided in this conversation and move to the next distinct action.",
-    "If the required tool result is not visible or is not usable, stop with a brief BLOCKED error message that names the missing or unusable evidence.",
+    "If the required tool result is not visible or is not usable, reply exactly BLOCKED: followed by one short reason.",
     "Do not assume hidden output, wait silently, or continue from guessed file information.",
     "Do not emit a YAML plan while recovering from a repeated action.",
     `Do not call ${actionName} with the same parameters again.`,
@@ -265,7 +266,7 @@ export function buildPrematureVerifyPrompt(reason: string | null): string {
     "You emitted a verify tag while executing a step body.",
     "Only emit verify tags after I send a Verify request.",
     reasonLine,
-    "Continue the current step now with the next required action tag, or write a blocker summary if you cannot proceed.",
+    "Continue the current step now with the next required action tag. If you cannot proceed, reply exactly BLOCKED: followed by one short reason.",
   ].join("\n");
 }
 
@@ -1196,6 +1197,30 @@ async function runAgentLoop(
         planState.finishStepBody();
         logPlanEvents();
         if (planState.state !== "running") {
+          meta(`done — plan ${planState.state}`);
+          return;
+        }
+        const next = planState.nextPrompt();
+        if (!next) {
+          meta("done — plan complete");
+          return;
+        }
+        prepareStepEvidence(next);
+        pushHarnessPrompt(messages, next.kind, next.text);
+        awaitingVerify = next.kind === "verify";
+        continue;
+      }
+      const blockedReason = parseBlockedReason(buffer);
+      if (blockedReason) {
+        messages.push({ role: "assistant", content: buffer });
+        meta(`step attempt blocked: ${blockedReason}`);
+        const outcome = planState.failCurrentStepAttempt(
+          `blocked: ${blockedReason}`,
+        );
+        logPlanEvents();
+        awaitingVerify = false;
+        resetStepAttemptTracking();
+        if (outcome === "abort" || planState.state !== "running") {
           meta(`done — plan ${planState.state}`);
           return;
         }

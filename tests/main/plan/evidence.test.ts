@@ -8,6 +8,7 @@ import {
   isContradictedBySuccessfulEvidence,
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
+  parseBlockedReason,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
 } from "../../../src/main/plan/evidence";
@@ -56,6 +57,16 @@ describe("plan step evidence", () => {
       isMalformedActionSelfReport("Previous action tag was not properly closed"),
     ).toBe(true);
     expect(isMalformedActionSelfReport("focused test failed")).toBe(false);
+  });
+
+  it("parses explicit blocked step responses", () => {
+    expect(parseBlockedReason("BLOCKED: missing list_files result")).toBe(
+      "missing list_files result",
+    );
+    expect(
+      parseBlockedReason("BLOCKED: missing\nlist_files result"),
+    ).toBe("missing list_files result");
+    expect(parseBlockedReason("I am blocked because the result is missing")).toBeNull();
   });
 
   it("detects guarded existing tool evidence after reading required files", () => {

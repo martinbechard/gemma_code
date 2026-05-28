@@ -82,7 +82,7 @@ describe("buildRepeatedActionPrompt", () => {
 
     expect(prompt).toContain("read_file");
     expect(prompt).toContain("move to the next distinct action");
-    expect(prompt).toContain("BLOCKED error message");
+    expect(prompt).toContain("reply exactly BLOCKED:");
     expect(prompt).toContain("Do not assume hidden output");
     expect(prompt).toContain("Do not emit a YAML plan");
     expect(prompt).not.toContain("src/main/tools.ts");
@@ -264,6 +264,7 @@ describe("buildIncompleteStepPrompt", () => {
     expect(prompt).toContain("missing read_file evidence for: src/main/index.ts");
     expect(prompt).toContain("Do not invent tool results");
     expect(prompt).toContain("next required action tag");
+    expect(prompt).toContain("reply exactly BLOCKED:");
   });
 });
 

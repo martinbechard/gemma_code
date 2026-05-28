@@ -90,7 +90,7 @@ export class PlanExecutionState {
         `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making so your edit fits the project's existing shape. ` +
         `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
-        `If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, write a brief BLOCKED error message that names the unusable or missing evidence and stop. Do not assume hidden tool output or continue from guessed information. ` +
+        `If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply exactly BLOCKED: followed by one short reason, then stop. Do not write waiting prose. Do not assume hidden tool output or continue from guessed information. ` +
         `If this step says to add something only if missing or avoid editing when it is already present, and the latest file evidence shows it is already present, summarize that evidence and do not edit the file. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
         `If this step names an exact command, run that exact command with run_bash; do not substitute run_project_script. ` +

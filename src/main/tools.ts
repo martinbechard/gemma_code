@@ -818,7 +818,8 @@ export function chatSystemPrompt(enableTools: boolean): string {
     "Rules:",
     "- One action per response, on its own line.",
     "- Never wrap actions in markdown code fences.",
-    "- After writing </action>, STOP. Wait for the result before continuing.",
+    '- For tools with no parameters, <action name="tool_name"/> is also valid.',
+    "- After writing the action tag, STOP. Wait for the result before continuing.",
     "- When finished, write a short plain-text answer and emit no more actions.",
     "",
     "Tools:",
@@ -875,6 +876,7 @@ export function codeSystemPrompt(
     "- Never paste file contents in your chat reply — only inside <content>.",
     "- Never wrap <action> tags in ``` code fences.",
     "- Paths are relative to the workspace (no leading slashes).",
+    '- For tools with no parameters, <action name="tool_name"/> is also valid.',
     "- One action per response, then STOP and wait.",
     "",
     "AVAILABLE TOOLS",
@@ -903,12 +905,21 @@ export function findNextAction(
   text: string,
   from = 0,
 ): ParsedAction | "incomplete" | null {
-  // Accept variations: <action name="x">, name='x', name=x, case-insensitive
-  const openRe = /<action\s+name\s*=\s*["']?([a-zA-Z_][\w]*)["']?\s*>/gi;
+  // Accept variations: <action name="x">, name='x', name=x, and self-closing no-arg actions.
+  const openRe = /<action\s+name\s*=\s*["']?([a-zA-Z_][\w]*)["']?\s*(\/?)>/gi;
   openRe.lastIndex = from;
   const open = openRe.exec(text);
   if (!open) return null;
   const name = open[1];
+  if (open[2] === "/") {
+    return {
+      name,
+      args: {},
+      raw: open[0],
+      start: open.index,
+      end: open.index + open[0].length,
+    };
+  }
   const bodyStart = open.index + open[0].length;
   const closeMatch = text.slice(bodyStart).match(/<\/action\s*>/i);
   if (!closeMatch || closeMatch.index === undefined) return "incomplete";

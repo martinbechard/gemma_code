@@ -50,6 +50,7 @@ const MALFORMED_ACTION_SELF_REPORT_RE =
 const GUARDED_ALREADY_PRESENT_RE =
   /\b(?:only\s+if\s+missing|already\s+present|avoid\s+editing|do\s+not\s+edit)\b/i;
 const GET_CURRENT_TOOL_RE = /\bget_current_[a-z0-9_]+\b/g;
+const BLOCKED_RESPONSE_RE = /^\s*BLOCKED:\s*(.+?)\s*$/is;
 
 export function createPlanStepEvidence(): PlanStepEvidence {
   return {
@@ -71,6 +72,12 @@ export function isRecoverableEditFailureResult(result: string): boolean {
 
 export function isMalformedActionSelfReport(reason: string | undefined): boolean {
   return typeof reason === "string" && MALFORMED_ACTION_SELF_REPORT_RE.test(reason);
+}
+
+export function parseBlockedReason(response: string): string | null {
+  const match = BLOCKED_RESPONSE_RE.exec(response);
+  if (!match) return null;
+  return match[1].replace(/\s+/g, " ").trim() || "blocked";
 }
 
 export function isContradictedBySuccessfulEvidence(
@@ -302,7 +309,8 @@ export function buildIncompleteStepPrompt(reason: string): string {
     "The current plan step is not complete yet.",
     `Missing evidence: ${reason}.`,
     "Do not invent tool results, paste fake file contents, or wrap results in a result tag.",
-    "Continue the current step now with the next required action tag, or write a blocker summary if you cannot proceed.",
+    "Continue the current step now with the next required action tag.",
+    "If you cannot proceed, reply exactly BLOCKED: followed by one short reason, with no action tag, verify tag, or extra prose.",
   ].join("\n");
 }
 

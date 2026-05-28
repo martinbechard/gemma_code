@@ -88,6 +88,7 @@ import {
   isContradictedBySuccessfulEvidence,
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
+  parseBlockedReason,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
 } from "./plan/evidence";
@@ -435,7 +436,7 @@ const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
-  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now, or write a brief plain-text summary if no action is needed. Do not emit a verify tag about the malformed response.";
+  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly BLOCKED: followed by one short reason. Do not emit a verify tag about the malformed response.";
 
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
@@ -477,7 +478,7 @@ function buildPrematureVerifyPrompt(reason: string | null): string {
     "You emitted a verify tag while executing a step body.",
     "Only emit verify tags after I send a Verify request.",
     reasonLine,
-    "Continue the current step now with the next required action tag, or write a blocker summary if you cannot proceed.",
+    "Continue the current step now with the next required action tag. If you cannot proceed, reply exactly BLOCKED: followed by one short reason.",
   ].join("\n");
 }
 
@@ -1390,7 +1391,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 [
                   `You repeated the same ${found.name} action ${repeatedActionCount} times.`,
                   "Use the existing tool result already provided in this conversation and move to the next distinct action.",
-                  "If the required tool result is not visible or is not usable, stop with a brief BLOCKED error message that names the missing or unusable evidence.",
+                  "If the required tool result is not visible or is not usable, reply exactly BLOCKED: followed by one short reason.",
                   "Do not assume hidden output, wait silently, or continue from guessed file information.",
                   "Do not emit a YAML plan while executing a plan step.",
                   `Do not call ${found.name} with the same parameters again.`,
@@ -1875,6 +1876,39 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             buildPrematureVerifyPrompt(forcedReason),
           );
           emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+          continue;
+        }
+        const blockedReason = parseBlockedReason(buffer);
+        if (blockedReason) {
+          flushBufferToUI();
+          baseMessages.push({ role: "assistant", content: buffer });
+          const outcome = planState.failCurrentStepAttempt(
+            `blocked: ${blockedReason}`,
+          );
+          drainPlanEvents();
+          awaitingVerify = false;
+          resetStepAttemptTracking();
+          if (outcome === "abort" || planState.state !== "running") {
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(
+            next.kind === "verify" ? "plan verify" : "plan step",
+            next.text,
+          );
+          awaitingVerify = next.kind === "verify";
+          emit({
+            type: "activity",
+            activity: { kind: "thinking", chars: 0 },
+          });
           continue;
         }
         const incompleteReason = forcedVerifyFailureReason(
