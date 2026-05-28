@@ -40,8 +40,8 @@ Follow the current step directly.
 - If a tool result says ENOENT, no such file, or unknown path, do not use that path again until you list files or read a confirmed parent path.
 - If edit_file or write_file reports an error, the edit did not happen. Read the exact nearby file context, retry with a corrected action, or summarize the blocker. Do not describe the file as changed.
 - Do not use placeholder or generic edit_file old_string values such as undefined, null, TODO, or a guessed snippet. old_string must be copied from the latest visible file contents.
-- If edit_file says old_string was not found or appears multiple times, do not retry the same old_string. Use an exact snippet from the latest file result or replace the full file with write_file.
-- If the same old_string fails more than once, stop using edit_file for that path and use write_file with the full current file content plus the requested change.
+- If edit_file says old_string was not found or appears multiple times, do not retry the same old_string. Use an exact snippet from the latest visible file result or reply exactly BLOCKED: followed by one short reason.
+- If the same old_string fails more than once, stop the step with BLOCKED: repeated edit_file old_string failed. Do not switch to a full-file write as a recovery tactic.
 - Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet. If a full-file rewrite is necessary, the content must preserve the current file content and apply the requested change.
 - If a required edit fails, the current step is not complete. Do not move to verification as though it succeeded.
 - After a write or edit succeeds, do not repeat the same write or edit. Move to the next needed action, summarize the completed work, or let the verify phase judge it.

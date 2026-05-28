@@ -86,6 +86,9 @@ describe("codeSystemPrompt", () => {
       "a read-only action is not enough",
     );
     expect(executePrompt).toContain("post-edit absence evidence");
+    expect(executePrompt).toContain(
+      "Do not switch to a full-file write as a recovery tactic",
+    );
     expect(executePrompt).toContain("Execution starts with a fresh model context");
     expect(codeSystemPrompt("/workspace", "http://preview", "execute")).toContain(
       '<action name="tool_name"/> is also valid',

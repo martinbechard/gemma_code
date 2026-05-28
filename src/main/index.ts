@@ -430,6 +430,7 @@ const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
 const MAX_PLAN_SEMANTIC_REVIEW_RETRIES = 4;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
+const INCOMPLETE_ACTION_PREVIEW_CHARS = 240;
 const CODE_PLAN_NUDGE =
   "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
@@ -465,10 +466,10 @@ function buildRepeatedEditFailureRecoveryPrompt(
   return [
     `The same edit_file old_string failed ${attemptCount} times for ${path}.`,
     "That exact old_string is invalid or ambiguous for this file. Do not use it again.",
-    "Use the latest read_file result for this path already in the conversation.",
-    "Your next response must be exactly one write_file action for this same path and nothing else.",
-    "The write_file content must preserve the current file content and apply the requested change.",
-    "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
+    "The current step cannot safely continue from guessed file contents.",
+    "Your next response must be exactly:",
+    `BLOCKED: repeated edit_file old_string failed for ${path}`,
+    "Do not emit action tags, verify tags, a plan, or extra prose.",
     "Do not retry this old_string:",
     preview,
   ].join("\n");
@@ -490,9 +491,10 @@ function buildRepeatedRecoveryReadPrompt(path: string): string {
   return [
     `You are recovering from a failed edit_file action for ${path}.`,
     "The file has already been reread and the tool result is already in the conversation.",
-    "Your next response must be exactly one write_file action for this same path and nothing else.",
-    "The write_file content must preserve the current file content and apply the requested change.",
-    "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
+    "Repeating the same read_file action is not progress.",
+    "Your next response must be exactly:",
+    `BLOCKED: repeated read_file during edit recovery for ${path}`,
+    "Do not emit action tags, verify tags, a plan, or extra prose.",
   ].join("\n");
 }
 
@@ -934,6 +936,36 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             done: false,
           });
         }
+      };
+      const closeLivePreview = (): void => {
+        if (!livePath) return;
+        logExecution("file_streaming", {
+          path: livePath,
+          content: lastEmittedContent,
+          done: true,
+        });
+        send("file:streaming", {
+          conversationId: req.conversationId,
+          path: livePath,
+          content: lastEmittedContent,
+          done: true,
+        });
+        livePath = null;
+        liveContentStart = -1;
+        lastEmittedContent = "";
+      };
+      const pushIncompleteActionPrompt = (): void => {
+        logExecution("incomplete_action", {
+          pendingAction,
+          bufferChars: buffer.length,
+          emittedIdx,
+          livePath,
+          livePreviewChars: lastEmittedContent.length,
+          tail: buffer.slice(-INCOMPLETE_ACTION_PREVIEW_CHARS),
+        });
+        closeLivePreview();
+        pushHarnessPrompt("incomplete action", INCOMPLETE_ACTION_NUDGE);
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
       };
 
       const emitActivity = (): void => {
@@ -1398,23 +1430,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                   buildRepeatedRecoveryReadPrompt(found.args.path),
                 );
                 executedAction = true;
-                if (livePath) {
-                  logExecution("file_streaming", {
-                    path: livePath,
-                    content: lastEmittedContent,
-                    done: true,
-                  });
-                  send("file:streaming", {
-                    conversationId: req.conversationId,
-                    path: livePath,
-                    content: lastEmittedContent,
-                    done: true,
-                  });
-                }
+                closeLivePreview();
                 pendingAction = null;
-                livePath = null;
-                liveContentStart = -1;
-                lastEmittedContent = "";
                 emit({
                   type: "activity",
                   activity: { kind: "thinking", chars: 0 },
@@ -1484,23 +1501,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 found.args.path,
               );
             }
-            if (livePath) {
-              logExecution("file_streaming", {
-                path: livePath,
-                content: lastEmittedContent,
-                done: true,
-              });
-              send("file:streaming", {
-                conversationId: req.conversationId,
-                path: livePath,
-                content: lastEmittedContent,
-                done: true,
-              });
-            }
+            closeLivePreview();
             pendingAction = null;
-            livePath = null;
-            liveContentStart = -1;
-            lastEmittedContent = "";
             emit({
               type: "activity",
               activity: { kind: "thinking", chars: 0 },
@@ -1520,9 +1522,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         continue;
       }
 
-      if (sawIncompleteAction) {
-        pushHarnessPrompt("incomplete action", INCOMPLETE_ACTION_NUDGE);
-        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+      if (
+        sawIncompleteAction ||
+        pendingAction ||
+        findNextAction(buffer, emittedIdx) === "incomplete"
+      ) {
+        pushIncompleteActionPrompt();
         continue;
       }
 
