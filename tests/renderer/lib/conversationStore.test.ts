@@ -336,6 +336,10 @@ describe("prompt display helpers", () => {
     expect(mainSource).toContain("readExecutionLogSnapshot");
     expect(mainSource).toContain("plan_blocked");
     expect(mainSource).toContain("plan_step_failed");
+    expect(mainSource).toContain("isToolErrorResult(result)");
+    expect(mainSource).toContain("args: found.args");
+    expect(mainSource).toContain("output: result");
+    expect(mainSource).toContain('status: hadError ? "error" : "ok"');
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

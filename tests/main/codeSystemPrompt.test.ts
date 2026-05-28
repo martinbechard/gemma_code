@@ -224,6 +224,7 @@ describe("codeSystemPrompt", () => {
     expect(prompt).toContain(
       "Use this before run_bash for finding references, usages, symbols, or text.",
     );
+    expect(prompt).not.toContain("using rg");
     expect(prompt.indexOf("### search_files")).toBeLessThan(
       prompt.indexOf("### list_files"),
     );

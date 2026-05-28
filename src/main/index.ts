@@ -35,6 +35,7 @@ import {
   emitSafeBoundary,
   runTool,
   cleanFileContent,
+  isToolErrorResult,
   type ToolContext,
 } from "./tools";
 import { saveLastPrompt } from "./debugPrompt";
@@ -1154,18 +1155,30 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             }
             try {
               result = await runTool(found.name, found.args, ctx);
-              logExecution("tool_result", {
+              hadError = isToolErrorResult(result);
+              const toolResultLog = {
                 id: call.id,
                 tool: found.name,
-                result,
-              });
-              emit({ type: "tool_result", id: call.id, result });
+                args: found.args,
+                status: hadError ? "error" : "ok",
+                output: result,
+                ...(hadError ? { error: result } : { result }),
+              };
+              logExecution("tool_result", toolResultLog);
+              emit(
+                hadError
+                  ? { type: "tool_result", id: call.id, error: result }
+                  : { type: "tool_result", id: call.id, result },
+              );
             } catch (e) {
               result = `Error: ${(e as Error).message}`;
               hadError = true;
               logExecution("tool_result", {
                 id: call.id,
                 tool: found.name,
+                args: found.args,
+                status: "error",
+                output: result,
                 error: result,
               });
               emit({ type: "tool_result", id: call.id, error: result });

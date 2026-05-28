@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync, promises as fs, readFileSync } from "fs";
+import { basename, join } from "path";
 import {
   wsWriteFile,
   wsReadFile,
@@ -31,26 +31,34 @@ const DESTRUCTIVE_EDIT_MAX_NEW_TO_OLD_RATIO = 10;
 const SEARCH_FILES_DEFAULT_PATH = ".";
 const SEARCH_FILES_DEFAULT_MAX_RESULTS = 200;
 const SEARCH_FILES_ABSOLUTE_MAX_RESULTS = 500;
-const SEARCH_FILES_TIMEOUT_MS = 20_000;
-const SEARCH_FILES_IGNORED_GLOBS = [
-  "!node_modules/**",
-  "!out/**",
-  "!dist/**",
-  "!build/**",
-  "!.git/**",
-  "!.gemma-cli/**",
-  "!.next/**",
-  "!coverage/**",
-  "!.turbo/**",
-  "!.vite/**",
-  "!.cache/**",
-  "!*.tsbuildinfo",
+const SEARCH_FILES_MAX_FILE_BYTES = 1_000_000;
+const SEARCH_FILES_IGNORED_DIRS = [
+  "node_modules",
+  "out",
+  "dist",
+  "build",
+  ".git",
+  ".gemma-cli",
+  ".next",
+  "coverage",
+  ".turbo",
+  ".vite",
+  ".cache",
+] as const;
+const SEARCH_FILES_IGNORED_FILE_SUFFIXES = [
+  ".tsbuildinfo",
 ] as const;
 const PROTECTED_OVERWRITE_PATH_RE =
   /^(?:src|tests)\/|^Gemma(?:\.[A-Za-z]+)?\.md$|^package\.json$/;
 
 type ProjectScriptName = (typeof PROJECT_SCRIPT_ALLOWED_NAMES)[number];
 type ProjectScriptManager = (typeof PROJECT_SCRIPT_MANAGERS)[number];
+
+interface SearchMatch {
+  path: string;
+  line: number;
+  text: string;
+}
 
 export type PromptMode = "chat" | "code" | "build" | "plan" | "execute";
 
@@ -422,10 +430,6 @@ async function listFiles(
     .join("\n");
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
 function safeSearchPath(args: Record<string, unknown>): string | null {
   const rawPath = String(args.path ?? SEARCH_FILES_DEFAULT_PATH).trim();
   const path = rawPath || SEARCH_FILES_DEFAULT_PATH;
@@ -444,6 +448,111 @@ function boundedSearchResultLimit(args: Record<string, unknown>): number {
   return Math.max(1, Math.min(integer, SEARCH_FILES_ABSOLUTE_MAX_RESULTS));
 }
 
+function globToRegExp(glob: string): RegExp {
+  let source = "^";
+  let index = 0;
+  while (index < glob.length) {
+    const char = glob[index];
+    const next = glob[index + 1];
+    if (char === "*" && next === "*") {
+      if (glob[index + 2] === "/") {
+        source += "(?:.*/)?";
+        index += 3;
+      } else {
+        source += ".*";
+        index += 2;
+      }
+      continue;
+    }
+    if (char === "*") {
+      source += "[^/]*";
+      index += 1;
+      continue;
+    }
+    if (char === "?") {
+      source += "[^/]";
+      index += 1;
+      continue;
+    }
+    source += char.replace(/[\\^$+?.()|[\]{}]/g, "\\$&");
+    index += 1;
+  }
+  return new RegExp(`${source}$`);
+}
+
+function matchesSearchFileGlob(path: string, fileGlob: string): boolean {
+  if (!fileGlob) return true;
+  const normalizedGlob = fileGlob.replace(/\\/g, "/");
+  const normalizedPath = path.replace(/\\/g, "/");
+  if (normalizedGlob.includes("/")) {
+    return globToRegExp(normalizedGlob).test(normalizedPath);
+  }
+  return globToRegExp(normalizedGlob).test(basename(normalizedPath));
+}
+
+function shouldIgnoreSearchDir(name: string): boolean {
+  return SEARCH_FILES_IGNORED_DIRS.includes(
+    name as (typeof SEARCH_FILES_IGNORED_DIRS)[number],
+  );
+}
+
+function shouldIgnoreSearchFile(path: string): boolean {
+  return SEARCH_FILES_IGNORED_FILE_SUFFIXES.some((suffix) =>
+    path.endsWith(suffix),
+  );
+}
+
+async function collectSearchMatches(params: {
+  base: string;
+  relativePath: string;
+  query: string;
+  fileGlob: string;
+  maxResults: number;
+  matches: SearchMatch[];
+}): Promise<boolean> {
+  let stat;
+  const absolutePath = join(params.base, params.relativePath);
+  try {
+    stat = await fs.stat(absolutePath);
+  } catch (error) {
+    throw new Error(
+      `could not read ${params.relativePath}: ${(error as Error).message}`,
+    );
+  }
+  if (stat.isDirectory()) {
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isDirectory() && shouldIgnoreSearchDir(entry.name)) continue;
+      const childPath =
+        params.relativePath === SEARCH_FILES_DEFAULT_PATH
+          ? entry.name
+          : `${params.relativePath}/${entry.name}`;
+      const truncated = await collectSearchMatches({
+        ...params,
+        relativePath: childPath,
+      });
+      if (truncated) return true;
+    }
+    return false;
+  }
+  if (!stat.isFile()) return false;
+  if (stat.size > SEARCH_FILES_MAX_FILE_BYTES) return false;
+  if (shouldIgnoreSearchFile(params.relativePath)) return false;
+  if (!matchesSearchFileGlob(params.relativePath, params.fileGlob)) return false;
+  const content = await fs.readFile(absolutePath, "utf8");
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index].includes(params.query)) continue;
+    params.matches.push({
+      path: params.relativePath,
+      line: index + 1,
+      text: lines[index],
+    });
+    if (params.matches.length >= params.maxResults) return true;
+  }
+  return false;
+}
+
 async function searchFiles(
   args: Record<string, unknown>,
   ctx: ToolContext,
@@ -456,46 +565,32 @@ async function searchFiles(
   }
   const maxResults = boundedSearchResultLimit(args);
   const fileGlob = String(args.file_glob ?? "").trim();
-  const ignoreArgs = SEARCH_FILES_IGNORED_GLOBS.map(
-    (glob) => `--glob ${shellQuote(glob)}`,
-  );
-  const fileGlobArgs = fileGlob ? [`--glob ${shellQuote(fileGlob)}`] : [];
-  const command = [
-    "command -v rg >/dev/null 2>&1 || { echo 'rg is required for search_files but was not found on PATH.' >&2; exit 127; }",
-    [
-      "rg",
-      "--line-number",
-      "--hidden",
-      "--fixed-strings",
-      "--no-heading",
-      "--color",
-      "never",
-      ...ignoreArgs,
-      ...fileGlobArgs,
-      "--",
-      shellQuote(query),
-      shellQuote(path),
-    ].join(" "),
-  ].join(" && ");
-  const r = await wsRunBash(
-    ctx.conversationId,
-    command,
-    SEARCH_FILES_TIMEOUT_MS,
-  );
-  if (r.exitCode === 1 && !r.stdout.trim()) {
+  const base = await ensureWorkspace(ctx.conversationId);
+  const matches: SearchMatch[] = [];
+  let truncated = false;
+  try {
+    truncated = await collectSearchMatches({
+      base,
+      relativePath: path,
+      query,
+      fileGlob,
+      maxResults,
+      matches,
+    });
+  } catch (error) {
+    return `Error searching files: ${(error as Error).message}`;
+  }
+  if (matches.length === 0) {
     return `No matches found for ${JSON.stringify(query)} in ${path}.`;
   }
-  if (r.exitCode !== 0) {
-    const detail = (r.stderr || r.stdout || `exit=${r.exitCode}`).trim();
-    return `Error searching files: ${detail}`;
-  }
-  const lines = r.stdout.split(/\r?\n/).filter((line) => line.trim() !== "");
-  const limited = lines.slice(0, maxResults);
+  const renderedMatches = matches.map(
+    (match) => `${match.path}:${match.line}:${match.text}`,
+  );
   const parts = [
-    `Found ${lines.length} match${lines.length === 1 ? "" : "es"} for ${JSON.stringify(query)} in ${path}.`,
-    ...limited,
+    `${truncated ? "Found at least" : "Found"} ${matches.length} match${matches.length === 1 ? "" : "es"} for ${JSON.stringify(query)} in ${path}.`,
+    ...renderedMatches,
   ];
-  if (lines.length > limited.length || r.truncated) {
+  if (truncated) {
     parts.push("[results were truncated]");
   }
   return parts.join("\n");
@@ -755,7 +850,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   search_files: {
     name: "search_files",
     description:
-      "Search workspace files for a literal query using rg with generated directories excluded. Use this before run_bash for finding references, usages, symbols, or text.",
+      "Search workspace files for a literal query with generated directories excluded. Use this before run_bash for finding references, usages, symbols, or text.",
     params: [
       {
         name: "query",
@@ -1114,6 +1209,10 @@ export function emitSafeBoundary(buffer: string, from: number): number {
     // Otherwise this '<' is some other tag — safe.
   }
   return buffer.length;
+}
+
+export function isToolErrorResult(result: string): boolean {
+  return /^Error(?:\b|:)/i.test(result.trimStart());
 }
 
 export async function runTool(
