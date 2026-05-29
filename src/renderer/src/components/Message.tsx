@@ -754,14 +754,51 @@ function PlanView({
   onRerun?: () => void;
 }) {
   const trees = React.useMemo(() => buildPlanTree(nodes), [nodes]);
-  const failed = nodes.some(
-    (node) => node.kind === "plan" && node.status === "failed",
-  );
+  const rootPlan =
+    nodes.find((node) => node.kind === "plan" && !node.parentId) ??
+    nodes.find((node) => node.kind === "plan");
+  const complete = rootPlan?.status === "ok";
+  const failed = rootPlan?.status === "failed";
+  const stepCount = nodes.filter((node) => node.kind === "step").length;
+  const [open, setOpen] = React.useState(!complete);
+  const wasComplete = React.useRef(complete);
+
+  React.useEffect(() => {
+    if (complete && !wasComplete.current) setOpen(false);
+    wasComplete.current = complete;
+  }, [complete]);
+
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
-      {trees.map((t) => (
-        <PlanRow key={t.node.id} tree={t} depth={0} toolCalls={toolCalls} />
-      ))}
+      {complete && (
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 py-0.5 text-left text-[12.5px] hover:bg-white/[0.02]"
+        >
+          <span
+            className={`inline-flex h-4 w-4 shrink-0 items-center justify-center font-mono ${planStatusColor("ok")}`}
+          >
+            {planStatusGlyph("ok")}
+          </span>
+          <span className="text-ink-100">Plan done</span>
+          <span className="text-[11px] text-ink-400">
+            ({stepCount} {stepCount === 1 ? "step" : "steps"})
+          </span>
+          <svg
+            viewBox="0 0 12 12"
+            className={`h-2.5 w-2.5 shrink-0 text-ink-400 transition ${open ? "rotate-90" : ""}`}
+            fill="currentColor"
+          >
+            <path d="M4 2l4 4-4 4V2z" />
+          </svg>
+        </button>
+      )}
+      {(!complete || open) &&
+        trees.map((t) => (
+          <PlanRow key={t.node.id} tree={t} depth={0} toolCalls={toolCalls} />
+        ))}
       {failed && onRerun && (
         <div className="mt-2 border-t border-white/5 pt-2">
           <button

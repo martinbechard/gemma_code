@@ -141,6 +141,35 @@ describe("Message", () => {
     expect(html).toContain("Run Failed Plan Again");
   });
 
+  it("collapses completed plan executions behind a done row", () => {
+    const html = renderMessage({
+      id: "assistant-plan",
+      role: "assistant",
+      content: "",
+      createdAt: 1,
+      phase: "execution",
+      planNodes: [
+        {
+          id: "plan-1",
+          kind: "plan",
+          status: "ok",
+        },
+        {
+          id: "step-1",
+          kind: "step",
+          parentId: "plan-1",
+          name: "remove_tool",
+          status: "ok",
+          prompt: "Remove the CWD tool.",
+        },
+      ],
+    });
+
+    expect(html).toContain("Plan done");
+    expect(html).toContain("aria-expanded=\"false\"");
+    expect(html).not.toContain("Step: remove_tool");
+  });
+
   it("shows run again on an executed proposal when the caller allows execution", () => {
     const html = renderMessage(
       {

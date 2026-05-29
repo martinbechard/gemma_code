@@ -66,7 +66,7 @@ import {
 import { replayRequestMessages } from "./chatHistory";
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
-import { clearPlan, loadPlan, savePlan } from "./plan/planStore";
+import { loadPlan, savePlan } from "./plan/planStore";
 import {
   EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
   validatePlanForExecution,
@@ -878,13 +878,6 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             reason: ev.reason ?? "",
           });
         }
-        if (
-          ev.type === "plan_node_end" &&
-          ev.kind === "plan" &&
-          ev.status === "ok"
-        ) {
-          clearPlan(req.conversationId);
-        }
         if (ev.type === "plan_node_start") {
           emit({
             type: "plan_node_start",
@@ -908,13 +901,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     };
 
     // executePlan path: a previously-proposed plan was approved by the user.
-    // Load it, build the state machine, and seed the first step's synthetic
-    // user prompt so the loop's first round streams the model's work for it.
+    // Prefer the UI-provided steps for the clicked proposal, then fall back to
+    // the saved plan copy for older requests or recovery after an app restart.
     if (req.executePlan) {
-      const saved =
-        loadPlan(req.conversationId) ??
-        parsedPlanFromSteps(req.executePlanSteps ?? []);
-      if (!saved) {
+      const plan =
+        parsedPlanFromSteps(req.executePlanSteps ?? []) ??
+        loadPlan(req.conversationId);
+      if (!plan) {
         emit({ type: "activity", activity: { kind: "idle" } });
         emit({
           type: "error",
@@ -922,7 +915,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         });
         return;
       }
-      planState = new PlanExecutionState(saved);
+      planState = new PlanExecutionState(plan);
       usePlanExecutionPrompt();
       drainPlanEvents();
       const next = planState.nextPrompt();

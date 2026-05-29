@@ -1,8 +1,7 @@
-// Per-conversation persistence of a proposed plan. The harness writes the
-// plan YAML here when the model emits one at the top level, then waits for the
-// user to approve execution. On execute the file is parsed back into a
-// ParsedPlan and used to drive PlanExecutionState. The file survives app
-// crashes between propose and execute.
+// Per-conversation persistence of the latest proposed plan. The harness writes
+// the plan YAML here when the model emits one at the top level, then reads it
+// back for execution or rerun recovery. The file survives app crashes and
+// completed executions until a newer proposal replaces it.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
