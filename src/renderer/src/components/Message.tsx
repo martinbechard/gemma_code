@@ -17,6 +17,7 @@ interface Props {
   streaming: boolean;
   onRegenerate?: () => void;
   onExecutePlan?: () => void;
+  onRerunPlan?: () => void;
 }
 
 interface Parsed {
@@ -53,6 +54,7 @@ export default function Message({
   streaming,
   onRegenerate,
   onExecutePlan,
+  onRerunPlan,
 }: Props) {
   const isUser = message.role === "user";
   const isHarness = message.role === "harness";
@@ -170,6 +172,7 @@ export default function Message({
           <PlanView
             nodes={message.planNodes}
             toolCalls={message.toolCalls ?? []}
+            onRerun={onRerunPlan}
           />
         )}
 
@@ -744,16 +747,32 @@ function PlanRow({
 function PlanView({
   nodes,
   toolCalls,
+  onRerun,
 }: {
   nodes: PlanNode[];
   toolCalls: ToolCall[];
+  onRerun?: () => void;
 }) {
   const trees = React.useMemo(() => buildPlanTree(nodes), [nodes]);
+  const failed = nodes.some(
+    (node) => node.kind === "plan" && node.status === "failed",
+  );
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
       {trees.map((t) => (
         <PlanRow key={t.node.id} tree={t} depth={0} toolCalls={toolCalls} />
       ))}
+      {failed && onRerun && (
+        <div className="mt-2 border-t border-white/5 pt-2">
+          <button
+            type="button"
+            onClick={onRerun}
+            className="rounded-md bg-amber-300/15 px-2.5 py-1 text-[11.5px] font-medium text-amber-100 transition hover:bg-amber-300/25"
+          >
+            Run Failed Plan Again
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -881,13 +900,13 @@ function PlanProposalView({
             ({steps.length} {steps.length === 1 ? "step" : "steps"})
           </span>
         </div>
-        {!executed && onExecute && (
+        {onExecute && (
           <button
             type="button"
             onClick={onExecute}
             className="rounded-md bg-amber-300/15 px-2.5 py-1 text-[11.5px] font-medium text-amber-100 transition hover:bg-amber-300/25"
           >
-            Execute Plan
+            {executed ? "Run Again" : "Execute Plan"}
           </button>
         )}
       </div>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   containsCompletePlan,
   findNextPlan,
+  parsedPlanFromSteps,
 } from "../../../src/main/plan/parser";
 
 const yamlPlan = [
@@ -123,5 +124,30 @@ describe("containsCompletePlan", () => {
   it("returns false when there is no complete YAML plan", () => {
     expect(containsCompletePlan("plain response")).toBe(false);
     expect(containsCompletePlan("plan:\n  steps:\n    - name:")).toBe(false);
+  });
+});
+
+describe("parsedPlanFromSteps", () => {
+  it("builds a parsed plan from proposed UI steps", () => {
+    const plan = parsedPlanFromSteps([
+      {
+        name: "remove_tool",
+        prompt: "Read src/main/tools.ts and remove the CWD tool.",
+        verify: "src/main/tools.ts no longer contains the CWD tool.",
+      },
+    ]);
+
+    expect(plan).not.toBeNull();
+    if (!plan) return;
+    expect(plan.steps).toEqual([
+      {
+        name: "remove_tool",
+        prompt: "Read src/main/tools.ts and remove the CWD tool.",
+        verify: "src/main/tools.ts no longer contains the CWD tool.",
+      },
+    ]);
+    expect(findNextPlan(plan.raw)).toMatchObject({
+      steps: plan.steps,
+    });
   });
 });

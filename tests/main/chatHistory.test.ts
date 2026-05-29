@@ -65,8 +65,8 @@ describe("replayRequestMessages", () => {
       { role: "user", content: "Earlier context" },
       { role: "assistant", content: "I read it" },
       {
-        role: "tool",
-        content: 'Result of <action name="read_file">: plan instructions',
+        role: "user",
+        content: "[ok] read_file tool result:\nplan instructions",
       },
       { role: "user", content: "Synthetic instruction" },
     ]);

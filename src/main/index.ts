@@ -59,6 +59,7 @@ import type {
 import { setRuntimePaths } from "./runtimePaths";
 import {
   findNextPlan,
+  parsedPlanFromSteps,
   parseVerifyResult,
   type ParsedPlan,
 } from "./plan/parser";
@@ -442,6 +443,9 @@ const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
   "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly BLOCKED: followed by one short reason. Do not emit a verify tag about the malformed response.";
+const PSEUDO_TOOL_RESPONSE_RE = /<\/?tool_response\b/i;
+const TOOL_RESULT_WAITING_SELF_REPORT_RE =
+  /\b(?:waiting for|wait for|awaiting|results? (?:are|is) not yet available|not yet available)\b[\s\S]{0,120}\b(?:tool|result|results|output|search_files|read_file|list_files)\b/i;
 
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
@@ -494,6 +498,34 @@ function buildRepeatedRecoveryReadPrompt(path: string): string {
     "Your next response must be exactly one write_file action for this same path and nothing else.",
     "The write_file content must preserve the current file content and apply the requested change.",
     "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
+  ].join("\n");
+}
+
+function formatToolResultMessage(
+  toolName: string,
+  result: string,
+  hadError: boolean,
+): string {
+  return `[${hadError ? "error" : "ok"}] ${toolName} tool result:\n${result}`;
+}
+
+function invalidToolResultSelfReportReason(response: string): string | null {
+  if (PSEUDO_TOOL_RESPONSE_RE.test(response)) {
+    return "assistant emitted pseudo tool output instead of using the actual tool result";
+  }
+  if (TOOL_RESULT_WAITING_SELF_REPORT_RE.test(response)) {
+    return "assistant claimed it was waiting for a tool result that is already visible";
+  }
+  return null;
+}
+
+function buildToolResultSelfReportPrompt(reason: string): string {
+  return [
+    `The previous response was rejected: ${reason}.`,
+    "The latest tool result is already visible in this conversation as a harness message beginning with [ok] or [error].",
+    "Use that tool result directly for the current step.",
+    "Do not emit <tool_response>, do not paste fake tool output, and do not say you are waiting for a result.",
+    "If the visible tool result is unusable, reply exactly BLOCKED: followed by one short reason.",
   ].join("\n");
 }
 
@@ -846,6 +878,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             reason: ev.reason ?? "",
           });
         }
+        if (
+          ev.type === "plan_node_end" &&
+          ev.kind === "plan" &&
+          ev.status === "ok"
+        ) {
+          clearPlan(req.conversationId);
+        }
         if (ev.type === "plan_node_start") {
           emit({
             type: "plan_node_start",
@@ -872,7 +911,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     // Load it, build the state machine, and seed the first step's synthetic
     // user prompt so the loop's first round streams the model's work for it.
     if (req.executePlan) {
-      const saved = loadPlan(req.conversationId);
+      const saved =
+        loadPlan(req.conversationId) ??
+        parsedPlanFromSteps(req.executePlanSteps ?? []);
       if (!saved) {
         emit({ type: "activity", activity: { kind: "idle" } });
         emit({
@@ -881,7 +922,6 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         });
         return;
       }
-      clearPlan(req.conversationId);
       planState = new PlanExecutionState(saved);
       usePlanExecutionPrompt();
       drainPlanEvents();
@@ -1260,8 +1300,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               content: buffer.slice(0, emittedIdx),
             });
             baseMessages.push({
-              role: "tool",
-              content: `[${hadError ? "error" : "ok"}] ${found.name}: ${result}`,
+              role: "user",
+              content: formatToolResultMessage(found.name, result, hadError),
             });
             if (planState?.currentStepId) {
               recordPlanToolEvidence(stepEvidence, found.name, result, found.args);
@@ -2029,6 +2069,23 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           planState.currentStepEvidenceCriterion() ?? "",
           stepEvidence,
         );
+        const invalidToolSelfReportReason =
+          stepEvidence.actionCount > 0
+            ? invalidToolResultSelfReportReason(buffer)
+            : null;
+        if (invalidToolSelfReportReason) {
+          logStepEvidenceCheck("tool_result_self_report_rejected", {
+            reason: invalidToolSelfReportReason,
+          });
+          flushBufferToUI();
+          emit({ type: "set_assistant_content", text: "" });
+          pushHarnessPrompt(
+            "tool result correction",
+            buildToolResultSelfReportPrompt(invalidToolSelfReportReason),
+          );
+          emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+          continue;
+        }
         if (incompleteReason) {
           logStepEvidenceCheck("step_incomplete_no_action", {
             reason: incompleteReason,

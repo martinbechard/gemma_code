@@ -22,6 +22,27 @@ describe("plan step evidence", () => {
     ).toContain("no tool evidence");
   });
 
+  it("treats missing-result verify reasons as contradicted by successful search evidence", () => {
+    const evidence = createPlanStepEvidence();
+    recordPlanToolEvidence(
+      evidence,
+      "search_files",
+      'Found 1 match for "current working directory" in src.\nsrc/main/tools.ts:785: "Return the active workspace root and the app process current working directory."',
+      {
+        query: "current working directory",
+        path: "src",
+      },
+    );
+
+    expect(
+      isContradictedBySuccessfulEvidence(
+        "The search results are not yet available to confirm the artifact has been identified.",
+        "A specific artifact responsible for the CWD retrieval function has been identified.",
+        evidence,
+      ),
+    ).toBe(true);
+  });
+
   it("blocks a verify pass after an edit_file failure", () => {
     const evidence = createPlanStepEvidence();
 

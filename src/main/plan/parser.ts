@@ -1,4 +1,4 @@
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 
 export interface ParsedStep {
   name: string;
@@ -59,6 +59,29 @@ export function findNextPlan(
 export function containsCompletePlan(text: string): boolean {
   const plan = findNextPlan(text);
   return plan !== null && plan !== "incomplete" && plan.steps.length > 0;
+}
+
+export function parsedPlanFromSteps(steps: ParsedStep[]): ParsedPlan | null {
+  const parsedSteps = steps
+    .map((step) => ({
+      name: step.name.trim(),
+      prompt: step.prompt.trim(),
+      verify: step.verify.trim(),
+    }))
+    .filter(
+      (step) =>
+        step.name.length > 0 &&
+        step.prompt.length > 0 &&
+        step.verify.length > 0,
+    );
+  if (parsedSteps.length === 0) return null;
+  const raw = stringify({ plan: { steps: parsedSteps } }).trimEnd();
+  return {
+    steps: parsedSteps,
+    raw,
+    start: 0,
+    end: raw.length,
+  };
 }
 
 function findPlanStart(text: string, from: number): number | null {

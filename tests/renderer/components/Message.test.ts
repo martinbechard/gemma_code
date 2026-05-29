@@ -18,12 +18,19 @@ function harnessMessage(
   };
 }
 
-function renderMessage(message: ChatMessage): string {
+function renderMessage(
+  message: ChatMessage,
+  handlers: {
+    onExecutePlan?: () => void;
+    onRerunPlan?: () => void;
+  } = {},
+): string {
   return renderToStaticMarkup(
     createElement(Message, {
       message,
       isLast: false,
       streaming: false,
+      ...handlers,
     }),
   );
 }
@@ -108,5 +115,53 @@ describe("Message", () => {
     expect(html).toContain("Does the plan directly address");
     expect(html).toContain("The steps all target the requested behavior.");
     expect(html).toContain("aria-expanded");
+  });
+
+  it("shows a rerun button for failed plan executions", () => {
+    const html = renderMessage(
+      {
+        id: "assistant-plan",
+        role: "assistant",
+        content: "",
+        createdAt: 1,
+        phase: "execution",
+        planNodes: [
+          {
+            id: "plan-1",
+            kind: "plan",
+            status: "failed",
+          },
+        ],
+      },
+      {
+        onRerunPlan: () => undefined,
+      },
+    );
+
+    expect(html).toContain("Run Failed Plan Again");
+  });
+
+  it("shows run again on an executed proposal when the caller allows execution", () => {
+    const html = renderMessage(
+      {
+        id: "assistant-proposal",
+        role: "assistant",
+        content: "",
+        createdAt: 1,
+        proposedPlan: [
+          {
+            name: "remove_tool",
+            prompt: "Remove the CWD tool.",
+            verify: "The CWD tool is absent.",
+          },
+        ],
+        planExecuted: true,
+      },
+      {
+        onExecutePlan: () => undefined,
+      },
+    );
+
+    expect(html).toContain("Run Again");
   });
 });

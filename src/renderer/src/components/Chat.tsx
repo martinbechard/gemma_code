@@ -124,6 +124,38 @@ function requestHistory(messages: ChatMessage[]): Array<{
     }));
 }
 
+function hasFailedPlanExecution(message: ChatMessage): boolean {
+  return (
+    message.role === "assistant" &&
+    message.phase === "execution" &&
+    (message.planNodes ?? []).some(
+      (node) => node.kind === "plan" && node.status === "failed",
+    )
+  );
+}
+
+function hasFailedPlanExecutionAfter(
+  messages: ChatMessage[],
+  messageId: string,
+): boolean {
+  const start = messages.findIndex((message) => message.id === messageId);
+  if (start < 0) return false;
+  return messages.slice(start + 1).some(hasFailedPlanExecution);
+}
+
+function findProposalBeforeMessage(
+  messages: ChatMessage[],
+  messageId: string,
+): ChatMessage | null {
+  const end = messages.findIndex((message) => message.id === messageId);
+  if (end < 0) return null;
+  for (let index = end - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === "assistant" && message.proposedPlan) return message;
+  }
+  return null;
+}
+
 export default function Chat({ model, onSwitchModel }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const loaded = loadConversations();
@@ -511,8 +543,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
     const conv = conversations.find((c) => c.id === activeId);
     if (!conv) return;
     const proposalMsg = conv.messages.find((m) => m.id === messageId);
-    if (!proposalMsg || !proposalMsg.proposedPlan || proposalMsg.planExecuted)
-      return;
+    if (!proposalMsg || !proposalMsg.proposedPlan) return;
 
     const assistantMsg: ChatMessage = {
       id: newId("m"),
@@ -551,6 +582,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           workingDir: conv.workingDir,
           codeSubmode: conv.workingDir ? codeSubmodeOf(conv) : undefined,
           executePlan: true,
+          executePlanSteps: proposalMsg.proposedPlan,
           debugLogging: executionLogging,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
@@ -558,6 +590,15 @@ export default function Chat({ model, onSwitchModel }: Props) {
     } finally {
       setStreaming(false);
     }
+  }
+
+  async function handleRerunFailedPlan(messageId: string): Promise<void> {
+    if (streaming) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv) return;
+    const proposal = findProposalBeforeMessage(conv.messages, messageId);
+    if (!proposal) return;
+    await handleExecutePlan(proposal.id);
   }
 
   const canvasVisible =
@@ -621,6 +662,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
             codeSubmode={codeSubmodeOf(activeConversation)}
             onRegenerate={handleRegenerate}
             onExecutePlan={handleExecutePlan}
+            onRerunPlan={handleRerunFailedPlan}
           />
           <Composer
             onSend={handleSend}
@@ -1232,6 +1274,7 @@ function MessageList({
   codeSubmode,
   onRegenerate,
   onExecutePlan,
+  onRerunPlan,
 }: {
   messages: ChatMessage[];
   streaming: boolean;
@@ -1239,6 +1282,7 @@ function MessageList({
   codeSubmode: CodeSubmode;
   onRegenerate: () => void;
   onExecutePlan: (messageId: string) => void;
+  onRerunPlan: (messageId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -1305,6 +1349,15 @@ function MessageList({
 
             const m = item.message;
             const isLast = i === renderItems.length - 1;
+            const canExecutePlan =
+              m.role === "assistant" &&
+              !!m.proposedPlan &&
+              (!m.planExecuted || hasFailedPlanExecutionAfter(messages, m.id));
+            const canRerunFailedPlan =
+              !streaming &&
+              m.role === "assistant" &&
+              hasFailedPlanExecution(m) &&
+              findProposalBeforeMessage(messages, m.id) !== null;
             return (
               <div
                 key={m.id}
@@ -1321,9 +1374,12 @@ function MessageList({
                       : undefined
                   }
                   onExecutePlan={
-                    !streaming && m.role === "assistant" && !!m.proposedPlan
+                    !streaming && canExecutePlan
                       ? () => onExecutePlan(m.id)
                       : undefined
+                  }
+                  onRerunPlan={
+                    canRerunFailedPlan ? () => onRerunPlan(m.id) : undefined
                   }
                 />
               </div>

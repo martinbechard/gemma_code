@@ -293,6 +293,14 @@ function buildFailedEditKey(
   };
 }
 
+function formatToolResultMessage(
+  toolName: string,
+  result: string,
+  hadError: boolean,
+): string {
+  return `[${hadError ? "error" : "ok"}] ${toolName} tool result:\n${result}`;
+}
+
 export async function runChat(opts: AgentRunOptions): Promise<void> {
   const conversationId = `cli-${Date.now()}`;
   const repoRoot = process.cwd();
@@ -645,8 +653,12 @@ async function runAgentLoop(
           content: buffer.slice(0, action.end),
         });
         messages.push({
-          role: "tool",
-          content: `[error] run_bash: blocked by CLI policy (RUN_BASH not set)`,
+          role: "user",
+          content: formatToolResultMessage(
+            "run_bash",
+            "blocked by CLI policy (RUN_BASH not set)",
+            true,
+          ),
         });
         continue;
       }
@@ -730,8 +742,8 @@ async function runAgentLoop(
         content: buffer.slice(0, action.end),
       });
       messages.push({
-        role: "tool",
-        content: `[ok] ${action.name}: ${result}`,
+        role: "user",
+        content: formatToolResultMessage(action.name, result, false),
       });
       if (planState?.currentStepId) {
         recordPlanToolEvidence(stepEvidence, action.name, result, action.args);

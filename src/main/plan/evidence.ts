@@ -86,6 +86,8 @@ const MUTATING_COMMAND_RE =
   /\b(?:rm|mv|cp)\b|\b(?:sed|perl)\s+(?:-[A-Za-z]*i|[^\n]*\s-i\b)|(?:^|\s)>\s*\S+/i;
 const TRUNCATED_OUTPUT_RE = /\[(?:…|\.\.\.)?(?:output )?truncated\]/i;
 const NO_SEARCH_MATCHES_RE = /^No matches found for (.+?) in (.+?)\./;
+const MISSING_TOOL_RESULT_REASON_RE =
+  /\b(?:result|results|output|tool result|search|listing|file evidence)\b[\s\S]{0,80}\b(?:not yet available|not available|missing|not visible|not found|unavailable)\b|\b(?:not yet available|not available|missing|not visible|unavailable)\b[\s\S]{0,80}\b(?:result|results|output|tool result|search|listing|file evidence)\b/i;
 
 export function createPlanStepEvidence(): PlanStepEvidence {
   return {
@@ -124,10 +126,20 @@ export function isContradictedBySuccessfulEvidence(
   evidence: PlanStepEvidence,
 ): boolean {
   if (typeof reason !== "string" || reason.length === 0) return false;
-  if (!/\b(?:did not|failed|failure|not return|not execute|could not)\b/i.test(reason)) {
+  if (
+    !/\b(?:did not|failed|failure|not return|not execute|could not|not yet available|not available|not visible|not found|missing|unavailable)\b/i.test(
+      reason,
+    )
+  ) {
     return false;
   }
   if (forcedVerifyFailureReason(criterion, evidence)) return false;
+  if (
+    MISSING_TOOL_RESULT_REASON_RE.test(reason) &&
+    hasSuccessfulVisibleToolEvidence(evidence)
+  ) {
+    return true;
+  }
   if (
     /\b(?:run_bash|command|test|build|execution error|missing file evidence)\b/i.test(
       reason,
@@ -147,6 +159,14 @@ export function isContradictedBySuccessfulEvidence(
   return extractRequiredCommands(criterion).some(
     (command) =>
       reason.includes(command) && hasSuccessfulCommand(evidence, command),
+  );
+}
+
+function hasSuccessfulVisibleToolEvidence(evidence: PlanStepEvidence): boolean {
+  return (
+    evidence.readActions.some((read) => !read.truncated) ||
+    evidence.searchActions.some((search) => !search.truncated) ||
+    evidence.listedPaths.size > 0
   );
 }
 

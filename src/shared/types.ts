@@ -112,6 +112,7 @@ export interface ChatRequest {
   // loads a previously-proposed plan for this conversation, building a
   // PlanExecutionState and entering the standard step/verify loop.
   executePlan?: boolean;
+  executePlanSteps?: ProposedStep[];
   // When true, the main process appends raw harness execution events to the
   // local debug execution log for later reconstruction.
   debugLogging?: boolean;

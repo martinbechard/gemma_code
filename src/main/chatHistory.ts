@@ -26,8 +26,8 @@ export function replayRequestMessages(
     for (const toolCall of message.toolCalls ?? []) {
       if (toolCall.result == null) continue;
       replayedMessages.push({
-        role: "tool",
-        content: `Result of <action name="${toolCall.name}">: ${toolCall.result}`,
+        role: "user",
+        content: `[ok] ${toolCall.name} tool result:\n${toolCall.result}`,
       });
     }
   }
