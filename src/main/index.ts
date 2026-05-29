@@ -429,6 +429,7 @@ const MAX_TOOL_ROUNDS_CHAT = 6;
 const MAX_TOOL_ROUNDS_CODE = 40;
 const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
 const MAX_PLAN_SEMANTIC_REVIEW_RETRIES = 4;
+const MAX_STEP_INCOMPLETE_REPROMPTS = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const INCOMPLETE_ACTION_PREVIEW_CHARS = 240;
@@ -760,6 +761,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     let planAssemblyValidationRetries = 0;
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
+    let stepIncompletePromptCount = 0;
     let stepEvidence = createPlanStepEvidence();
     let stepEvidenceStepId: string | null = null;
     const failedEditCounts = new Map<string, number>();
@@ -775,6 +777,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       stepEvidenceStepId = prompt.stepId;
       lastActionKey = null;
       repeatedActionCount = 0;
+      stepIncompletePromptCount = 0;
       pendingEditRecoveryPath = null;
       logExecution("step_evidence_reset", {
         stepId: prompt.stepId,
@@ -785,6 +788,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     const resetStepAttemptTracking = (): void => {
       lastActionKey = null;
       repeatedActionCount = 0;
+      stepIncompletePromptCount = 0;
       stepEvidence = createPlanStepEvidence();
       stepEvidenceStepId = null;
       pendingEditRecoveryPath = null;
@@ -2080,12 +2084,38 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           continue;
         }
         if (incompleteReason) {
+          stepIncompletePromptCount++;
+          if (stepIncompletePromptCount >= MAX_STEP_INCOMPLETE_REPROMPTS) {
+            const abortReason =
+              `repeated no-action responses for this plan step. ` +
+              `Latest missing evidence: ${incompleteReason}`;
+            logStepEvidenceCheck("step_incomplete_abort", {
+              reason: incompleteReason,
+              promptCount: stepIncompletePromptCount,
+              abortReason,
+            });
+            flushBufferToUI();
+            emit({
+              type: "set_assistant_content",
+              text: `BLOCKED: ${abortReason}`,
+            });
+            planState.abortCurrentStep(abortReason);
+            drainPlanEvents();
+            awaitingVerify = false;
+            resetStepAttemptTracking();
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
           logStepEvidenceCheck("step_incomplete_no_action", {
             reason: incompleteReason,
+            promptCount: stepIncompletePromptCount,
           });
           flushBufferToUI();
           emit({ type: "set_assistant_content", text: "" });
-          baseMessages.push({ role: "assistant", content: buffer });
+          if (buffer.trim().length > 0) {
+            baseMessages.push({ role: "assistant", content: buffer });
+          }
           pushStepIncompletePrompt(incompleteReason);
           emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
           continue;

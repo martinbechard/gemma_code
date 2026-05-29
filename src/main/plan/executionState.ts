@@ -195,6 +195,28 @@ export class PlanExecutionState {
     return this.applyVerify({ result: "fail", reason });
   }
 
+  abortCurrentStep(reason: string): void {
+    if (this.state !== "running" || this.frames.length === 0) return;
+    const f = this.top();
+    if (!f.currentStepNodeId) return;
+    if (f.phase === "step") {
+      f.phase = "verify";
+      this.startVerify(f);
+    }
+    this.endVerify(f, "failed", reason);
+    this.endStep(f, "failed");
+    while (this.frames.length > 0) {
+      const top = this.frames.pop()!;
+      this.events.push({
+        type: "plan_node_end",
+        kind: "plan",
+        id: top.planNodeId,
+        status: "failed",
+      });
+    }
+    this.state = "failed";
+  }
+
   drainEvents(): PlanEvent[] {
     const out = this.events;
     this.events = [];

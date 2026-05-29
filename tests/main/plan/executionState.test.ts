@@ -119,6 +119,30 @@ describe("PlanExecutionState — single step happy path", () => {
     );
     expect(verifyEnds[0]?.reason).toBe("missing artifact");
   });
+
+  it("can abort the active step without retrying", () => {
+    const s = new PlanExecutionState(plan({ name: "x" }, { name: "y" }), {
+      idGen: counter(),
+    });
+    s.nextPrompt();
+
+    s.abortCurrentStep("blocked: repeated no-action responses");
+
+    expect(s.state).toBe("failed");
+    expect(s.nextPrompt()).toBeNull();
+    const ends = endEvents(s.drainEvents());
+    expect(ends).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "verify",
+          status: "failed",
+          reason: "blocked: repeated no-action responses",
+        }),
+        expect.objectContaining({ kind: "step", status: "failed" }),
+        expect.objectContaining({ kind: "plan", status: "failed" }),
+      ]),
+    );
+  });
 });
 
 describe("PlanExecutionState — verify=none auto-advance", () => {
