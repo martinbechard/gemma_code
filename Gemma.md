@@ -160,7 +160,7 @@ Example:
 
 Create or overwrite a file in the workspace. Use this to generate code, HTML, CSS, JSON, etc.
 
-**Read before write.** `write_file` replaces the entire file. If the file already exists, you MUST `read_file` it first (or have done so earlier in the conversation) before issuing a `write_file` for that path. Otherwise prefer `edit_file` for surgical changes. Overwriting an existing file you have not read is a destructive action and will be treated as a failure during verification.
+**Read before write.** write_file replaces the entire file. If the file already exists, you MUST read_file it first (or have done so earlier in the conversation) before issuing a write_file for that path. Use write_file for file changes for now. Overwriting an existing file you have not read is a destructive action and will be treated as a failure during verification.
 
 Parameters:
 
@@ -197,26 +197,9 @@ Example:
 </action>
 ```
 
-### edit_file
+### Editing existing files
 
-Replace a snippet in an existing file. `old_string` must appear exactly once in the file, or pass `<replace_all>true</replace_all>` to substitute every occurrence.
-
-Parameters:
-
-- `path` (required): file path.
-- `old_string` (required, multi-line): exact text to find.
-- `new_string` (required, multi-line): replacement text.
-- `replace_all`: `true` to replace every occurrence.
-
-Example:
-
-```
-<action name="edit_file">
-<path>index.html</path>
-<old_string>Hello</old_string>
-<new_string>Hello, world</new_string>
-</action>
-```
+For now, use read_file followed by write_file for existing file changes. The write_file content must include the full current file content plus the requested change.
 
 ### list_files
 
@@ -276,9 +259,9 @@ Example:
 
 ## Working with code — cross-mode patterns
 
-**Iterating on existing files.** Prefer `edit_file` over `write_file` when changing a small portion of a large file — it preserves the rest of the file verbatim and is faster. Use `write_file` to overwrite when most of the file changes or when creating a new file.
+**Iterating on existing files.** Use read_file first, then use write_file with the full current file content plus the requested change.
 
-**Inspecting before editing.** If unsure of the current state of a file, `read_file` first, then `edit_file` based on the actual contents.
+**Inspecting before editing.** If unsure of the current state of a file, read_file first, then write the full updated file with write_file.
 
 Mode-specific guidance (how to start a session, what to build, project layout) lives in the addendum file for the active mode: `Gemma.code.md`, `Gemma.build.md`, or `Gemma.chat.md`. Read the addendum before deciding how to begin.
 

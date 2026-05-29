@@ -466,10 +466,10 @@ function buildRepeatedEditFailureRecoveryPrompt(
   return [
     `The same edit_file old_string failed ${attemptCount} times for ${path}.`,
     "That exact old_string is invalid or ambiguous for this file. Do not use it again.",
-    "The current step cannot safely continue from guessed file contents.",
-    "Your next response must be exactly:",
-    `BLOCKED: repeated edit_file old_string failed for ${path}`,
-    "Do not emit action tags, verify tags, a plan, or extra prose.",
+    "Use the latest read_file result for this path already in the conversation.",
+    "Your next response must be exactly one write_file action for this same path and nothing else.",
+    "The write_file content must preserve the current file content and apply the requested change.",
+    "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
     "Do not retry this old_string:",
     preview,
   ].join("\n");
@@ -491,10 +491,9 @@ function buildRepeatedRecoveryReadPrompt(path: string): string {
   return [
     `You are recovering from a failed edit_file action for ${path}.`,
     "The file has already been reread and the tool result is already in the conversation.",
-    "Repeating the same read_file action is not progress.",
-    "Your next response must be exactly:",
-    `BLOCKED: repeated read_file during edit recovery for ${path}`,
-    "Do not emit action tags, verify tags, a plan, or extra prose.",
+    "Your next response must be exactly one write_file action for this same path and nothing else.",
+    "The write_file content must preserve the current file content and apply the requested change.",
+    "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
   ].join("\n");
 }
 

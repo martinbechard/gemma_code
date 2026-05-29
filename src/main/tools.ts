@@ -23,6 +23,7 @@ const PROJECT_SCRIPT_DEFAULT_TIMEOUT_MS = 120_000;
 const PROJECT_SCRIPT_MAX_TIMEOUT_MS = 300_000;
 const PROJECT_SCRIPT_ALLOWED_NAMES = ["build", "test", "dev"] as const;
 const PROJECT_SCRIPT_MANAGERS = ["npm", "pnpm"] as const;
+const USE_WRITE_FILE_FOR_FILE_CHANGES = true;
 const DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES = 1_000;
 const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
 const DESTRUCTIVE_EDIT_MIN_OLD_STRING_CHARS = 20;
@@ -790,7 +791,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   write_file: {
     name: "write_file",
     description:
-      "Create or overwrite a file in the workspace. Use this to generate code, HTML, CSS, JSON, etc.",
+      "Create or overwrite a file in the workspace. Use this for file changes: read the existing file first, then provide the full current file content plus the requested change.",
     params: [
       {
         name: "path",
@@ -980,7 +981,16 @@ function tz(): string {
 }
 
 function renderToolHelp(mode: "chat" | "code"): string {
-  const wanted = (t: ToolSpec): boolean => t.mode === "both" || t.mode === mode;
+  const wanted = (t: ToolSpec): boolean => {
+    if (
+      USE_WRITE_FILE_FOR_FILE_CHANGES &&
+      mode === "code" &&
+      t.name === "edit_file"
+    ) {
+      return false;
+    }
+    return t.mode === "both" || t.mode === mode;
+  };
   const lines: string[] = [];
   for (const t of Object.values(TOOLS)) {
     if (!wanted(t)) continue;
@@ -1094,6 +1104,8 @@ export function codeSystemPrompt(
     "- Then close the action with </action> on its own line.",
     "",
     "HARD RULES (apply in every code/build session)",
+    "- Use write_file for all file changes for now. For an existing file, read_file first, then write the full current file content with the requested changes.",
+    "- Do not use edit_file unless a future instruction explicitly enables it.",
     "- Never paste file contents in your chat reply — only inside <content>.",
     "- Never wrap <action> tags in ``` code fences.",
     "- Paths are relative to the workspace (no leading slashes).",

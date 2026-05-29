@@ -42,7 +42,7 @@ Gemma.chat.md     Chat-mode addendum.
 
 ### Where to add things — read the canonical file FIRST
 
-For each kind of change, read the listed file before deciding on a shape. The existing entries are the template for your new entry; copy their structure. Use surgical edits to add to these files. They are large and overwriting them destroys the rest of the project.
+For each kind of change, read the listed file before deciding on a shape. The existing entries are the template for your new entry; copy their structure. Use write_file for file changes for now, and preserve the full current file content when updating large project files.
 
 | Feature kind                                      | Read first                                                   | What to add                                                                                                                                                 |
 | ------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -8,7 +8,7 @@ Execution starts with a fresh model context. Treat the code-execute system promp
 
 - Work in the user's existing codebase, not a fresh demo workspace.
 - Make targeted, conservative changes that fit the project's existing shape.
-- Read before you write. Edit before you overwrite.
+- Read before you write. Use write_file for file changes.
 - For gemma-chat-public, source files are TypeScript and tests live under tests mirroring src.
 - For gemma-chat-public, src/main/tools.ts is the single tool registry, src/main/index.ts is the Electron IPC and agent loop, src/main/plan contains the plan parser and execution state machine, and src/shared/types.ts contains types shared by main, preload, renderer, and CLI.
 - When changing behavior, create or update focused tests before implementation, then run the focused test, the full test suite, and pnpm run build.
@@ -32,17 +32,16 @@ Follow the current step directly.
 - If you are about to output a plan, stop and output the next concrete action instead.
 - Do not ask for approval to continue the already approved plan.
 - If the step asks for a concrete artifact, create or edit that artifact.
-- If the step asks you to remove, edit, update, replace, delete, or modify code, a read-only action is not enough. Run a successful edit_file, write_file, delete_file, or clearly modifying run_bash command before summarizing.
+- Use write_file for file changes. For an existing file, read_file first, then write the full current file content with the requested changes.
+- If the step asks you to remove, edit, update, replace, delete, or modify code, a read-only action is not enough. Run a successful write_file, delete_file, or clearly modifying run_bash command before summarizing.
 - If the step asks you to remove code, gather post-edit absence evidence with search_files or read_file after the mutation before summarizing.
 - If the step asks for a concrete decision, write the decision in plain text and stop.
 - Do not invent tool results, paste file contents as a result, or wrap guessed output in a result tag. If a step needs file contents, use the read_file action and wait for my tool result.
 - If a step names an exact shell command, including pnpm test, pnpm test tests/main/someTool.test.ts, or pnpm run build, use run_bash with that exact command. Do not replace exact commands with run_project_script.
 - If a tool result says ENOENT, no such file, or unknown path, do not use that path again until you list files or read a confirmed parent path.
-- If edit_file or write_file reports an error, the edit did not happen. Read the exact nearby file context, retry with a corrected action, or summarize the blocker. Do not describe the file as changed.
-- Do not use placeholder or generic edit_file old_string values such as undefined, null, TODO, or a guessed snippet. old_string must be copied from the latest visible file contents.
-- If edit_file says old_string was not found or appears multiple times, do not retry the same old_string. Use an exact snippet from the latest visible file result or reply exactly BLOCKED: followed by one short reason.
-- If the same old_string fails more than once, stop the step with BLOCKED: repeated edit_file old_string failed. Do not switch to a full-file write as a recovery tactic.
-- Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet. If a full-file rewrite is necessary, the content must preserve the current file content and apply the requested change.
+- If write_file reports an error, the edit did not happen. Read the exact nearby file context, retry with a corrected write_file action, or summarize the blocker. Do not describe the file as changed.
+- Do not use edit_file for now. If edit_file appears in prior context, switch to write_file after reading the target file.
+- Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet. The content must preserve the current file content and apply the requested change.
 - If a required edit fails, the current step is not complete. Do not move to verification as though it succeeded.
 - After a write or edit succeeds, do not repeat the same write or edit. Move to the next needed action, summarize the completed work, or let the verify phase judge it.
 - If a command result reports a nonzero exit code, a failed assertion, or missing command output needed by the verify condition, treat that evidence as a failure until you have fixed the cause and rerun the command successfully.

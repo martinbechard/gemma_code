@@ -233,12 +233,9 @@ describe("buildRepeatedEditFailureRecoveryPrompt", () => {
 
     expect(prompt).toContain("failed 2 times");
     expect(prompt).toContain("Do not use it again");
-    expect(prompt).toContain("cannot safely continue");
-    expect(prompt).toContain(
-      "BLOCKED: repeated edit_file old_string failed",
-    );
-    expect(prompt).toContain("Do not emit action tags");
-    expect(prompt).not.toContain("write_file action");
+    expect(prompt).toContain("Use the latest read_file result");
+    expect(prompt).toContain("exactly one write_file action");
+    expect(prompt).toContain("Do not emit read_file, edit_file");
     expect(prompt).toContain("const mockCwd = '/mock/cwd';");
   });
 });
@@ -272,18 +269,14 @@ describe("buildIncompleteStepPrompt", () => {
 });
 
 describe("buildRepeatedRecoveryReadPrompt", () => {
-  it("blocks when edit recovery rereads the same file repeatedly", () => {
+  it("forces write_file when edit recovery rereads the same file repeatedly", () => {
     const prompt = buildRepeatedRecoveryReadPrompt(
       "tests/main/currentDatetimeTool.test.ts",
     );
 
     expect(prompt).toContain("recovering from a failed edit_file action");
     expect(prompt).toContain("already been reread");
-    expect(prompt).toContain(
-      "Repeating the same read_file action is not progress",
-    );
-    expect(prompt).toContain("BLOCKED: repeated read_file during edit recovery");
-    expect(prompt).toContain("Do not emit action tags");
-    expect(prompt).not.toContain("write_file action");
+    expect(prompt).toContain("exactly one write_file action");
+    expect(prompt).toContain("Do not emit read_file, edit_file");
   });
 });

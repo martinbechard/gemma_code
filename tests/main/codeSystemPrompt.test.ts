@@ -63,16 +63,13 @@ describe("codeSystemPrompt", () => {
     );
   });
 
-  it("teaches execute mode that ambiguous old_string failures require a different edit path", () => {
+  it("teaches execute mode to use write_file for file changes", () => {
     const executePrompt = readFileSync(
       join(process.cwd(), "Gemma.execute.md"),
       "utf8",
     );
 
-    expect(executePrompt).toContain(
-      "old_string was not found or appears multiple times",
-    );
-    expect(executePrompt).toContain("do not retry the same old_string");
+    expect(executePrompt).toContain("Use write_file for file changes");
     expect(executePrompt).toContain("Do not invent tool results");
     expect(executePrompt).toContain("A visible tool result that begins with [ok] is usable output");
     expect(executePrompt).toContain("reply exactly BLOCKED:");
@@ -87,12 +84,13 @@ describe("codeSystemPrompt", () => {
     );
     expect(executePrompt).toContain("post-edit absence evidence");
     expect(executePrompt).toContain(
-      "Do not switch to a full-file write as a recovery tactic",
+      "The content must preserve the current file content",
     );
     expect(executePrompt).toContain("Execution starts with a fresh model context");
-    expect(codeSystemPrompt("/workspace", "http://preview", "execute")).toContain(
-      '<action name="tool_name"/> is also valid',
-    );
+    const prompt = codeSystemPrompt("/workspace", "http://preview", "execute");
+    expect(prompt).toContain('<action name="tool_name"/> is also valid');
+    expect(prompt).toContain("### write_file");
+    expect(prompt).not.toContain("### edit_file");
     expect(executePrompt).toContain(
       "use run_bash with that exact command",
     );
