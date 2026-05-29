@@ -842,7 +842,14 @@ function ExecutionLogViewer({
                   key={entry.line}
                   className={`group rounded-lg border bg-white/[0.025] ${executionLogEventClass(entry)}`}
                 >
-                  <summary className="grid cursor-pointer grid-cols-[76px_150px_minmax(0,1fr)_56px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
+                  <summary className="grid cursor-pointer grid-cols-[12px_76px_150px_minmax(0,1fr)_56px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
+                    <svg
+                      viewBox="0 0 12 12"
+                      className="h-2.5 w-2.5 text-ink-500 transition group-open:rotate-90"
+                      fill="currentColor"
+                    >
+                      <path d="M4 2l4 4-4 4V2z" />
+                    </svg>
                     <span className="font-mono text-ink-500">
                       {entryTimeLabel(entry)}
                     </span>
@@ -874,6 +881,23 @@ function isLogRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function logRecordField(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record[key];
+  return isLogRecord(value) ? value : null;
+}
+
+function logRecordArrayField(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown>[] {
+  const value = record[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter(isLogRecord);
+}
+
 function logStringField(
   record: Record<string, unknown>,
   key: string,
@@ -882,13 +906,21 @@ function logStringField(
   return typeof value === "string" ? value : "";
 }
 
+function logNumberField(
+  record: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function compactLogText(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   if (oneLine.length <= LOG_DETAIL_PREVIEW_MAX_CHARS) return oneLine;
   return `${oneLine.slice(0, LOG_DETAIL_PREVIEW_MAX_CHARS)}...`;
 }
 
-function executionLogSummary(entry: ExecutionLogEntry): string {
+export function executionLogSummary(entry: ExecutionLogEntry): string {
   const data = isLogRecord(entry.data) ? entry.data : null;
   if (!data) return compactLogText(String(entry.data ?? ""));
   switch (entry.event) {
@@ -914,21 +946,156 @@ function executionLogSummary(entry: ExecutionLogEntry): string {
         `${logStringField(data, "label")} ${logStringField(data, "content")}`,
       );
     case "model_request":
-      return compactLogText(
-        `${String(data.messageCount ?? "")} messages ${logStringField(data, "promptPath")}`,
-      );
+      return modelRequestSummary(data);
     case "model_chunk":
-      return compactLogText(logStringField(data, "content"));
+      return modelChunkSummary(data);
     case "stream_chunk":
-      return compactLogText(
-        `${logStringField(data, "type")} ${logStringField(data, "reason")}`,
-      );
+      return streamChunkSummary(data);
     default:
       return compactLogText(JSON.stringify(data));
   }
 }
 
-function executionLogDetails(entry: ExecutionLogEntry): string {
+export function executionLogDetails(entry: ExecutionLogEntry): string {
+  const data = isLogRecord(entry.data) ? entry.data : null;
+  if (entry.event === "model_request" && data) {
+    return modelRequestDetails(entry, data);
+  }
+  return JSON.stringify(
+    {
+      line: entry.line,
+      timestamp: entry.timestamp,
+      conversationId: entry.conversationId,
+      mode: entry.mode,
+      model: entry.model,
+      event: entry.event,
+      data: entry.data,
+      raw: entry.raw,
+    },
+    null,
+    2,
+  );
+}
+
+function modelRequestSummary(data: Record<string, unknown>): string {
+  const messageCount = String(data.messageCount ?? "");
+  const messages = logRecordArrayField(data, "messages");
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) {
+    return compactLogText(
+      `${messageCount} messages ${logStringField(data, "promptPath")}`,
+    );
+  }
+  const role = logStringField(lastMessage, "role") || "message";
+  const preview = logStringField(lastMessage, "preview");
+  return compactLogText(`${messageCount} messages · last ${role}: ${preview}`);
+}
+
+function modelChunkSummary(data: Record<string, unknown>): string {
+  if (data.done === true) return "done";
+  return compactLogText(logStringField(data, "content"));
+}
+
+function streamChunkSummary(data: Record<string, unknown>): string {
+  const type = logStringField(data, "type");
+  switch (type) {
+    case "token":
+      return compactLogText(`token ${logStringField(data, "text")}`);
+    case "system_prompt":
+      return compactLogText(
+        `system prompt ${logStringField(data, "label")}: ${logStringField(data, "content")}`,
+      );
+    case "tool_call": {
+      const call = logRecordField(data, "call");
+      if (!call) return "tool call";
+      return compactLogText(
+        `tool call ${logStringField(call, "name")} ${JSON.stringify(call.args ?? {})}`,
+      );
+    }
+    case "tool_result":
+      return compactLogText(
+        `tool result ${logStringField(data, "id")} ${logStringField(data, "error") || logStringField(data, "result")}`,
+      );
+    case "activity": {
+      const activity = logRecordField(data, "activity");
+      if (!activity) return "activity";
+      return compactLogText(
+        `activity ${logStringField(activity, "kind")} ${logStringField(activity, "label")} ${logStringField(activity, "detail")}`,
+      );
+    }
+    case "plan_node_start":
+      return compactLogText(
+        `start ${logStringField(data, "kind")} ${logStringField(data, "name") || logStringField(data, "criterion") || logStringField(data, "prompt")}`,
+      );
+    case "plan_node_end":
+      return compactLogText(
+        `end ${logStringField(data, "kind")} ${logStringField(data, "status")} ${logStringField(data, "reason")}`,
+      );
+    case "set_assistant_content":
+      return compactLogText(
+        logStringField(data, "text")
+          ? `assistant content ${logStringField(data, "text")}`
+          : "assistant content cleared",
+      );
+    case "harness_message":
+      return compactLogText(
+        `harness ${logStringField(data, "label")} ${logStringField(data, "phase")}: ${logStringField(data, "content")}`,
+      );
+    case "plan_proposed": {
+      const steps = logRecordArrayField(data, "steps");
+      const names = steps.map((step) => logStringField(step, "name")).join(", ");
+      return compactLogText(`plan proposed ${steps.length} steps ${names}`);
+    }
+    case "plan_reviewed": {
+      const review = logRecordField(data, "review");
+      if (!review) return "plan reviewed";
+      return compactLogText(
+        `plan reviewed ${logStringField(review, "verdict")} ${logStringField(review, "summary")}`,
+      );
+    }
+    case "done":
+      return "done";
+    case "error":
+      return compactLogText(`error ${logStringField(data, "error")}`);
+    default:
+      return compactLogText(JSON.stringify(data));
+  }
+}
+
+function modelRequestDetails(
+  entry: ExecutionLogEntry,
+  data: Record<string, unknown>,
+): string {
+  const messages = logRecordArrayField(data, "messages");
+  const lines = [
+    `line: ${entry.line}`,
+    `timestamp: ${entry.timestamp}`,
+    `conversationId: ${entry.conversationId ?? ""}`,
+    `mode: ${entry.mode ?? ""}`,
+    `model: ${entry.model ?? ""}`,
+    `promptPath: ${logStringField(data, "promptPath")}`,
+    `messageCount: ${String(data.messageCount ?? "")}`,
+    "",
+    "messages:",
+  ];
+  if (messages.length === 0) {
+    lines.push("  No per-message summary was logged for this entry.");
+  } else {
+    for (const message of messages) {
+      const index = logNumberField(message, "index");
+      const role = logStringField(message, "role") || "message";
+      const chars = logNumberField(message, "chars");
+      lines.push(
+        `  ${index ?? "?"}. ${role} (${chars ?? 0} chars)`,
+        `     ${logStringField(message, "preview")}`,
+      );
+    }
+  }
+  lines.push("", "raw:", executionLogDetailsJson(entry));
+  return lines.join("\n");
+}
+
+function executionLogDetailsJson(entry: ExecutionLogEntry): string {
   return JSON.stringify(
     {
       line: entry.line,

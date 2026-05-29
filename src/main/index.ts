@@ -433,6 +433,7 @@ const MAX_STEP_INCOMPLETE_REPROMPTS = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 const INCOMPLETE_ACTION_PREVIEW_CHARS = 240;
+const MODEL_REQUEST_MESSAGE_PREVIEW_CHARS = 320;
 const CODE_PLAN_NUDGE =
   "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
@@ -528,6 +529,28 @@ function buildToolResultSelfReportPrompt(reason: string): string {
     "Do not emit <tool_response>, do not paste fake tool output, and do not say you are waiting for a result.",
     "If the visible tool result is unusable, reply exactly BLOCKED: followed by one short reason.",
   ].join("\n");
+}
+
+function compactModelRequestLogText(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= MODEL_REQUEST_MESSAGE_PREVIEW_CHARS) return oneLine;
+  return `${oneLine.slice(0, MODEL_REQUEST_MESSAGE_PREVIEW_CHARS)}...`;
+}
+
+function summarizeModelRequestMessages(
+  messages: MLXChatMessage[],
+): Array<{
+  index: number;
+  role: MLXChatMessage["role"];
+  chars: number;
+  preview: string;
+}> {
+  return messages.map((message, index) => ({
+    index: index + 1,
+    role: message.role,
+    chars: message.content.length,
+    preview: compactModelRequestLogText(message.content),
+  }));
 }
 
 function buildFailedEditKey(
@@ -1040,6 +1063,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         logExecution("model_request", {
           promptPath,
           messageCount: requestMessages.length,
+          messages: summarizeModelRequestMessages(requestMessages),
         });
       } catch {
         // debug aid only; never let a write failure abort the chat round
