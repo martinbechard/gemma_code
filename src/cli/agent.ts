@@ -58,6 +58,7 @@ import {
   loadCliConversation,
   saveCliConversation,
 } from "./conversation";
+import { appendToolResultMessage } from "../main/chatHistory";
 
 export {
   buildIncompleteStepPrompt,
@@ -293,14 +294,6 @@ function buildFailedEditKey(
     path: args.path,
     oldString: args.old_string,
   };
-}
-
-function formatToolResultMessage(
-  toolName: string,
-  result: string,
-  hadError: boolean,
-): string {
-  return `[${hadError ? "error" : "ok"}] ${toolName} tool result:\n${result}`;
 }
 
 export async function runChat(opts: AgentRunOptions): Promise<void> {
@@ -654,13 +647,11 @@ async function runAgentLoop(
           role: "assistant",
           content: buffer.slice(0, action.end),
         });
-        messages.push({
-          role: "user",
-          content: formatToolResultMessage(
-            "run_bash",
-            "blocked by CLI policy (RUN_BASH not set)",
-            true,
-          ),
+        appendToolResultMessage(messages, {
+          toolName: "run_bash",
+          args: action.args,
+          result: "blocked by CLI policy (RUN_BASH not set)",
+          hadError: true,
         });
         continue;
       }
@@ -743,9 +734,11 @@ async function runAgentLoop(
         role: "assistant",
         content: buffer.slice(0, action.end),
       });
-      messages.push({
-        role: "user",
-        content: formatToolResultMessage(action.name, result, false),
+      appendToolResultMessage(messages, {
+        toolName: action.name,
+        args: action.args,
+        result,
+        hadError: false,
       });
       if (planState?.currentStepId) {
         recordPlanToolEvidence(stepEvidence, action.name, result, action.args);

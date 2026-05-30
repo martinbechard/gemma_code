@@ -63,7 +63,7 @@ import {
   parseVerifyResult,
   type ParsedPlan,
 } from "./plan/parser";
-import { replayRequestMessages } from "./chatHistory";
+import { appendToolResultMessage, replayRequestMessages } from "./chatHistory";
 import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 import { loadPlan, savePlan } from "./plan/planStore";
@@ -512,14 +512,6 @@ function buildRepeatedRecoveryReadPrompt(path: string): string {
     "The write_file content must preserve the current file content and apply the requested change.",
     "Do not emit read_file, edit_file, run_bash, run_project_script, verify, or a plan.",
   ].join("\n");
-}
-
-function formatToolResultMessage(
-  toolName: string,
-  result: string,
-  hadError: boolean,
-): string {
-  return `[${hadError ? "error" : "ok"}] ${toolName} tool result:\n${result}`;
 }
 
 function invalidToolResultSelfReportReason(response: string): string | null {
@@ -1345,9 +1337,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               role: "assistant",
               content: buffer.slice(0, emittedIdx),
             });
-            baseMessages.push({
-              role: "user",
-              content: formatToolResultMessage(found.name, result, hadError),
+            appendToolResultMessage(baseMessages, {
+              toolName: found.name,
+              args: found.args,
+              result,
+              hadError,
             });
             if (planState?.currentStepId) {
               recordPlanToolEvidence(stepEvidence, found.name, result, found.args);

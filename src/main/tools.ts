@@ -29,6 +29,8 @@ const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
 const DESTRUCTIVE_EDIT_MIN_OLD_STRING_CHARS = 20;
 const DESTRUCTIVE_EDIT_MIN_NEW_STRING_CHARS = 200;
 const DESTRUCTIVE_EDIT_MAX_NEW_TO_OLD_RATIO = 10;
+const READ_FILE_MAX_CONTENT_CHARS = 20_000;
+const READ_FILE_TRUNCATION_SUFFIX = "\n[…truncated]";
 const SEARCH_FILES_DEFAULT_PATH = ".";
 const SEARCH_FILES_DEFAULT_MAX_RESULTS = 200;
 const SEARCH_FILES_ABSOLUTE_MAX_RESULTS = 500;
@@ -52,9 +54,12 @@ const SEARCH_FILES_IGNORED_FILE_SUFFIXES = [
 ] as const;
 const PROTECTED_OVERWRITE_PATH_RE =
   /^(?:src|tests)\/|^Gemma(?:\.[A-Za-z]+)?\.md$|^package\.json$/;
+const FILE_CONTEXT_HEADING = "Files in context:";
+const CURRENT_FILE_HEADING_PREFIX = "Current file: ";
 
 type ProjectScriptName = (typeof PROJECT_SCRIPT_ALLOWED_NAMES)[number];
 type ProjectScriptManager = (typeof PROJECT_SCRIPT_MANAGERS)[number];
+const filesInContextByConversation = new Map<string, string[]>();
 
 interface SearchMatch {
   path: string;
@@ -356,11 +361,8 @@ async function readFile(
   const path = String(args.path ?? "").trim();
   if (!path) return "Error: missing <path>";
   try {
-    const content = await wsReadFile(ctx.conversationId, path);
-    if (content.length > 20_000) {
-      return content.slice(0, 20_000) + "\n[…truncated]";
-    }
-    return content;
+    const content = await readFileContentForContext(ctx.conversationId, path);
+    return formatFileContextResult(ctx.conversationId, path, content);
   } catch (e) {
     return `Error reading ${path}: ${(e as Error).message}`;
   }
@@ -387,10 +389,61 @@ async function editFile(
       replaceAll,
     );
     ctx.onFileChange?.();
-    return `Edited ${path} (${r.occurrences} replacement${r.occurrences === 1 ? "" : "s"}).`;
+    const summary = `Edited ${path} (${r.occurrences} replacement${r.occurrences === 1 ? "" : "s"}).`;
+    try {
+      const content = await readFileContentForContext(ctx.conversationId, path);
+      return [
+        summary,
+        "",
+        formatFileContextResult(ctx.conversationId, path, content),
+      ].join("\n");
+    } catch (e) {
+      return `${summary}\n\nError refreshing ${path}: ${(e as Error).message}`;
+    }
   } catch (e) {
     return `Error editing ${path}: ${(e as Error).message}`;
   }
+}
+
+async function readFileContentForContext(
+  conversationId: string,
+  path: string,
+): Promise<string> {
+  const content = await wsReadFile(conversationId, path);
+  if (content.length > READ_FILE_MAX_CONTENT_CHARS) {
+    return (
+      content.slice(0, READ_FILE_MAX_CONTENT_CHARS) +
+      READ_FILE_TRUNCATION_SUFFIX
+    );
+  }
+  return content;
+}
+
+function formatFileContextResult(
+  conversationId: string,
+  path: string,
+  content: string,
+): string {
+  const paths = recordFileInContext(conversationId, path);
+  return [
+    FILE_CONTEXT_HEADING,
+    ...paths.map((contextPath) => `- ${contextPath}`),
+    "",
+    `${CURRENT_FILE_HEADING_PREFIX}${path}`,
+    content,
+  ].join("\n");
+}
+
+function recordFileInContext(conversationId: string, path: string): string[] {
+  const existing = filesInContextByConversation.get(conversationId) ?? [];
+  if (existing.includes(path)) return existing;
+  const next = [...existing, path];
+  filesInContextByConversation.set(conversationId, next);
+  return next;
+}
+
+export function clearFileContextForConversation(conversationId: string): void {
+  filesInContextByConversation.delete(conversationId);
 }
 
 function detectDestructiveEdit(
@@ -812,7 +865,8 @@ export const TOOLS: Record<string, ToolSpec> = {
   },
   read_file: {
     name: "read_file",
-    description: "Read a file from the workspace.",
+    description:
+      "Read a file from the workspace and show the current files-in-context list.",
     params: [
       {
         name: "path",
@@ -827,7 +881,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   edit_file: {
     name: "edit_file",
     description:
-      "Replace a snippet in an existing file. old_string must appear exactly once, or pass <replace_all>true</replace_all>.",
+      "Replace a snippet in an existing file, then reread the updated file into context. old_string must appear exactly once, or pass <replace_all>true</replace_all>.",
     params: [
       { name: "path", description: "file path", required: true },
       {

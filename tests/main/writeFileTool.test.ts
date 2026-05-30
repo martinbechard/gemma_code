@@ -8,13 +8,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runTool } from "../../src/main/tools";
+import { clearFileContextForConversation, runTool } from "../../src/main/tools";
 import {
   clearWorkspaceOverride,
   setWorkspaceOverride,
 } from "../../src/main/workspace";
 
 const TEST_CONVERSATION_ID = "write-file-tool-test";
+const CONTEXT_CONVERSATION_ID = "file-context-tool-test";
 const LARGE_SOURCE_TEXT = [
   "import { keep } from './keep';",
   "",
@@ -23,11 +24,17 @@ const LARGE_SOURCE_TEXT = [
   "}",
   "",
 ].join("\n").repeat(80);
+const CONTEXT_SOURCE_PATH = "src/main/context.ts";
+const CONTEXT_SOURCE_TEXT = "export const label = 'before';\n";
+const CONTEXT_UPDATED_TEXT = "export const label = 'after';\n";
 
 let workspace = "";
 
 afterEach(() => {
   clearWorkspaceOverride(TEST_CONVERSATION_ID);
+  clearWorkspaceOverride(CONTEXT_CONVERSATION_ID);
+  clearFileContextForConversation(TEST_CONVERSATION_ID);
+  clearFileContextForConversation(CONTEXT_CONVERSATION_ID);
   if (workspace) {
     rmSync(workspace, { recursive: true, force: true });
     workspace = "";
@@ -109,5 +116,44 @@ describe("edit_file tool", () => {
     expect(readFileSync(join(workspace, "src/main/tools.ts"), "utf8")).toBe(
       LARGE_SOURCE_TEXT + "\nconst value = undefined;\n",
     );
+  });
+
+  it("rereads the updated file into context after a successful edit", async () => {
+    createWorkspace();
+    setWorkspaceOverride(CONTEXT_CONVERSATION_ID, workspace);
+    writeWorkspaceFile(CONTEXT_SOURCE_PATH, CONTEXT_SOURCE_TEXT);
+
+    const result = await runTool(
+      "edit_file",
+      {
+        path: CONTEXT_SOURCE_PATH,
+        old_string: "before",
+        new_string: "after",
+      },
+      { conversationId: CONTEXT_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("Edited src/main/context.ts");
+    expect(result).toContain("Files in context:");
+    expect(result).toContain("- src/main/context.ts");
+    expect(result).toContain(CONTEXT_UPDATED_TEXT.trim());
+  });
+});
+
+describe("read_file tool", () => {
+  it("adds read files to the displayed file context list", async () => {
+    createWorkspace();
+    setWorkspaceOverride(CONTEXT_CONVERSATION_ID, workspace);
+    writeWorkspaceFile(CONTEXT_SOURCE_PATH, CONTEXT_SOURCE_TEXT);
+
+    const result = await runTool(
+      "read_file",
+      { path: CONTEXT_SOURCE_PATH },
+      { conversationId: CONTEXT_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("Files in context:");
+    expect(result).toContain("- src/main/context.ts");
+    expect(result).toContain(CONTEXT_SOURCE_TEXT.trim());
   });
 });
