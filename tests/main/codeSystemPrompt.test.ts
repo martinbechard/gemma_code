@@ -131,6 +131,15 @@ describe("codeSystemPrompt", () => {
       "Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.",
     );
     expect(planPrompt).toContain(
+      "Resolve the files and artifacts to change during planning",
+    );
+    expect(planPrompt).toContain(
+      "Do not add execution steps whose only purpose is to locate, determine, or identify where changes should happen",
+    );
+    expect(planPrompt).toContain(
+      "mutation steps after grounding must name the exact files or artifacts they will change, create, or delete",
+    );
+    expect(planPrompt).toContain(
       "relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed",
     );
     expect(planPrompt).not.toContain("tests/main/currentDatetimeTool.test.ts");

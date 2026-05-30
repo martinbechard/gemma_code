@@ -141,6 +141,15 @@ describe("iterative plan assembly", () => {
     expect(prompt).toContain(
       "<UserRequest>add keyboard shortcuts to the composer.</UserRequest>",
     );
+    expect(prompt).toContain(
+      "Resolve the files and artifacts to change during planning",
+    );
+    expect(prompt).toContain(
+      "do not add later execution steps whose only purpose is to locate, determine, or identify where changes should happen",
+    );
+    expect(prompt).toContain(
+      "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
+    );
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
     expect(prompt).not.toContain("get_current");
@@ -162,6 +171,9 @@ describe("iterative plan assembly", () => {
       },
     ]);
     expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_NEXT_PROMPT);
+    expect(result.nextPrompt).toContain(
+      "Do not add a step whose only purpose is to locate, determine, or identify where changes should happen",
+    );
     expect(result.nextPrompt).not.toMatch(/\bhost\b/i);
     expect(result.nextPrompt).not.toContain("tests/main");
     expect(result.nextPrompt).not.toContain("get_current");

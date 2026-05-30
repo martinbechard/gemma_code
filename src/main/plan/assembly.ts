@@ -90,6 +90,7 @@ export const PLAN_ASSEMBLY_NEXT_PROMPT = [
   "What should I tell the agent next? Continue the same plan with exactly one additional YAML step.",
   "Return plan: done only when the accepted steps form a complete executable plan for the user request.",
   "Do not return plan: done if grounding, implementation, testing, documentation, or verification work is still needed for this specific request.",
+  "Do not add a step whose only purpose is to locate, determine, or identify where changes should happen; resolve target files during planning, and make mutation steps name exact files or artifacts.",
   "YAML only, no extra explanations.",
 ].join("\n");
 
@@ -163,6 +164,8 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
     "",
     "Build the plan one step at a time. I will accumulate the steps that you produce and save the final plan file after review.",
     "Choose exact files, tests, commands, and documentation steps from the request and project evidence; I will not provide request-specific paths or commands.",
+    "Resolve the files and artifacts to change during planning. Grounding steps may search or read exact paths, exact symbols, or exact directories, but do not add later execution steps whose only purpose is to locate, determine, or identify where changes should happen.",
+    "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
     "",
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
   ].join("\n");

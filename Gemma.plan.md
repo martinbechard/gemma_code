@@ -36,6 +36,8 @@ After the assembled plan passes deterministic validation, I start a fresh valida
 
 Do not copy examples from this prompt. A valid step must name the actual files, tests, commands, or artifacts needed for this request when those details are known.
 
+Resolve the files and artifacts to change during planning from the request and project instructions. Do not add execution steps whose only purpose is to locate, determine, or identify where changes should happen. Grounding steps may search or read exact paths, exact symbols, or exact directories, but mutation steps after grounding must name the exact files or artifacts they will change, create, or delete.
+
 If the request is genuinely ambiguous in a way that changes the file set or behavior, ask one focused clarifying question instead of emitting a half-scoped step.
 
 ## Step contract
