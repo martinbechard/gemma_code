@@ -267,36 +267,37 @@ export function buildPlanSemanticReviewPrompt(
     "Check whether the plan has enough concrete grounding, implementation, test, documentation, and verification work for this specific request. Some requests may not need every category.",
     "Check that files, folders, commands, and artifacts are task-specific choices made by the plan, not placeholders.",
     "",
-    "Return exactly one YAML document using this schema:",
+    "Checklist questions and allowed answers:",
+    ...PLAN_SEMANTIC_REVIEW_CHECKLIST_ITEMS.map(
+      (item) =>
+        `- ${item.id}: ${item.question} Answer: ${item.allowedAnswers.join(" | ")}`,
+    ),
+    "",
+    "Return exactly one compact YAML document using this schema:",
     "review:",
     "  verdict: pass | needs_correction",
     "  summary: Short review summary.",
     "  checklist:",
     "    - id: request_fit",
-    "      question: Does the plan directly address the original request?",
     "      answer: yes | no | partial",
-    "      additional_info: Task-specific reason for this answer.",
+    "      additional_info: Short task-specific reason.",
     "    - id: grounding",
-    "      question: Does the plan include enough project grounding before edits?",
     "      answer: yes | no | not_applicable",
-    "      additional_info: Task-specific reason for this answer.",
+    "      additional_info: Short task-specific reason.",
     "    - id: specificity",
-    "      question: Are files, commands, artifacts, and verification evidence task-specific?",
     "      answer: yes | no | partial",
-    "      additional_info: Task-specific reason for this answer.",
+    "      additional_info: Short task-specific reason.",
     "    - id: placeholder_present",
-    "      question: Does the plan contain placeholder wording or made-up examples?",
     "      answer: true | false",
-    "      additional_info: Task-specific reason for this answer.",
+    "      additional_info: Short task-specific reason.",
     "    - id: verification",
-    "      question: Does the plan include appropriate verification for the request?",
     "      answer: yes | no | not_applicable",
-    "      additional_info: Task-specific reason for this answer.",
+    "      additional_info: Short task-specific reason.",
     "    - id: residual_risk",
-    "      question: What residual risk remains if this plan is executed?",
     "      answer: low | medium | high",
-    "      additional_info: Task-specific reason for this answer.",
+    "      additional_info: Short task-specific reason.",
     "",
+    "Do not include question fields in the YAML; the checklist ids already identify the questions.",
     "If verdict is pass, do not include a plan key.",
     "If verdict is needs_correction, include one complete corrected top-level plan key named plan after review, with all steps, not just an added step.",
     "Do not use corrected_plan, correctedPlan, or review.corrected_plan.",
@@ -460,7 +461,7 @@ function parsePlanReviewChecklist(
     seen.add(expected.id);
 
     const question = stringField(item, "question");
-    if (question?.trim() !== expected.question) {
+    if (question && question.trim() !== expected.question) {
       return `Checklist item "${expected.id}" must use the expected question text.`;
     }
 
@@ -668,7 +669,9 @@ function semanticReviewRejected(reason: string): PlanSemanticReviewResult {
     reason,
     retryPrompt: [
       "The semantic review response was rejected: " + reason,
-      "Return the structured review YAML with verdict, summary, and every checklist item.",
+      "Start over from the top of the YAML document; do not continue any previous partial response.",
+      "Return the compact structured review YAML with verdict, summary, and every checklist item.",
+      "Each checklist item must contain only id, answer, and additional_info.",
       "If verdict is pass, do not include a plan key.",
       "If verdict is needs_correction, include one complete corrected top-level plan key named plan after review, with all steps.",
       "Do not use corrected_plan, correctedPlan, or review.corrected_plan.",
