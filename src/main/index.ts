@@ -445,8 +445,8 @@ const CODE_PLAN_NUDGE =
   "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
 const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
   "The previous response did not answer the prompt-writing question with a YAML plan fragment.",
-  "Answer in YAML only, with no explanation.",
-  "Return exactly one plan.steps item with name, prompt, and verify string fields.",
+  "Use one read-only action if project context is missing, or return exactly one plan.steps item with name, prompt, and verify string fields.",
+  "Return no extra explanations with YAML.",
 ].join("\n");
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";

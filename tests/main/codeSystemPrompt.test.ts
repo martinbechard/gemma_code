@@ -49,15 +49,15 @@ describe("codeSystemPrompt", () => {
       "utf8",
     );
 
-    expect(planPrompt).toContain(
-      "exactly one YAML plan containing exactly one step",
-    );
-    expect(planPrompt).toContain("This phase is only for planning");
-    expect(planPrompt).toContain("fresh model context");
-    expect(planPrompt).toContain("Do not emit action tags");
-    expect(planPrompt).toContain("Do not add stop, conclude, cleanup");
+    expect(planPrompt).toContain("Build one executable plan step at a time");
+    expect(planPrompt).toContain("You may inspect the project");
+    expect(planPrompt).toContain("fresh context");
+    expect(planPrompt).toContain("Do not edit, write, create, delete");
+    expect(planPrompt).toContain("Do not add steps whose only purpose");
     expect(planPrompt).toContain("plan: done");
+    expect(planPrompt).toContain("BECAUSE:");
     expect(planPrompt).not.toContain("no plan + no action");
+    expect(planPrompt).not.toContain("Do not inspect files");
     expect(planPrompt).not.toContain(
       "Emit one complete YAML plan covering the work end to end",
     );
@@ -104,50 +104,34 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain("preserve the current file content");
   });
 
-  it("states the generic executable-plan validation and review gates in plan mode", () => {
+  it("keeps only necessary planning rules in plan mode", () => {
     const planPrompt = readFileSync(
       join(process.cwd(), "Gemma.plan.md"),
       "utf8",
     );
 
-    expect(planPrompt).toContain("I perform deterministic validation of plan shape only");
     expect(planPrompt).toContain(
-      "The plan must contain at least one executable step.",
-    );
-    expect(planPrompt).toContain("Every step name must be unique.");
-    expect(planPrompt).toContain(
-      "After the assembled plan passes deterministic validation, I start a fresh validation context",
+      "return exactly one YAML document with one plan.steps item containing name, prompt, and verify",
     );
     expect(planPrompt).toContain(
-      "I pass the original request in an OriginalRequest XML block",
+      "Read-only actions are list_files, search_files, read_file, fetch_url, web_search, and non-mutating run_bash commands.",
     );
     expect(planPrompt).toContain(
-      "answer the structured checklist with the requested enum values",
+      "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
     );
     expect(planPrompt).toContain(
-      "return a review verdict of needs_correction and one complete corrected YAML plan under a top-level plan key with all steps",
+      "Do not add steps whose only purpose is to locate, determine, identify, report, summarize, conclude, or final-check.",
     );
     expect(planPrompt).toContain(
-      "Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.",
+      "relevant files, needed files, implementation files, documentation files needed, runtime files needed, prompt files needed",
     );
-    expect(planPrompt).toContain(
-      "Resolve the files and artifacts to change during planning",
-    );
-    expect(planPrompt).toContain(
-      "Do not add execution steps whose only purpose is to locate, determine, or identify where changes should happen",
-    );
-    expect(planPrompt).toContain(
-      "mutation steps after grounding must name the exact files or artifacts they will change, create, or delete",
-    );
-    expect(planPrompt).toContain(
-      "relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed",
-    );
+    expect(planPrompt).not.toContain("I perform deterministic validation");
+    expect(planPrompt).not.toContain("OriginalRequest XML block");
+    expect(planPrompt).not.toContain("structured checklist");
     expect(planPrompt).not.toContain("tests/main/currentDatetimeTool.test.ts");
     expect(planPrompt).not.toContain("get_current_hostname");
     expect(planPrompt).not.toContain("pnpm run build or npm run build");
-    for (const line of EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES) {
-      expect(planPrompt).toContain(line);
-    }
+    expect(EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES.length).toBeGreaterThan(0);
   });
 
   it("keeps common plan instructions aligned with iterative assembly", () => {

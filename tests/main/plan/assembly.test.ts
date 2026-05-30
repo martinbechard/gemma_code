@@ -142,13 +142,13 @@ describe("iterative plan assembly", () => {
       "<UserRequest>add keyboard shortcuts to the composer.</UserRequest>",
     );
     expect(prompt).toContain(
-      "Resolve the files and artifacts to change during planning",
+      "Use one read-only action first if you need project context.",
     );
     expect(prompt).toContain(
-      "do not add later execution steps whose only purpose is to locate, determine, or identify where changes should happen",
+      "When enough context is visible, emit exactly one YAML plan step.",
     );
     expect(prompt).toContain(
-      "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
+      "Mutation steps must name exact files or artifacts; do not defer locating targets to execution.",
     );
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
@@ -172,7 +172,7 @@ describe("iterative plan assembly", () => {
     ]);
     expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_NEXT_PROMPT);
     expect(result.nextPrompt).toContain(
-      "Do not add a step whose only purpose is to locate, determine, or identify where changes should happen",
+      "Do not defer locating targets to execution",
     );
     expect(result.nextPrompt).not.toMatch(/\bhost\b/i);
     expect(result.nextPrompt).not.toContain("tests/main");
