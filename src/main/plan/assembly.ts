@@ -83,13 +83,15 @@ const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
   " What should I start by telling the agent? in YAML only no extra explanations, just the prompt?";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "Our task is to create clear, executable instructions for an AI coding agent.";
-const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX = "Return no extra explanations.";
+const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
+  "What should I tell the AI coding agent first? YAML only, no extra explanations, just the prompt.";
 
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
-  "Continue planning. Use one read-only action if more project context is needed, or emit exactly one additional YAML step.",
+  "What should I tell the agent next? Continue the same plan with exactly one additional YAML step.",
   "Return plan: done only when the accepted steps form a complete executable plan for the user request.",
-  "Do not defer locating targets to execution; mutation steps must name exact files or artifacts.",
-  "When emitting YAML, return no extra explanations.",
+  "Do not return plan: done if grounding, implementation, testing, documentation, or verification work is still needed for this specific request.",
+  "Do not add a step whose only purpose is to locate, determine, or identify where changes should happen; resolve target files during planning, and make mutation steps name exact files or artifacts.",
+  "YAML only, no extra explanations.",
 ].join("\n");
 
 export interface PlanAssemblyState {
@@ -160,11 +162,12 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
       taskSentence +
       PLAN_ASSEMBLY_USER_REQUEST_CLOSE,
     "",
-    "Use one read-only action first if you need project context.",
-    "When enough context is visible, emit exactly one YAML plan step.",
-    "Mutation steps must name exact files or artifacts; do not defer locating targets to execution.",
+    "Build the plan one step at a time. I will accumulate the steps that you produce and save the final plan file after review.",
+    "Choose exact files, tests, commands, and documentation steps from the request and project evidence; I will not provide request-specific paths or commands.",
+    "Resolve the files and artifacts to change during planning. Grounding steps may search or read exact paths, exact symbols, or exact directories, but do not add later execution steps whose only purpose is to locate, determine, or identify where changes should happen.",
+    "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
     "",
-    "Return no extra explanations.",
+    PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
   ].join("\n");
 }
 
