@@ -9,6 +9,7 @@ import {
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   parseBlockedReason,
+  parseStepSummary,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
 } from "../../../src/main/plan/evidence";
@@ -234,7 +235,27 @@ describe("plan step evidence", () => {
     expect(
       parseBlockedReason("BLOCKED: missing\nlist_files result"),
     ).toBe("missing list_files result");
+    expect(parseBlockedReason('<error reason="missing list_files result"/>')).toBe(
+      "missing list_files result",
+    );
+    expect(parseBlockedReason("<error>missing\nlist_files result</error>")).toBe(
+      "missing list_files result",
+    );
     expect(parseBlockedReason("I am blocked because the result is missing")).toBeNull();
+  });
+
+  it("parses bounded step summaries", () => {
+    expect(
+      parseStepSummary("<summary>Read src/main/tools.ts.\nRemoved the stale tool.\nRan tests.</summary>"),
+    ).toEqual({
+      kind: "summary",
+      text: "Read src/main/tools.ts.\nRemoved the stale tool.\nRan tests.",
+    });
+    expect(parseStepSummary("plain summary")).toBeNull();
+    expect(parseStepSummary("<summary>one\n\ntwo\nthree\nfour</summary>")).toEqual({
+      kind: "invalid",
+      reason: "summary exceeds 3 lines",
+    });
   });
 
   it("detects guarded existing tool evidence after reading required files", () => {

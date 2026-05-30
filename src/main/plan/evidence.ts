@@ -77,6 +77,13 @@ const GUARDED_ALREADY_PRESENT_RE =
   /\b(?:only\s+if\s+missing|already\s+present|avoid\s+editing|do\s+not\s+edit)\b/i;
 const GET_CURRENT_TOOL_RE = /\bget_current_[a-z0-9_]+\b/g;
 const BLOCKED_RESPONSE_RE = /^\s*BLOCKED:\s*(.+?)\s*$/is;
+const ERROR_RESPONSE_RE =
+  /^\s*<error\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/error\s*>)\s*$/i;
+const ERROR_REASON_RE =
+  /\breason\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s/>]+))/i;
+const SUMMARY_RESPONSE_RE =
+  /^\s*<summary\b[^>]*>([\s\S]*?)<\/summary\s*>\s*$/i;
+export const MAX_STEP_SUMMARY_LINES = 3;
 const MUTATION_CRITERION_RE =
   /\b(?:add|added|create|created|edit|edited|change|changed|update|updated|replace|replaced|remove|removed|removal|delete|deleted|modify|modified|write|written)\b/i;
 const REMOVAL_CRITERION_RE =
@@ -116,8 +123,43 @@ export function isMalformedActionSelfReport(reason: string | undefined): boolean
 
 export function parseBlockedReason(response: string): string | null {
   const match = BLOCKED_RESPONSE_RE.exec(response);
+  if (match) return compactStepText(match[1]) || "blocked";
+  const errorMatch = ERROR_RESPONSE_RE.exec(response);
+  if (!errorMatch) return null;
+  const attrs = errorMatch[1] ?? "";
+  const body = errorMatch[2] ?? "";
+  const reasonMatch = ERROR_REASON_RE.exec(attrs);
+  const reason =
+    reasonMatch?.[1] ?? reasonMatch?.[2] ?? reasonMatch?.[3] ?? body;
+  return compactStepText(reason) || "blocked";
+}
+
+export type ParsedStepSummary =
+  | { kind: "summary"; text: string }
+  | { kind: "invalid"; reason: string };
+
+export function parseStepSummary(response: string): ParsedStepSummary | null {
+  const match = SUMMARY_RESPONSE_RE.exec(response);
   if (!match) return null;
-  return match[1].replace(/\s+/g, " ").trim() || "blocked";
+  const text = (match[1] ?? "").trim();
+  if (text.length === 0) {
+    return { kind: "invalid", reason: "summary is empty" };
+  }
+  const lineCount = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0).length;
+  if (lineCount > MAX_STEP_SUMMARY_LINES) {
+    return {
+      kind: "invalid",
+      reason: `summary exceeds ${MAX_STEP_SUMMARY_LINES} lines`,
+    };
+  }
+  return { kind: "summary", text };
+}
+
+function compactStepText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export function isContradictedBySuccessfulEvidence(
@@ -597,7 +639,15 @@ export function buildIncompleteStepPrompt(reason: string): string {
     `Missing evidence: ${reason}.`,
     "Do not invent tool results, paste fake file contents, or wrap results in a result tag.",
     "Continue the current step now with the next required action tag.",
-    "If you cannot proceed, reply exactly BLOCKED: followed by one short reason, with no action tag, verify tag, or extra prose.",
+    'If you cannot proceed, reply exactly with <error reason="short reason"/> and no action tag, verify tag, or extra prose.',
+  ].join("\n");
+}
+
+export function buildStepSummaryCorrectionPrompt(reason: string): string {
+  return [
+    `The step summary was rejected: ${reason}.`,
+    `Reply with exactly one <summary> tag using no more than ${MAX_STEP_SUMMARY_LINES} non-empty lines.`,
+    'If the step cannot be summarized because required evidence is missing or unusable, reply exactly with <error reason="short reason"/>.',
   ].join("\n");
 }
 

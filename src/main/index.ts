@@ -82,6 +82,7 @@ import {
 } from "./plan/assembly";
 import {
   buildIncompleteStepPrompt,
+  buildStepSummaryCorrectionPrompt,
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   hasGuardedAlreadyPresentEvidence,
@@ -91,6 +92,7 @@ import {
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   parseBlockedReason,
+  parseStepSummary,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
   summarizePlanStepEvidence,
@@ -444,10 +446,12 @@ const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
 const INCOMPLETE_ACTION_NUDGE =
-  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly BLOCKED: followed by one short reason. Do not emit a verify tag about the malformed response.";
+  'Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly with <error reason="short reason"/>. Do not emit a verify tag about the malformed response.';
 const PSEUDO_TOOL_RESPONSE_RE = /<\/?tool_response\b/i;
 const TOOL_RESULT_WAITING_SELF_REPORT_RE =
   /\b(?:waiting for|wait for|awaiting|results? (?:are|is) not yet available|not yet available)\b[\s\S]{0,120}\b(?:tool|result|results|output|search_files|read_file|list_files)\b/i;
+const COMPLETE_STEP_RESPONSE_RE =
+  /<summary\b[^>]*>[\s\S]*?<\/summary\s*>|<error\b[^>]*?(?:\/\s*>|>[\s\S]*?<\/error\s*>)/i;
 
 interface ModelRequestMessageSummary {
   index: number;
@@ -496,7 +500,7 @@ function buildPrematureVerifyPrompt(reason: string | null): string {
     "You emitted a verify tag while executing a step body.",
     "Only emit verify tags after I send a Verify request.",
     reasonLine,
-    "Continue the current step now with the next required action tag. If you cannot proceed, reply exactly BLOCKED: followed by one short reason.",
+    'Continue the current step now with the next required action tag. If you cannot proceed, reply exactly with <error reason="short reason"/>.',
   ].join("\n");
 }
 
@@ -534,7 +538,7 @@ function buildToolResultSelfReportPrompt(reason: string): string {
     "The latest tool result is already visible in this conversation as a harness message beginning with [ok] or [error].",
     "Use that tool result directly for the current step.",
     "Do not emit <tool_response>, do not paste fake tool output, and do not say you are waiting for a result.",
-    "If the visible tool result is unusable, reply exactly BLOCKED: followed by one short reason.",
+    'If the visible tool result is unusable, reply exactly with <error reason="short reason"/>.',
   ].join("\n");
 }
 
@@ -1563,7 +1567,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 [
                   `You repeated the same ${found.name} action ${repeatedActionCount} times.`,
                   "Use the existing tool result already provided in this conversation and move to the next distinct action.",
-                  "If the required tool result is not visible or is not usable, reply exactly BLOCKED: followed by one short reason.",
+                  'If the required tool result is not visible or is not usable, reply exactly with <error reason="short reason"/>.',
                   "Do not assume hidden output, wait silently, or continue from guessed file information.",
                   "Do not emit a YAML plan while executing a plan step.",
                   `Do not call ${found.name} with the same parameters again.`,
@@ -1590,6 +1594,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             });
             // Break out of the current stream — we need to start a new
             // request with the updated conversation including the tool result.
+            break streamLoop;
+          }
+          if (
+            planState?.currentStepId &&
+            !awaitingVerify &&
+            COMPLETE_STEP_RESPONSE_RE.test(buffer)
+          ) {
             break streamLoop;
           }
         }
@@ -1901,8 +1912,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         usePlanExecutionPrompt();
         const corrective =
           `You emitted a YAML plan while inside an active plan step. That is not allowed and the plan was discarded. ` +
-          `Do the work for the current step directly using <action> tags, or write a brief plain-text summary if no tools are needed. ` +
-          `If the step is too large, do what you can and let verify fail with a reason describing what's left.`;
+          `Do the work for the current step directly using <action> tags, or write a <summary> of no more than 3 lines if no tools are needed. ` +
+          `If you cannot proceed, reply with <error reason="short reason"/>.`;
         pushHarnessPrompt("nested plan correction", corrective);
         const next = planState.nextPrompt();
         if (!next) {
@@ -2073,7 +2084,14 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         const blockedReason = parseBlockedReason(buffer);
         if (blockedReason) {
           flushBufferToUI();
-          baseMessages.push({ role: "assistant", content: buffer });
+          emit({
+            type: "set_assistant_content",
+            text: `BLOCKED: ${blockedReason}`,
+          });
+          baseMessages.push({
+            role: "assistant",
+            content: `BLOCKED: ${blockedReason}`,
+          });
           logExecution("plan_blocked", {
             reason: blockedReason,
             stepId: planState.currentStepId,
@@ -2107,6 +2125,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           });
           continue;
         }
+        const stepSummary = parseStepSummary(buffer);
         const incompleteReason = forcedVerifyFailureReason(
           planState.currentStepEvidenceCriterion() ?? "",
           stepEvidence,
@@ -2165,9 +2184,31 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
           continue;
         }
+        if (stepSummary?.kind === "invalid") {
+          logStepEvidenceCheck("step_summary_rejected", {
+            reason: stepSummary.reason,
+          });
+          flushBufferToUI();
+          emit({
+            type: "set_assistant_content",
+            text: stripPlanArtifacts(buffer),
+          });
+          baseMessages.push({ role: "assistant", content: buffer });
+          pushHarnessPrompt(
+            "summary correction",
+            buildStepSummaryCorrectionPrompt(stepSummary.reason),
+          );
+          emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+          continue;
+        }
         flushBufferToUI();
-        replaceBodyStripped();
-        baseMessages.push({ role: "assistant", content: buffer });
+        if (stepSummary?.kind === "summary") {
+          emit({ type: "set_assistant_content", text: stepSummary.text });
+          baseMessages.push({ role: "assistant", content: stepSummary.text });
+        } else {
+          replaceBodyStripped();
+          baseMessages.push({ role: "assistant", content: buffer });
+        }
         logStepEvidenceCheck("finish_step_body_no_forced_failure");
         planState.finishStepBody();
         drainPlanEvents();

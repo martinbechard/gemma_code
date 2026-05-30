@@ -45,8 +45,13 @@ describe("PlanExecutionState — single step happy path", () => {
     expect(p1?.text).toContain(
       "If this requires changing files, emit a file-changing <action> tag and receive a successful tool result before summarizing.",
     );
-    expect(p1?.text).toContain("reply exactly BLOCKED:");
-    expect(p1?.text).toContain("Summarize the work that was done.");
+    expect(p1?.text).toContain(
+      "Write a <summary> of no more than 3 lines describing the work that was done.",
+    );
+    expect(p1?.text).toContain('reply with <error reason="');
+    expect(p1!.text.indexOf("Write a <summary>")).toBeLessThan(
+      p1!.text.indexOf("reply with <error"),
+    );
 
     s.finishStepBody();
 

@@ -4,6 +4,7 @@
 // for the renderer and drained by the caller.
 
 import type { ParsedPlan, VerifyResult } from "./parser";
+import { MAX_STEP_SUMMARY_LINES } from "./evidence";
 
 export type PlanEvent =
   | {
@@ -89,9 +90,9 @@ export class PlanExecutionState {
         : step.prompt;
       const instructions = [
         "Use <action> tags to invoke tools to do file operations and other external work.",
-        "If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply exactly BLOCKED: followed by one short reason, then stop.",
         "If this requires changing files, emit a file-changing <action> tag and receive a successful tool result before summarizing.",
-        "Summarize the work that was done.",
+        `Write a <summary> of no more than ${MAX_STEP_SUMMARY_LINES} lines describing the work that was done.`,
+        'If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply with <error reason="short reason"/> and stop.',
       ];
       const text = `${body}\n\n${instructions.join("\n")}`;
       return { kind: "step", stepId: f.currentStepNodeId!, text };

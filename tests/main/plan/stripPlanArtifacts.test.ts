@@ -40,6 +40,18 @@ describe("stripPlanArtifacts", () => {
     expect(stripPlanArtifacts(input)).toBe("pre  post");
   });
 
+  it("unwraps summary tags and removes error tags", () => {
+    expect(stripPlanArtifacts("<summary>read files\nran tests</summary>")).toBe(
+      "read files\nran tests",
+    );
+    expect(stripPlanArtifacts('before <error reason="missing output"/> after')).toBe(
+      "before  after",
+    );
+    expect(stripPlanArtifacts("before <error>missing output</error> after")).toBe(
+      "before  after",
+    );
+  });
+
   it("leaves malformed plan YAML in place", () => {
     const input = "narrative\nplan:\n  steps:\n    - name:";
     expect(stripPlanArtifacts(input)).toBe(input);

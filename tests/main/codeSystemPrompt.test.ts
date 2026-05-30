@@ -72,7 +72,8 @@ describe("codeSystemPrompt", () => {
     expect(executePrompt).toContain("Use write_file for file changes");
     expect(executePrompt).toContain("Do not invent tool results");
     expect(executePrompt).toContain("A visible tool result that begins with [ok] is usable output");
-    expect(executePrompt).toContain("reply exactly BLOCKED:");
+    expect(executePrompt).toContain('reply exactly with <error reason="short reason"/>');
+    expect(executePrompt).toContain("no more than 3 non-empty lines");
     expect(executePrompt).toContain("Do not write waiting prose");
     expect(executePrompt).toContain("list_files returns the workspace tree");
     expect(executePrompt).toContain("search_files searches file contents");

@@ -39,6 +39,7 @@ import {
 } from "../main/plan/assembly";
 import {
   buildIncompleteStepPrompt,
+  buildStepSummaryCorrectionPrompt,
   createPlanStepEvidence,
   forcedVerifyFailureReason,
   hasGuardedAlreadyPresentEvidence,
@@ -48,6 +49,7 @@ import {
   isMalformedActionSelfReport,
   isRecoverableEditFailureResult,
   parseBlockedReason,
+  parseStepSummary,
   recordPlanToolEvidence,
   repeatedActionForcedFailureReason,
 } from "../main/plan/evidence";
@@ -72,7 +74,7 @@ const CODE_PLAN_NUDGE =
 const PLAN_ONLY_CONTINUE_NUDGE =
   "Continue in plan-only mode. Emit exactly one YAML plan step when another executable instruction is needed. Do not write files, do not emit verify tags, and do not stop with plain prose until the plan has enough concrete steps.";
 const INCOMPLETE_ACTION_NUDGE =
-  "Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly BLOCKED: followed by one short reason. Do not emit a verify tag about the malformed response.";
+  'Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly with <error reason="short reason"/>. Do not emit a verify tag about the malformed response.';
 const MAX_PLAN_ONLY_NUDGES = 3;
 const MAX_CODE_NO_PROGRESS_NUDGES = 3;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
@@ -197,7 +199,7 @@ export function buildRepeatedActionPrompt(
   return [
     `You repeated the same ${actionName} action ${repeatedActionCount} times.`,
     "Use the existing tool result already provided in this conversation and move to the next distinct action.",
-    "If the required tool result is not visible or is not usable, reply exactly BLOCKED: followed by one short reason.",
+    'If the required tool result is not visible or is not usable, reply exactly with <error reason="short reason"/>.',
     "Do not assume hidden output, wait silently, or continue from guessed file information.",
     "Do not emit a YAML plan while recovering from a repeated action.",
     `Do not call ${actionName} with the same parameters again.`,
@@ -267,7 +269,7 @@ export function buildPrematureVerifyPrompt(reason: string | null): string {
     "You emitted a verify tag while executing a step body.",
     "Only emit verify tags after I send a Verify request.",
     reasonLine,
-    "Continue the current step now with the next required action tag. If you cannot proceed, reply exactly BLOCKED: followed by one short reason.",
+    'Continue the current step now with the next required action tag. If you cannot proceed, reply exactly with <error reason="short reason"/>.',
   ].join("\n");
 }
 
@@ -1056,7 +1058,7 @@ async function runAgentLoop(
           pushHarnessPrompt(
             messages,
             "nested plan rejection",
-            "You emitted a YAML plan while inside an active plan step. That is not allowed and the plan was discarded. Do the work for the current step directly using <action> tags, or write a brief plain-text summary if no tools are needed. If the step is too large, do what you can and let verify fail with a reason describing what's left.",
+            'You emitted a YAML plan while inside an active plan step. That is not allowed and the plan was discarded. Do the work for the current step directly using <action> tags, or write a <summary> of no more than 3 lines if no tools are needed. If you cannot proceed, reply with <error reason="short reason"/>.',
           );
         } else {
           if (!planAssemblyState) {
@@ -1238,7 +1240,10 @@ async function runAgentLoop(
       }
       const blockedReason = parseBlockedReason(buffer);
       if (blockedReason) {
-        messages.push({ role: "assistant", content: buffer });
+        messages.push({
+          role: "assistant",
+          content: `BLOCKED: ${blockedReason}`,
+        });
         meta(`step attempt blocked: ${blockedReason}`);
         const outcome = planState.failCurrentStepAttempt(
           `blocked: ${blockedReason}`,
@@ -1260,6 +1265,7 @@ async function runAgentLoop(
         awaitingVerify = next.kind === "verify";
         continue;
       }
+      const stepSummary = parseStepSummary(buffer);
       const incompleteReason = forcedVerifyFailureReason(
         planState.currentStepEvidenceCriterion() ?? "",
         stepEvidence,
@@ -1273,7 +1279,19 @@ async function runAgentLoop(
         );
         continue;
       }
-      messages.push({ role: "assistant", content: buffer });
+      if (stepSummary?.kind === "invalid") {
+        messages.push({ role: "assistant", content: buffer });
+        pushHarnessPrompt(
+          messages,
+          "summary correction",
+          buildStepSummaryCorrectionPrompt(stepSummary.reason),
+        );
+        continue;
+      }
+      messages.push({
+        role: "assistant",
+        content: stepSummary?.kind === "summary" ? stepSummary.text : buffer,
+      });
       planState.finishStepBody();
       logPlanEvents();
       if (planState.state !== "running") {
