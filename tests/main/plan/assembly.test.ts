@@ -393,6 +393,58 @@ describe("semantic plan review", () => {
     });
   });
 
+  it("accepts semantic review free-text fields containing colons", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const plan = finalizePlanAssembly(first.state);
+    if (!plan) throw new Error("expected plan");
+
+    const colonReview = compactPassingReview.replace(
+      "additional_info: Names files and commands.",
+      "additional_info: The steps are concrete: read the file, then report the name found.",
+    );
+
+    const result = applyPlanSemanticReviewResponse(plan, colonReview);
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.review.checklist[2].additionalInfo).toBe(
+      "The steps are concrete: read the file, then report the name found.",
+    );
+  });
+
+  it("accepts fenced semantic review YAML with colons in free-text fields", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const plan = finalizePlanAssembly(first.state);
+    if (!plan) throw new Error("expected plan");
+
+    const fencedReview = [
+      "```yaml",
+      compactPassingReview.replace(
+        "additional_info: Names files and commands.",
+        "additional_info: The steps are concrete: read the file, then report the name found.",
+      ),
+      "```",
+    ].join("\n");
+
+    const result = applyPlanSemanticReviewResponse(plan, fencedReview);
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.review.checklist[2].additionalInfo).toBe(
+      "The steps are concrete: read the file, then report the name found.",
+    );
+  });
+
   it("accepts a complete corrected plan from semantic review", () => {
     const first = applyPlanAssemblyResponse(
       createPlanAssemblyState(),

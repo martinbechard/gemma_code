@@ -18,6 +18,8 @@ const PLAN_SEMANTIC_REVIEW_VERDICTS: readonly PlanReviewVerdict[] = [
   PLAN_SEMANTIC_REVIEW_VERDICT_PASS,
   PLAN_SEMANTIC_REVIEW_VERDICT_NEEDS_CORRECTION,
 ];
+const SEMANTIC_REVIEW_FREE_TEXT_FIELD_RE =
+  /^(\s*(?:summary|additional_info):\s+)(.+)$/;
 
 interface PlanSemanticReviewChecklistPromptItem {
   id: string;
@@ -358,7 +360,7 @@ function parseStructuredPlanSemanticReviewResponse(
   const text = normalizeWholeResponseYaml(response);
   let doc: unknown;
   try {
-    doc = parse(text);
+    doc = parseSemanticReviewYaml(text);
   } catch {
     return {
       kind: "rejected",
@@ -499,6 +501,32 @@ function parsePlanReviewChecklist(
   }
 
   return checklist;
+}
+
+function parseSemanticReviewYaml(text: string): unknown {
+  try {
+    return parse(text);
+  } catch (error) {
+    return parse(quoteSemanticReviewFreeTextScalars(text));
+  }
+}
+
+function quoteSemanticReviewFreeTextScalars(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(SEMANTIC_REVIEW_FREE_TEXT_FIELD_RE);
+      if (!match) return line;
+      const value = match[2].trim();
+      if (!shouldQuoteSemanticReviewTextValue(value)) return line;
+      return match[1] + JSON.stringify(value);
+    })
+    .join("\n");
+}
+
+function shouldQuoteSemanticReviewTextValue(value: string): boolean {
+  if (value.length === 0) return false;
+  return !/^(?:"|'|\||>|\{|\[|&|\*)/.test(value);
 }
 
 function findCorrectedPlan(
