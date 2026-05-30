@@ -7,7 +7,7 @@ import {
   rmSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { setRuntimePaths } from "../../src/main/runtimePaths";
 import {
   createExecutionLogger,
@@ -38,7 +38,9 @@ describe("executionLog", () => {
     log("tool_call", { id: "call-1", name: "write_file" });
     log("tool_result", { id: "call-1", result: "Wrote src/main/tools.ts" });
 
-    const lines = readFileSync(executionLogPath(), "utf8").trim().split("\n");
+    const path = executionLogPath();
+    expect(basename(path)).toMatch(/^execution-log-.*-c1\.jsonl$/);
+    const lines = readFileSync(path, "utf8").trim().split("\n");
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0])).toMatchObject({
       conversationId: "c1",
@@ -63,6 +65,31 @@ describe("executionLog", () => {
     log("tool_call", { id: "call-1" });
 
     expect(existsSync(executionLogPath())).toBe(false);
+  });
+
+  it("creates a separate log file for each enabled execution", () => {
+    const first = createExecutionLogger(true, {
+      conversationId: "first-conversation",
+      mode: "code",
+      model: "gemma-test",
+    });
+    const firstPath = executionLogPath();
+    first("session_start", { id: 1 });
+
+    const second = createExecutionLogger(true, {
+      conversationId: "second-conversation",
+      mode: "code",
+      model: "gemma-test",
+    });
+    const secondPath = executionLogPath();
+    second("session_start", { id: 2 });
+
+    expect(secondPath).not.toBe(firstPath);
+    expect(basename(firstPath)).toContain("first-conversation");
+    expect(basename(secondPath)).toContain("second-conversation");
+    expect(readFileSync(firstPath, "utf8")).toContain('"id":1');
+    expect(readFileSync(firstPath, "utf8")).not.toContain('"id":2');
+    expect(readFileSync(secondPath, "utf8")).toContain('"id":2');
   });
 
   it("creates an empty execution log file for opening", () => {

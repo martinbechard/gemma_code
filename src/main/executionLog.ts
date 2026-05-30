@@ -1,9 +1,19 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "fs";
 import { join } from "path";
 import type { ExecutionLogEntry, ExecutionLogSnapshot } from "../shared/types";
 import { userDataDir } from "./runtimePaths";
 
 const EXECUTION_LOG_VIEW_MAX_LINES = 800;
+const EXECUTION_LOG_PREFIX = "execution-log";
+const EXECUTION_LOG_EXTENSION = ".jsonl";
+const LEGACY_EXECUTION_LOG_FILE = "execution-log.jsonl";
 
 export interface ExecutionLogMeta {
   conversationId: string;
@@ -13,14 +23,78 @@ export interface ExecutionLogMeta {
 
 export type ExecutionLogger = (event: string, data: unknown) => void;
 
+let activeExecutionLogPath: string | null = null;
+let executionLogSequence = 0;
+
+function executionLogDir(): string {
+  return join(userDataDir(), "debug");
+}
+
+function ensureExecutionLogDir(): string {
+  const dir = executionLogDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function safePathSegment(value: string): string {
+  const cleaned = value
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned.length > 0 ? cleaned.slice(0, 80) : "execution";
+}
+
+function timestampSegment(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, "-");
+}
+
+function latestExecutionLogPath(): string | null {
+  const dir = executionLogDir();
+  if (!existsSync(dir)) return null;
+  const candidates = readdirSync(dir)
+    .filter(
+      (name) =>
+        name.startsWith(`${EXECUTION_LOG_PREFIX}-`) &&
+        name.endsWith(EXECUTION_LOG_EXTENSION),
+    )
+    .map((name) => {
+      const path = join(dir, name);
+      return { path, mtimeMs: statSync(path).mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return candidates[0]?.path ?? null;
+}
+
+function createExecutionLogFile(meta: ExecutionLogMeta): string {
+  const dir = ensureExecutionLogDir();
+  executionLogSequence += 1;
+  const path = join(
+    dir,
+    [
+      EXECUTION_LOG_PREFIX,
+      timestampSegment(new Date()),
+      String(executionLogSequence).padStart(4, "0"),
+      safePathSegment(meta.conversationId),
+    ].join("-") + EXECUTION_LOG_EXTENSION,
+  );
+  appendFileSync(path, "", "utf8");
+  activeExecutionLogPath = path;
+  return path;
+}
+
 export function executionLogPath(): string {
-  return join(userDataDir(), "debug", "execution-log.jsonl");
+  if (activeExecutionLogPath && !existsSync(activeExecutionLogPath)) {
+    activeExecutionLogPath = null;
+  }
+  return (
+    activeExecutionLogPath ??
+    latestExecutionLogPath() ??
+    join(executionLogDir(), LEGACY_EXECUTION_LOG_FILE)
+  );
 }
 
 export function ensureExecutionLogFile(): string {
   const path = executionLogPath();
-  const dir = join(userDataDir(), "debug");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  ensureExecutionLogDir();
   appendFileSync(path, "", "utf8");
   return path;
 }
@@ -30,10 +104,9 @@ export function createExecutionLogger(
   meta: ExecutionLogMeta,
 ): ExecutionLogger {
   if (!enabled) return () => undefined;
+  const path = createExecutionLogFile(meta);
   return (event: string, data: unknown): void => {
-    const path = executionLogPath();
-    const dir = join(userDataDir(), "debug");
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    ensureExecutionLogDir();
     const record = {
       timestamp: new Date().toISOString(),
       conversationId: meta.conversationId,
