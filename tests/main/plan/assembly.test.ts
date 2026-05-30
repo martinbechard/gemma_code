@@ -3,6 +3,7 @@ import {
   PLAN_ASSEMBLY_DONE_TEXT,
   PLAN_ASSEMBLY_NEXT_PROMPT,
   PLAN_SEMANTIC_REVIEW_SYSTEM_PROMPT,
+  applyPlanCorrectionResponse,
   applyPlanAssemblyResponse,
   applyPlanSemanticReviewResponse,
   buildPlanAssemblyInitialPrompt,
@@ -11,6 +12,7 @@ import {
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
+  parsePlanQuestion,
 } from "../../../src/main/plan/assembly";
 import { validatePlanForExecution } from "../../../src/main/plan/validation";
 
@@ -142,13 +144,16 @@ describe("iterative plan assembly", () => {
       "<UserRequest>add keyboard shortcuts to the composer.</UserRequest>",
     );
     expect(prompt).toContain(
-      "Resolve the files and artifacts to change during planning",
+      "Prepare a plan for another AI coding agent",
     );
     expect(prompt).toContain(
-      "do not add later execution steps whose only purpose is to locate, determine, or identify where changes should happen",
+      "Use one read-only inspection action first if project evidence is missing.",
     );
     expect(prompt).toContain(
-      "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
+      "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
+    );
+    expect(prompt).toContain(
+      "Respond with exactly one of: one read-only inspection action, one YAML plan step",
     );
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
@@ -172,11 +177,49 @@ describe("iterative plan assembly", () => {
     ]);
     expect(result.nextPrompt).toContain(PLAN_ASSEMBLY_NEXT_PROMPT);
     expect(result.nextPrompt).toContain(
-      "Do not add a step whose only purpose is to locate, determine, or identify where changes should happen",
+      "Do not pass target discovery to the coding agent",
     );
+    expect(result.nextPrompt).toContain("one read-only inspection action");
+    expect(result.nextPrompt).toContain("plan: done");
     expect(result.nextPrompt).not.toMatch(/\bhost\b/i);
     expect(result.nextPrompt).not.toContain("tests/main");
     expect(result.nextPrompt).not.toContain("get_current");
+  });
+
+  it("parses focused planning questions", () => {
+    expect(parsePlanQuestion("<Question>Which file should own this?</Question>")).toBe(
+      "Which file should own this?",
+    );
+    expect(parsePlanQuestion("Which file should own this?")).toBeNull();
+    expect(parsePlanQuestion("<Question> </Question>")).toBeNull();
+  });
+
+  it("accepts a complete corrected plan after validation failure", () => {
+    const result = applyPlanCorrectionResponse(correctedPlan);
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.plan.steps.map((step) => step.name)).toEqual([
+      "inspect_renderer",
+      "test_renderer",
+    ]);
+  });
+
+  it("rejects invalid corrected plans with a retry prompt", () => {
+    const result = applyPlanCorrectionResponse(
+      [
+        "plan:",
+        "  steps:",
+        "    - name: vague",
+        "      prompt: Update the relevant files.",
+        "      verify: The relevant tests pass.",
+      ].join("\n"),
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.retryPrompt).toContain("complete corrected YAML plan");
+    expect(result.retryPrompt).toContain("Return no prose.");
   });
 
   it("assembles accepted steps when the model returns plan done", () => {

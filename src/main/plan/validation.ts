@@ -120,14 +120,16 @@ export function buildExecutablePlanValidationPrompt(reason: string): string {
   return [
     "The assembled plan is not executable yet: " + reason,
     "",
+    "Return one complete corrected YAML plan for the AI coding agent.",
+    "Do not return one extra patch step; the defect may be in an already accepted step.",
+    "Do not use tools.",
+    "",
     "Executable-plan validation gates:",
     ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
     "",
-    "Do not use tools. Return exactly one additional well-formed YAML plan step that is directly executable by the coding agent.",
-    "Do not describe rewriting, correcting, reporting, or ensuring a previous step.",
-    "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
-    "The new step's prompt and verify fields must contain exact task-specific files, artifacts, commands, or verification evidence.",
-    "Do not return plan: done; the assembled plan did not pass validation yet.",
+    "The corrected YAML plan must have top-level plan.steps, and every step must have string name, prompt, and verify fields.",
+    "Every prompt and verify field must contain exact task-specific files, artifacts, commands, or verification evidence.",
+    "Return no prose.",
   ].join("\n");
 }
 

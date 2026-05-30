@@ -1,93 +1,148 @@
 # Planning Prompt Minimal Outline
 
-## Keep In The Prompt
+## System Prompt
 
-- Plan one step at a time.
+- State that the task is to prepare a plan for another AI coding assistant, and the plan must contain all information that assistant needs.
   - KEEP
-  - The prompt should say to emit one plan step per response, or plan: done when complete.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may emit a full plan, prose, or multiple steps that the harness will not treat as the next planning fragment.
+  - WHY DOES THE LLM NEED TO KNOW? Without this, it may answer directly or omit details because it does not understand that another assistant will rely on the plan.
 
-- Allow read-only inspection during planning.
+- Allow read-only inspection while preparing the plan.
   - KEEP
-  - The prompt should allow listing, searching, reading files, and safe read-only commands before writing a plan step.
   - WHY DOES THE LLM NEED TO KNOW? Without this, it may guess file names or avoid the inspection needed to produce a grounded plan.
 
-- Forbid mutation during planning.
+- Forbid mutation while preparing the plan.
   - KEEP
-  - The prompt should forbid editing, writing, creating, deleting, and mutating shell commands.
   - WHY DOES THE LLM NEED TO KNOW? Without this, it may start implementing before the user has approved the plan.
 
-- Mention execution context reset.
+- Require concrete implementation instructions after inspection.
   - KEEP
-  - The prompt should say execution starts from the approved plan, not the full planning chat.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may rely on planning-chat details that the execution model will not see.
+  - WHY DOES THE LLM NEED TO KNOW? Without this, it may write vague instructions that another assistant cannot carry out reliably.
 
-- Require exact target files after inspection.
+- Forbid passing target discovery to the coding assistant.
   - KEEP
-  - The prompt should say mutation steps must name exact files or artifacts.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may write vague mutation steps that cannot be executed reliably in a fresh context.
+  - WHY DOES THE LLM NEED TO KNOW? Without this, it may defer locating files and symbols instead of producing a ready-to-run plan.
 
-- Forbid locator-only execution steps.
+- Require verification selected from the request and project rules.
   - KEEP
-  - The prompt should say not to add execution steps whose only purpose is locate, determine, or identify targets.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may spend approved execution turns rediscovering what planning should already have resolved.
-
-- Require executable verification.
-  - KEEP
-  - The prompt should say include only verification needed by the request and project rules.
   - WHY DOES THE LLM NEED TO KNOW? Without this, it may omit proof of completion or add excessive verification that does not fit the request.
-
-- Forbid filler steps.
-  - KEEP
-  - The prompt should forbid report, summarize, conclude, cleanup, final-check, and repeated verification steps.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may add non-work steps that look orderly but do not advance the task.
 
 - Forbid placeholders.
   - KEEP
-  - The prompt should reject placeholder names and wording such as relevant files, needed files, and example file names.
   - WHY DOES THE LLM NEED TO KNOW? Without this, it may mask uncertainty with generic wording instead of inspecting or asking.
 
-- Define the YAML shape.
+- Allow a focused question only when inspection cannot resolve ambiguity.
   - KEEP
-  - The prompt should define plan.steps with one item containing name, prompt, and verify.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may produce valid-looking text that cannot be parsed into an executable step.
-
-- Define the done signal.
-  - KEEP
-  - The prompt should show plan: done.
-  - WHY DOES THE LLM NEED TO KNOW? Without this, it may keep inventing steps after the plan is already complete.
-
-- Ask a clarifying question only when inspection cannot resolve ambiguity.
-  - KEEP
-  - The prompt should allow one focused question when file set or behavior remains ambiguous.
   - WHY DOES THE LLM NEED TO KNOW? Without this, it may fabricate intent or target files when inspection cannot answer the question.
+
+## Initial Prompt
+
+- Include the user request.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? Without the request in the current prompt, it may optimize the plan for generic coding work instead of the actual task.
+
+- End with the allowed response choices.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? Without explicit choices at the response point, it may mix inspection, YAML, and prose in one response.
+
+- Allowed response choices for the first prompt:
+  - one read-only inspection action
+  - one YAML plan step
+  - one focused question wrapped in a question tag
+  - WHY DOES THE LLM NEED TO KNOW? The first response may need evidence, a plan step, or clarification; these choices prevent accidental implementation or rambling.
+
+- First prompt response shapes:
+
+```xml
+<action name="read_only_tool_name">
+<param_name>value</param_name>
+</action>
+```
+
+```yaml
+plan:
+  steps:
+    - name: short_step_name
+      prompt: Direct instruction for the coding assistant.
+      verify: Observable condition that proves the step is complete.
+```
+
+```xml
+<Question>One focused question.</Question>
+```
+
+## Next-Step Prompt
+
+- Repeat the allowed response choices at the end of every next-step prompt.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? The one-step rule is turn-local; repeating it where the response is requested is clearer than relying on earlier context.
+
+- Include a compact summary of accepted step names.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? Without this, it may repeat a step or fail to know whether the plan is complete.
+
+- Allowed response choices for a next-step prompt:
+  - one read-only inspection action if more evidence is needed
+  - one YAML plan step
+  - plan done
+  - one focused question wrapped in a question tag
+  - WHY DOES THE LLM NEED TO KNOW? Later planning turns still need the same response discipline, plus the option to stop.
+
+- Next-step response shapes:
+
+```xml
+<action name="read_only_tool_name">
+<param_name>value</param_name>
+</action>
+```
+
+```yaml
+plan: done
+```
+
+The YAML plan-step shape and question shape are the same as in the first prompt.
+
+## Validation-Failure Prompt
+
+- Include the validation failure reason.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? Without the exact failure, it cannot repair the plan defect that blocked acceptance.
+
+- Ask for a complete corrected plan, not an extra patch step.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? Some failures are in an existing step, so adding one more step may preserve the bad plan.
+
+- Validation-failure response shape:
+
+```yaml
+plan:
+  steps:
+    - name: corrected_step_name
+      prompt: Direct instruction for the coding assistant.
+      verify: Observable condition that proves the step is complete.
+```
 
 ## Remove From The Prompt
 
 - Semantic review protocol.
   - REMOVE
-  - This includes review context, OriginalRequest blocks, checklist enums, and corrected plan schema.
-  - WHY REMOVE: It teaches the LLM about a later harness phase instead of helping it decide the next planning action.
+  - WHY REMOVE: It teaches the planner about review plumbing instead of helping it decide the next planning instruction.
 
 - Deterministic validator internals.
   - REMOVE
-  - This includes shape-only validation details and duplicate-name validation details.
-  - WHY REMOVE: It distracts the LLM with implementation details; the useful part is the required output shape.
+  - WHY REMOVE: It distracts the planner with implementation details; the useful part is the required response shape.
 
 - No-action-tags rule as currently written.
   - REMOVE
-  - The current wording forbids the inspection we want planning to perform.
-  - WHY REMOVE: It would stop the LLM from gathering the evidence needed to plan correctly.
+  - WHY REMOVE: It would stop the planner from gathering the evidence needed to plan correctly.
 
 - Broad checklist of docs, focused verification, full suite, and build.
   - REMOVE
-  - Replace it with required verification only.
-  - WHY REMOVE: It pushes the LLM to add boilerplate checks instead of choosing verification from the actual request.
+  - WHY REMOVE: It pushes the planner to add boilerplate checks instead of choosing verification from the actual request.
 
-- Execution-mode warning not to emit YAML while executing a step.
+- Warnings for the later coding assistant.
   - REMOVE
-  - WHY REMOVE: It describes a mode the LLM is not currently in, so it adds noise to planning.
+  - WHY REMOVE: The planner only needs to know how to prepare instructions; warnings for the assistant doing the work belong elsewhere.
 
 - Specific example paths from one task.
   - REMOVE
-  - WHY REMOVE: They can cause the LLM to copy irrelevant paths instead of inspecting the current request.
+  - WHY REMOVE: They can cause the planner to copy irrelevant paths instead of inspecting the current request.

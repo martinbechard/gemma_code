@@ -137,8 +137,9 @@ describe("buildCodeNoProgressPrompt", () => {
       createPlanInspectionEvidence(),
     );
 
-    expect(prompt).toContain("Continue in planning mode");
-    expect(prompt).toContain("emit exactly one YAML plan step");
+    expect(prompt).toContain("Continue preparing the plan");
+    expect(prompt).toContain("one read-only inspection action");
+    expect(prompt).toContain("<Question>...</Question>");
     expect(prompt).not.toContain("src/main/tools.ts");
     expect(prompt).not.toContain("tests/main");
   });
@@ -189,14 +190,16 @@ describe("hasSatisfiedReadOnlyStepEvidence", () => {
 });
 
 describe("buildPlanAmendmentPrompt", () => {
-  it("asks for one additional YAML plan step without more tools", () => {
+  it("asks for one complete corrected YAML plan without more tools", () => {
     const prompt = buildPlanAmendmentPrompt(
       "Plan has no executable steps.",
     );
 
     expect(prompt).toContain("Do not use tools");
-    expect(prompt).toContain("one additional well-formed YAML plan step");
-    expect(prompt).toContain("name, prompt, and verify");
+    expect(prompt).toContain("one complete corrected YAML plan");
+    expect(prompt).toContain("Do not return one extra patch step");
+    expect(prompt).toContain("top-level plan.steps");
+    expect(prompt).toContain("Return no prose");
   });
 
   it("includes generic deterministic validation guidance", () => {

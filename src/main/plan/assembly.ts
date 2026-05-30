@@ -12,6 +12,8 @@ const WHOLE_RESPONSE_YAML_FENCE_RE =
   /^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
+const PLAN_QUESTION_RE =
+  /^\s*<Question\b[^>]*>([\s\S]*?)<\/Question\s*>\s*$/i;
 const PLAN_SEMANTIC_REVIEW_VERDICT_PASS = "pass";
 const PLAN_SEMANTIC_REVIEW_VERDICT_NEEDS_CORRECTION = "needs_correction";
 const PLAN_SEMANTIC_REVIEW_VERDICTS: readonly PlanReviewVerdict[] = [
@@ -84,14 +86,13 @@ const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
 const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "Our task is to create clear, executable instructions for an AI coding agent.";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
-  "What should I tell the AI coding agent first? YAML only, no extra explanations, just the prompt.";
+  "Respond with exactly one of: one read-only inspection action, one YAML plan step, or one focused question wrapped in <Question>...</Question>.";
 
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
-  "What should I tell the agent next? Continue the same plan with exactly one additional YAML step.",
+  "Continue preparing the plan for the AI coding agent.",
+  "Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.",
   "Return plan: done only when the accepted steps form a complete executable plan for the user request.",
-  "Do not return plan: done if grounding, implementation, testing, documentation, or verification work is still needed for this specific request.",
-  "Do not add a step whose only purpose is to locate, determine, or identify where changes should happen; resolve target files during planning, and make mutation steps name exact files or artifacts.",
-  "YAML only, no extra explanations.",
+  "Do not pass target discovery to the coding agent; mutation steps must name exact files or artifacts.",
 ].join("\n");
 
 export interface PlanAssemblyState {
@@ -133,6 +134,17 @@ export type PlanSemanticReviewResult =
       retryPrompt: string;
     };
 
+export type PlanCorrectionResult =
+  | {
+      kind: "accepted";
+      plan: ParsedPlan;
+    }
+  | {
+      kind: "rejected";
+      reason: string;
+      retryPrompt: string;
+    };
+
 export interface PlanSemanticReviewMessage {
   role: "system" | "user";
   content: string;
@@ -162,10 +174,10 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
       taskSentence +
       PLAN_ASSEMBLY_USER_REQUEST_CLOSE,
     "",
-    "Build the plan one step at a time. I will accumulate the steps that you produce and save the final plan file after review.",
-    "Choose exact files, tests, commands, and documentation steps from the request and project evidence; I will not provide request-specific paths or commands.",
-    "Resolve the files and artifacts to change during planning. Grounding steps may search or read exact paths, exact symbols, or exact directories, but do not add later execution steps whose only purpose is to locate, determine, or identify where changes should happen.",
-    "Mutation steps must name the exact files or artifacts they will change, create, or delete.",
+    "Prepare a plan for another AI coding agent; include all information that agent needs.",
+    "Use one read-only inspection action first if project evidence is missing.",
+    "When enough evidence is visible, emit exactly one YAML plan step.",
+    "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     "",
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
   ].join("\n");
@@ -340,6 +352,25 @@ export function applyPlanSemanticReviewResponse(
     plan: structuredReview.plan,
     review: structuredReview.review,
   };
+}
+
+export function applyPlanCorrectionResponse(
+  response: string,
+): PlanCorrectionResult {
+  const parsed = findNextPlan(response);
+  if (parsed === "incomplete") {
+    return planCorrectionRejected("The corrected plan contains incomplete YAML.");
+  }
+  if (!parsed || parsed.steps.length === 0) {
+    return planCorrectionRejected(
+      "The response must contain one complete corrected top-level plan.",
+    );
+  }
+  const planShapeReason = validateRawPlanDocumentShape(parsed.raw);
+  if (planShapeReason) return planCorrectionRejected(planShapeReason);
+  const validation = validatePlanForExecution(parsed);
+  if (!validation.valid) return planCorrectionRejected(validation.reason);
+  return { kind: "accepted", plan: parsed };
 }
 
 type StructuredPlanSemanticReviewResult =
@@ -590,6 +621,13 @@ export function isPlanAssemblyDoneResponse(response: string): boolean {
   return keys.length === 1 && doc.plan === "done";
 }
 
+export function parsePlanQuestion(response: string): string | null {
+  const match = PLAN_QUESTION_RE.exec(response.trim());
+  if (!match) return null;
+  const question = match[1].trim();
+  return question.length > 0 ? question : null;
+}
+
 export function finalizePlanAssembly(
   state: PlanAssemblyState,
 ): ParsedPlan | null {
@@ -706,6 +744,20 @@ function semanticReviewRejected(reason: string): PlanSemanticReviewResult {
       "If verdict is pass, do not include a plan key.",
       "If verdict is needs_correction, include one complete corrected top-level plan key named plan after review, with all steps.",
       "Do not use corrected_plan, correctedPlan, or review.corrected_plan.",
+      "Return no prose.",
+    ].join("\n"),
+  };
+}
+
+function planCorrectionRejected(reason: string): PlanCorrectionResult {
+  return {
+    kind: "rejected",
+    reason,
+    retryPrompt: [
+      "The corrected plan response was rejected: " + reason,
+      "Return one complete corrected YAML plan with top-level plan.steps.",
+      "Every step must have string name, prompt, and verify fields.",
+      "Use exact task-specific files, artifacts, commands, and verification evidence.",
       "Return no prose.",
     ].join("\n"),
   };

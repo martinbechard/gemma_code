@@ -31,12 +31,14 @@ import {
   validatePlanForExecution,
 } from "../main/plan/validation";
 import {
+  applyPlanCorrectionResponse,
   applyPlanAssemblyResponse,
   buildPlanAssemblyInitialPrompt,
   applyPlanSemanticReviewResponse,
   buildPlanSemanticReviewMessages,
   createPlanAssemblyState,
   isPlanAssemblyDoneResponse,
+  parsePlanQuestion,
   type PlanAssemblyState,
 } from "../main/plan/assembly";
 import {
@@ -62,8 +64,10 @@ import {
 } from "./conversation";
 import { appendToolResultMessage } from "../main/chatHistory";
 import {
+  buildPlanInspectionToolBlockMessage,
   buildReadOnlyRequestToolBlockMessage,
   isFileMutationToolName,
+  isPlanInspectionToolAction,
   requestForbidsFileMutation,
 } from "../main/plan/requestPolicy";
 
@@ -78,9 +82,9 @@ const MAX_NESTED_PLAN_REJECTIONS = 3;
 const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
 const MAX_PLAN_SEMANTIC_REVIEW_RETRIES = 4;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
+  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.";
 const PLAN_ONLY_CONTINUE_NUDGE =
-  "Continue in plan-only mode. Emit exactly one YAML plan step when another executable instruction is needed. Do not write files, do not emit verify tags, and do not stop with plain prose until the plan has enough concrete steps.";
+  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.";
 const INCOMPLETE_ACTION_NUDGE =
   'Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly with <error reason="short reason"/>. Do not emit a verify tag about the malformed response.';
 const MAX_PLAN_ONLY_NUDGES = 3;
@@ -511,6 +515,7 @@ async function runAgentLoop(
   let planSemanticReviewMessages: MLXChatMessage[] | null = null;
   let planSemanticReviewRetries = 0;
   let planAssemblyValidationRetries = 0;
+  let awaitingPlanCorrection = false;
   let lastActionKey: string | null = null;
   let repeatedActionCount = 0;
   let planOnlyNudges = 0;
@@ -744,6 +749,28 @@ async function runAgentLoop(
         prepareStepEvidence(next);
         pushHarnessPrompt(messages, next.kind, next.text);
         awaitingVerify = next.kind === "verify";
+        continue;
+      }
+
+      if (
+        !planState &&
+        planAssemblyState &&
+        !planSemanticReviewPlan &&
+        !isPlanInspectionToolAction(action.name, action.args)
+      ) {
+        const result = buildPlanInspectionToolBlockMessage(action.name);
+        meta(`tool blocked during planning: ${action.name}`);
+        messages.push({
+          role: "assistant",
+          content: buffer.slice(0, action.end),
+        });
+        appendToolResultMessage(messages, {
+          toolName: action.name,
+          args: action.args,
+          result,
+          hadError: true,
+        });
+        pushHarnessPrompt(messages, "planning inspection policy", result);
         continue;
       }
 
@@ -1074,6 +1101,7 @@ async function runAgentLoop(
       planSemanticReviewRetries = 0;
       planAssemblyState = null;
       planAssemblyValidationRetries = 0;
+      awaitingPlanCorrection = false;
       const handling = await handleAssembledPlan(review.plan);
       if (handling === "retry") continue;
       if (handling === "done") return;
@@ -1087,6 +1115,14 @@ async function runAgentLoop(
       pushHarnessPrompt(messages, next.kind, next.text);
       awaitingVerify = next.kind === "verify";
       continue;
+    }
+
+    const planQuestion =
+      !planState && planAssemblyState ? parsePlanQuestion(buffer) : null;
+    if (planQuestion) {
+      messages.push({ role: "assistant", content: buffer });
+      meta("done — planning question");
+      return;
     }
 
     const planFound = findNextPlan(buffer);
@@ -1117,6 +1153,30 @@ async function runAgentLoop(
           if (!planAssemblyState) {
             meta("done - plan assembly is not active");
             return;
+          }
+          if (awaitingPlanCorrection) {
+            const correction = applyPlanCorrectionResponse(buffer);
+            messages.push({ role: "assistant", content: buffer });
+            if (correction.kind === "rejected") {
+              planAssemblyValidationRetries += 1;
+              if (
+                planAssemblyValidationRetries >=
+                MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+              ) {
+                meta("done - corrected plan failed validation too many times");
+                return;
+              }
+              pushHarnessPrompt(
+                messages,
+                "plan correction retry",
+                correction.retryPrompt,
+              );
+              continue;
+            }
+            awaitingPlanCorrection = false;
+            planAssemblyValidationRetries = 0;
+            startPlanSemanticReview(correction.plan);
+            continue;
           }
           const assembled = applyPlanAssemblyResponse(
             planAssemblyState,
@@ -1160,6 +1220,7 @@ async function runAgentLoop(
                 "plan assembly validation",
                 buildPlanAmendmentPrompt(validation.reason),
               );
+              awaitingPlanCorrection = true;
               continue;
             }
             planAssemblyValidationRetries = 0;

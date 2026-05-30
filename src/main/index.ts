@@ -72,12 +72,14 @@ import {
   validatePlanForExecution,
 } from "./plan/validation";
 import {
+  applyPlanCorrectionResponse,
   applyPlanAssemblyResponse,
   applyPlanSemanticReviewResponse,
   buildPlanAssemblyInitialPrompt,
   buildPlanSemanticReviewMessages,
   createPlanAssemblyState,
   isPlanAssemblyDoneResponse,
+  parsePlanQuestion,
   type PlanAssemblyState,
 } from "./plan/assembly";
 import {
@@ -98,8 +100,10 @@ import {
   summarizePlanStepEvidence,
 } from "./plan/evidence";
 import {
+  buildPlanInspectionToolBlockMessage,
   buildReadOnlyRequestToolBlockMessage,
   isFileMutationToolName,
+  isPlanInspectionToolAction,
   requestForbidsFileMutation,
 } from "./plan/requestPolicy";
 import { killAllBackgroundTasks } from "./backgroundTasks";
@@ -442,11 +446,10 @@ const FAILED_EDIT_PREVIEW_CHARS = 240;
 const INCOMPLETE_ACTION_PREVIEW_CHARS = 240;
 const MODEL_REQUEST_MESSAGE_PREVIEW_CHARS = 320;
 const CODE_PLAN_NUDGE =
-  "Continue in planning mode. Use an action to inspect files if you need more context, or emit exactly one YAML plan step when another executable instruction is needed. Do not write files before the assembled plan is approved.";
+  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.";
 const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
-  "The previous response did not answer the prompt-writing question with a YAML plan fragment.",
-  "Answer in YAML only, with no explanation.",
-  "Return exactly one plan.steps item with name, prompt, and verify string fields.",
+  "The previous response was not one of the allowed planning responses.",
+  "Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.",
 ].join("\n");
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";
@@ -776,6 +779,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     let planSemanticReviewMessages: MLXChatMessage[] | null = null;
     let planSemanticReviewRetries = 0;
     let planAssemblyValidationRetries = 0;
+    let awaitingPlanCorrection = false;
     const lastModelRequestMessageCounts = new Map<string, number>();
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
@@ -1298,7 +1302,24 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               lastActionKey = actionKey;
               repeatedActionCount = 1;
             }
-            if (readOnlyRequest && isFileMutationToolName(found.name)) {
+            if (
+              !planState &&
+              planAssemblyState &&
+              !planSemanticReviewPlan &&
+              !isPlanInspectionToolAction(found.name, found.args)
+            ) {
+              result = buildPlanInspectionToolBlockMessage(found.name);
+              hadError = true;
+              logExecution("tool_result", {
+                id: call.id,
+                tool: found.name,
+                args: found.args,
+                status: "error",
+                output: result,
+                error: result,
+              });
+              emit({ type: "tool_result", id: call.id, error: result });
+            } else if (readOnlyRequest && isFileMutationToolName(found.name)) {
               result = buildReadOnlyRequestToolBlockMessage(found.name);
               hadError = true;
               logExecution("tool_result", {
@@ -1788,6 +1809,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         planSemanticReviewRetries = 0;
         planAssemblyState = null;
         planAssemblyValidationRetries = 0;
+        awaitingPlanCorrection = false;
         emit({ type: "set_assistant_content", text: "" });
         emit({ type: "plan_reviewed", review: review.review });
         savePlan(req.conversationId, review.plan.raw);
@@ -1799,6 +1821,16 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             verify: s.verify,
           })),
         });
+        emit({ type: "activity", activity: { kind: "idle" } });
+        emit({ type: "done" });
+        return;
+      }
+
+      const planQuestion =
+        !planState && planAssemblyState ? parsePlanQuestion(buffer) : null;
+      if (planQuestion) {
+        flushBufferToUI();
+        baseMessages.push({ role: "assistant", content: buffer });
         emit({ type: "activity", activity: { kind: "idle" } });
         emit({ type: "done" });
         return;
@@ -1833,6 +1865,43 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               error: "Plan assembly is not active for this conversation.",
             });
             return;
+          }
+          if (awaitingPlanCorrection) {
+            const correction = applyPlanCorrectionResponse(buffer);
+            if (correction.kind === "rejected") {
+              planAssemblyValidationRetries += 1;
+              if (
+                planAssemblyValidationRetries >=
+                MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES
+              ) {
+                emit({
+                  type: "error",
+                  error: "Corrected plan failed validation too many times.",
+                });
+                emit({ type: "activity", activity: { kind: "idle" } });
+                emit({ type: "done" });
+                return;
+              }
+              baseMessages.push({ role: "assistant", content: buffer });
+              pushPlanningHarnessPrompt(
+                "plan correction retry",
+                correction.retryPrompt,
+              );
+              emit({
+                type: "activity",
+                activity: { kind: "thinking", chars: 0 },
+              });
+              continue;
+            }
+            awaitingPlanCorrection = false;
+            planAssemblyValidationRetries = 0;
+            baseMessages.push({ role: "assistant", content: buffer });
+            startPlanSemanticReview(correction.plan);
+            emit({
+              type: "activity",
+              activity: { kind: "thinking", chars: 0 },
+            });
+            continue;
           }
           const assembled = applyPlanAssemblyResponse(
             planAssemblyState,
@@ -1893,6 +1962,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             const validationPrompt = buildPlanValidationPrompt(
               validation.reason,
             );
+            awaitingPlanCorrection = true;
             baseMessages.push({ role: "assistant", content: buffer });
             pushPlanningHarnessPrompt("plan assembly validation", validationPrompt);
             emit({

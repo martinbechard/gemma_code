@@ -54,8 +54,20 @@ export const TOOLS: Record<string, ToolSpec> = {
   open_preview: openPreviewTool,
 };
 
-function renderToolHelp(mode: "chat" | "code"): string {
+const PLAN_INSPECTION_TOOL_NAMES = new Set([
+  "web_search",
+  "fetch_url",
+  "read_file",
+  "search_files",
+  "list_files",
+  "run_bash",
+]);
+
+function renderToolHelp(mode: "chat" | "code" | "plan"): string {
   const wanted = (tool: ToolSpec): boolean => {
+    if (mode === "plan") {
+      return PLAN_INSPECTION_TOOL_NAMES.has(tool.name);
+    }
     if (
       USE_WRITE_FILE_FOR_FILE_CHANGES &&
       mode === "code" &&
@@ -156,13 +168,29 @@ export function codeSystemPrompt(
     `- Local timezone: ${timezone()}`,
     `- Workspace root: ${workspacePath}`,
     `- Preview URL: ${previewHref}`,
-    `- Active prompt mode: ${codeMode}`,
+    ...(codeMode === "plan"
+      ? ["- Current task: prepare an implementation plan"]
+      : [`- Active prompt mode: ${codeMode}`]),
     ...projectInstructionsBlock(instructionModesForCodePrompt(codeMode), {
       includeCommon: codeMode !== "execute" && codeMode !== "plan",
     }),
   ];
 
-  if (codeMode === "plan") return promptParts.join("\n");
+  if (codeMode === "plan") {
+    return [
+      ...promptParts,
+      "",
+      "READ-ONLY INSPECTION ACTION FORMAT",
+      '<action name="tool_name">',
+      "<param_name>value</param_name>",
+      "</action>",
+      "",
+      "While preparing the plan, use one read-only inspection action, then stop and wait for the result.",
+      "Allowed inspection tools:",
+      "",
+      renderToolHelp("plan"),
+    ].join("\n");
+  }
 
   return [
     ...promptParts,
