@@ -1,0 +1,76 @@
+import { wsReadFile, wsWriteFile } from "../workspace";
+import { cleanFileContent } from "./fileContent";
+import { PROTECTED_OVERWRITE_PATH_RE } from "./protectedFiles";
+import type { ToolContext, ToolSpec } from "./types";
+
+const DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES = 1_000;
+const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
+
+export const writeFileTool: ToolSpec = {
+  name: "write_file",
+  description:
+    "Create or overwrite a file in the workspace. Use this for file changes: read the existing file first, then provide the full current file content plus the requested change.",
+  params: [
+    {
+      name: "path",
+      description: "path relative to workspace (e.g. index.html)",
+      required: true,
+    },
+    {
+      name: "content",
+      description: "full file text",
+      required: true,
+      multiline: true,
+    },
+  ],
+  example:
+    '<action name="write_file">\n<path>index.html</path>\n<content>\n<!doctype html>\n<html>\n<body>Hello</body>\n</html>\n</content>\n</action>',
+  mode: "code",
+  run: writeFile,
+};
+
+async function writeFile(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const path = String(args.path ?? "").trim();
+  const raw = typeof args.content === "string" ? args.content : "";
+  if (!path) return "Error: missing <path>";
+  const content = cleanFileContent(raw, path);
+  const destructiveOverwriteError = await detectDestructiveOverwrite(
+    ctx.conversationId,
+    path,
+    content,
+  );
+  if (destructiveOverwriteError) return destructiveOverwriteError;
+  await wsWriteFile(ctx.conversationId, path, content);
+  ctx.onFileChange?.();
+  const lines = content.split("\n").length;
+  return `Wrote ${path} (${content.length} bytes, ${lines} lines).`;
+}
+
+async function detectDestructiveOverwrite(
+  conversationId: string,
+  path: string,
+  content: string,
+): Promise<string | null> {
+  if (!PROTECTED_OVERWRITE_PATH_RE.test(path)) return null;
+  let existing: string;
+  try {
+    existing = await wsReadFile(conversationId, path);
+  } catch {
+    return null;
+  }
+  if (existing.length < DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES) return null;
+  if (
+    content.length >=
+    existing.length * DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO
+  ) {
+    return null;
+  }
+  return [
+    `Error writing ${path}: destructive overwrite blocked.`,
+    "The existing project file is much larger than the replacement content.",
+    "Use edit_file, or use write_file with the full current file content plus the requested change.",
+  ].join(" ");
+}
