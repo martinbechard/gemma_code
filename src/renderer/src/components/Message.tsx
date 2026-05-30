@@ -17,7 +17,6 @@ interface Props {
   streaming: boolean;
   onRegenerate?: () => void;
   onExecutePlan?: () => void;
-  onRerunPlan?: () => void;
 }
 
 interface Parsed {
@@ -54,7 +53,6 @@ export default function Message({
   streaming,
   onRegenerate,
   onExecutePlan,
-  onRerunPlan,
 }: Props) {
   const isUser = message.role === "user";
   const isHarness = message.role === "harness";
@@ -115,9 +113,22 @@ export default function Message({
 
   if (isUser) {
     return (
-      <div className="flex justify-end">
-        <div className="selectable max-w-[78%] rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed text-white">
-          <div className="whitespace-pre-wrap">{message.content}</div>
+      <div className="group flex justify-end">
+        <div className="selectable max-w-[78%]">
+          <div className="rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed text-white">
+            <div className="whitespace-pre-wrap">{message.content}</div>
+          </div>
+          {onRegenerate && (
+            <div className="mt-1 flex justify-end opacity-0 transition group-hover:opacity-100">
+              <button
+                type="button"
+                onClick={onRegenerate}
+                className="rounded-md px-2 py-1 text-[11px] text-ink-400 hover:bg-white/5 hover:text-white"
+              >
+                Regenerate
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -172,7 +183,6 @@ export default function Message({
           <PlanView
             nodes={message.planNodes}
             toolCalls={message.toolCalls ?? []}
-            onRerun={onRerunPlan}
           />
         )}
 
@@ -209,22 +219,6 @@ export default function Message({
           </div>
         )}
 
-        {onRegenerate && (
-          <div className="mt-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
-            <button
-              onClick={onRegenerate}
-              className="rounded-md px-2 py-1 text-[11px] text-ink-400 hover:bg-white/5 hover:text-white"
-            >
-              ↻ Regenerate
-            </button>
-            <button
-              onClick={() => navigator.clipboard.writeText(parsed.visible)}
-              className="rounded-md px-2 py-1 text-[11px] text-ink-400 hover:bg-white/5 hover:text-white"
-            >
-              Copy
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -747,18 +741,15 @@ function PlanRow({
 function PlanView({
   nodes,
   toolCalls,
-  onRerun,
 }: {
   nodes: PlanNode[];
   toolCalls: ToolCall[];
-  onRerun?: () => void;
 }) {
   const trees = React.useMemo(() => buildPlanTree(nodes), [nodes]);
   const rootPlan =
     nodes.find((node) => node.kind === "plan" && !node.parentId) ??
     nodes.find((node) => node.kind === "plan");
   const complete = rootPlan?.status === "ok";
-  const failed = rootPlan?.status === "failed";
   const stepCount = nodes.filter((node) => node.kind === "step").length;
   const [open, setOpen] = React.useState(!complete);
   const wasComplete = React.useRef(complete);
@@ -799,17 +790,6 @@ function PlanView({
         trees.map((t) => (
           <PlanRow key={t.node.id} tree={t} depth={0} toolCalls={toolCalls} />
         ))}
-      {failed && onRerun && (
-        <div className="mt-2 border-t border-white/5 pt-2">
-          <button
-            type="button"
-            onClick={onRerun}
-            className="rounded-md bg-amber-300/15 px-2.5 py-1 text-[11.5px] font-medium text-amber-100 transition hover:bg-amber-300/25"
-          >
-            Run Failed Plan Again
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -937,13 +917,13 @@ function PlanProposalView({
             ({steps.length} {steps.length === 1 ? "step" : "steps"})
           </span>
         </div>
-        {onExecute && (
+        {!executed && onExecute && (
           <button
             type="button"
             onClick={onExecute}
             className="rounded-md bg-amber-300/15 px-2.5 py-1 text-[11.5px] font-medium text-amber-100 transition hover:bg-amber-300/25"
           >
-            {executed ? "Run Again" : "Execute Plan"}
+            Execute Plan
           </button>
         )}
       </div>

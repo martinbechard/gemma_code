@@ -19,6 +19,7 @@ import {
   buildMessageRenderItems,
   hasSystemPromptSnapshot,
   isModeLocked,
+  rewindToUserRequest,
   shouldSendConversationMessage,
 } from "../lib/conversationStore";
 
@@ -122,38 +123,6 @@ function requestHistory(messages: ChatMessage[]): Array<{
       content: m.content,
       toolCalls: m.toolCalls,
     }));
-}
-
-function hasFailedPlanExecution(message: ChatMessage): boolean {
-  return (
-    message.role === "assistant" &&
-    message.phase === "execution" &&
-    (message.planNodes ?? []).some(
-      (node) => node.kind === "plan" && node.status === "failed",
-    )
-  );
-}
-
-function hasFailedPlanExecutionAfter(
-  messages: ChatMessage[],
-  messageId: string,
-): boolean {
-  const start = messages.findIndex((message) => message.id === messageId);
-  if (start < 0) return false;
-  return messages.slice(start + 1).some(hasFailedPlanExecution);
-}
-
-function findProposalBeforeMessage(
-  messages: ChatMessage[],
-  messageId: string,
-): ChatMessage | null {
-  const end = messages.findIndex((message) => message.id === messageId);
-  if (end < 0) return null;
-  for (let index = end - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (message.role === "assistant" && message.proposedPlan) return message;
-  }
-  return null;
 }
 
 export default function Chat({ model, onSwitchModel }: Props) {
@@ -331,10 +300,14 @@ export default function Chat({ model, onSwitchModel }: Props) {
     }
   }, [activeId, activeConversation.workingDir]);
 
-  async function handleSend(input: string): Promise<void> {
+  async function handleSend(
+    input: string,
+    priorMessagesOverride?: ChatMessage[],
+  ): Promise<void> {
     if (!input.trim() || streaming) return;
 
     const conv = conversations.find((c) => c.id === activeId)!;
+    const priorMessages = priorMessagesOverride ?? conv.messages;
     const codeSubmode = codeSubmodeOf(conv);
     const phase =
       conv.workingDir && (codeSubmode === "plan" || codeSubmode === "auto")
@@ -361,7 +334,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
 
     updateActive((c) => {
       const title =
-        !c.messages.some((m) => m.role === "user")
+        !priorMessages.some((m) => m.role === "user")
           ? input.slice(0, 48) + (input.length > 48 ? "…" : "")
           : c.title;
       // Stamp the current global model on the conversation so it can be
@@ -370,11 +343,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
         ...c,
         title,
         model,
-        messages: [...c.messages, userMsg, assistantMsg],
+        messages: [...priorMessages, userMsg, assistantMsg],
       };
     });
 
-    const history = requestHistory([...conv.messages, userMsg]);
+    const history = requestHistory([...priorMessages, userMsg]);
 
     setStreaming(true);
     streamRef.current.abort = false;
@@ -520,22 +493,13 @@ export default function Chat({ model, onSwitchModel }: Props) {
     setStreaming(false);
   }
 
-  async function handleRegenerate(): Promise<void> {
+  async function handleRegenerateFromMessage(messageId: string): Promise<void> {
     if (streaming) return;
     const conv = conversations.find((c) => c.id === activeId);
     if (!conv) return;
-    const lastUser = [...conv.messages]
-      .reverse()
-      .find((m) => m.role === "user");
-    if (!lastUser) return;
-    updateActive((c) => {
-      const msgs = [...c.messages];
-      while (msgs.length && msgs[msgs.length - 1].role !== "user") {
-        msgs.pop();
-      }
-      return { ...c, messages: msgs.slice(0, -1) };
-    });
-    setTimeout(() => handleSend(lastUser.content), 0);
+    const rewind = rewindToUserRequest(conv.messages, messageId);
+    if (!rewind) return;
+    await handleSend(rewind.request.content, rewind.priorMessages);
   }
 
   async function handleExecutePlan(messageId: string): Promise<void> {
@@ -590,15 +554,6 @@ export default function Chat({ model, onSwitchModel }: Props) {
     } finally {
       setStreaming(false);
     }
-  }
-
-  async function handleRerunFailedPlan(messageId: string): Promise<void> {
-    if (streaming) return;
-    const conv = conversations.find((c) => c.id === activeId);
-    if (!conv) return;
-    const proposal = findProposalBeforeMessage(conv.messages, messageId);
-    if (!proposal) return;
-    await handleExecutePlan(proposal.id);
   }
 
   const canvasVisible =
@@ -660,9 +615,8 @@ export default function Chat({ model, onSwitchModel }: Props) {
             streaming={streaming}
             mode={activeConversation.mode}
             codeSubmode={codeSubmodeOf(activeConversation)}
-            onRegenerate={handleRegenerate}
+            onRegenerateMessage={handleRegenerateFromMessage}
             onExecutePlan={handleExecutePlan}
-            onRerunPlan={handleRerunFailedPlan}
           />
           <Composer
             onSend={handleSend}
@@ -1548,17 +1502,15 @@ function MessageList({
   streaming,
   mode,
   codeSubmode,
-  onRegenerate,
+  onRegenerateMessage,
   onExecutePlan,
-  onRerunPlan,
 }: {
   messages: ChatMessage[];
   streaming: boolean;
   mode: AgentMode;
   codeSubmode: CodeSubmode;
-  onRegenerate: () => void;
+  onRegenerateMessage: (messageId: string) => void;
   onExecutePlan: (messageId: string) => void;
-  onRerunPlan: (messageId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -1626,14 +1578,7 @@ function MessageList({
             const m = item.message;
             const isLast = i === renderItems.length - 1;
             const canExecutePlan =
-              m.role === "assistant" &&
-              !!m.proposedPlan &&
-              (!m.planExecuted || hasFailedPlanExecutionAfter(messages, m.id));
-            const canRerunFailedPlan =
-              !streaming &&
-              m.role === "assistant" &&
-              hasFailedPlanExecution(m) &&
-              findProposalBeforeMessage(messages, m.id) !== null;
+              m.role === "assistant" && !!m.proposedPlan && !m.planExecuted;
             return (
               <div
                 key={m.id}
@@ -1645,17 +1590,14 @@ function MessageList({
                   isLast={isLast}
                   streaming={streaming && isLast}
                   onRegenerate={
-                    !streaming && m.role === "assistant" && isLast
-                      ? onRegenerate
+                    !streaming && m.role === "user"
+                      ? () => onRegenerateMessage(m.id)
                       : undefined
                   }
                   onExecutePlan={
                     !streaming && canExecutePlan
                       ? () => onExecutePlan(m.id)
                       : undefined
-                  }
-                  onRerunPlan={
-                    canRerunFailedPlan ? () => onRerunPlan(m.id) : undefined
                   }
                 />
               </div>

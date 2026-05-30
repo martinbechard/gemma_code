@@ -7,6 +7,7 @@ import {
   pickStartupModel,
   isModeLocked,
   hasSystemPromptSnapshot,
+  rewindToUserRequest,
   shouldDisplayConversationMessage,
   shouldSendConversationMessage,
   type PersistedConversationLite,
@@ -110,6 +111,61 @@ describe("isModeLocked", () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("rewindToUserRequest", () => {
+  it("returns the selected user request and the messages before it", () => {
+    const messages = [
+      {
+        id: "u1",
+        role: "user",
+        content: "First",
+        createdAt: 1,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "First response",
+        createdAt: 2,
+      },
+      {
+        id: "u2",
+        role: "user",
+        content: "Second",
+        createdAt: 3,
+      },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "Second response",
+        createdAt: 4,
+      },
+    ] as const;
+
+    const rewind = rewindToUserRequest([...messages], "u2");
+
+    expect(rewind?.request).toMatchObject({ id: "u2", content: "Second" });
+    expect(rewind?.priorMessages.map((message) => message.id)).toEqual([
+      "u1",
+      "a1",
+    ]);
+  });
+
+  it("returns null for assistant messages", () => {
+    expect(
+      rewindToUserRequest(
+        [
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Response",
+            createdAt: 1,
+          },
+        ],
+        "a1",
+      ),
+    ).toBeNull();
   });
 });
 

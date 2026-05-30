@@ -21,8 +21,8 @@ function harnessMessage(
 function renderMessage(
   message: ChatMessage,
   handlers: {
+    onRegenerate?: () => void;
     onExecutePlan?: () => void;
-    onRerunPlan?: () => void;
   } = {},
 ): string {
   return renderToStaticMarkup(
@@ -117,28 +117,40 @@ describe("Message", () => {
     expect(html).toContain("aria-expanded");
   });
 
-  it("shows a rerun button for failed plan executions", () => {
+  it("shows regenerate for user request messages", () => {
     const html = renderMessage(
       {
-        id: "assistant-plan",
-        role: "assistant",
-        content: "",
+        id: "user-request",
+        role: "user",
+        content: "Remove the CWD tool.",
         createdAt: 1,
-        phase: "execution",
-        planNodes: [
-          {
-            id: "plan-1",
-            kind: "plan",
-            status: "failed",
-          },
-        ],
       },
       {
-        onRerunPlan: () => undefined,
+        onRegenerate: () => undefined,
       },
     );
 
-    expect(html).toContain("Run Failed Plan Again");
+    expect(html).toContain("Remove the CWD tool.");
+    expect(html).toContain("Regenerate");
+  });
+
+  it("does not show a plan-specific rerun button for failed plan executions", () => {
+    const html = renderMessage({
+      id: "assistant-plan",
+      role: "assistant",
+      content: "",
+      createdAt: 1,
+      phase: "execution",
+      planNodes: [
+        {
+          id: "plan-1",
+          kind: "plan",
+          status: "failed",
+        },
+      ],
+    });
+
+    expect(html).not.toContain("Run Failed Plan Again");
   });
 
   it("collapses completed plan executions behind a done row", () => {
@@ -170,7 +182,7 @@ describe("Message", () => {
     expect(html).not.toContain("Step: remove_tool");
   });
 
-  it("shows run again on an executed proposal when the caller allows execution", () => {
+  it("does not show run again on an executed proposal", () => {
     const html = renderMessage(
       {
         id: "assistant-proposal",
@@ -191,6 +203,8 @@ describe("Message", () => {
       },
     );
 
-    expect(html).toContain("Run Again");
+    expect(html).toContain("Plan approved");
+    expect(html).not.toContain("Run Again");
+    expect(html).not.toContain("Execute Plan");
   });
 });

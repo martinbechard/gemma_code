@@ -45,6 +45,25 @@ export function hasSystemPromptSnapshot(
   );
 }
 
+export interface RegenerateRequestRewind {
+  request: ChatMessage;
+  priorMessages: ChatMessage[];
+}
+
+export function rewindToUserRequest(
+  messages: ChatMessage[],
+  messageId: string,
+): RegenerateRequestRewind | null {
+  const messageIndex = messages.findIndex((message) => message.id === messageId);
+  if (messageIndex < 0) return null;
+  const request = messages[messageIndex];
+  if (request.role !== "user") return null;
+  return {
+    request,
+    priorMessages: messages.slice(0, messageIndex),
+  };
+}
+
 // Returns the stamped model of the most-recent conversation in the persisted
 // list, or null if no conversation has one. The list is treated as
 // most-recent-first (matches Chat.tsx, which prepends new conversations).
