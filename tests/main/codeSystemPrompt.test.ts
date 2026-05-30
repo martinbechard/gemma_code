@@ -53,8 +53,11 @@ describe("codeSystemPrompt", () => {
     );
     expect(planPrompt).toContain("read-only inspection actions");
     expect(planPrompt).toContain("Mutation steps must name exact files");
+    expect(planPrompt).toContain("<Step>");
+    expect(planPrompt).toContain("</Step>");
     expect(planPrompt).toContain("<Question>One focused question.</Question>");
     expect(planPrompt).toContain("plan: done");
+    expect(planPrompt).toContain("Do not wrap it in Step tags");
     expect(planPrompt).not.toContain("Do not inspect files");
     expect(planPrompt).not.toContain("Do not emit action tags");
     expect(planPrompt).not.toContain("no plan + no action");

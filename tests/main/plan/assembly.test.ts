@@ -153,7 +153,7 @@ describe("iterative plan assembly", () => {
       "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     );
     expect(prompt).toContain(
-      "Respond with exactly one of: one read-only inspection action, one YAML plan step",
+      "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>",
     );
     expect(prompt).not.toMatch(/\bhost\b/i);
     expect(prompt).not.toContain("tests/main");
@@ -180,6 +180,7 @@ describe("iterative plan assembly", () => {
       "Do not pass target discovery to the coding agent",
     );
     expect(result.nextPrompt).toContain("one read-only inspection action");
+    expect(result.nextPrompt).toContain("<Step>...</Step>");
     expect(result.nextPrompt).toContain("plan: done");
     expect(result.nextPrompt).not.toMatch(/\bhost\b/i);
     expect(result.nextPrompt).not.toContain("tests/main");
@@ -250,6 +251,48 @@ describe("iterative plan assembly", () => {
     expect(done.plan.end).toBe(done.plan.raw.length);
   });
 
+  it("accepts prose around a Step-wrapped plan step", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      ["I will return the next step.", "<Step>", exploreStep, "</Step>"].join(
+        "\n",
+      ),
+    );
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.state.steps[0].name).toBe("explore");
+  });
+
+  it("rejects prose around an unwrapped plan step", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      ["I will return the next step.", exploreStep].join("\n"),
+    );
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind !== "rejected") return;
+    expect(result.reason).toContain("<Step>-wrapped YAML plan step");
+  });
+
+  it("rejects prose around plan done instead of finishing", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const done = applyPlanAssemblyResponse(
+      first.state,
+      "I am finished, so I will return plan: done.",
+    );
+
+    expect(done.kind).toBe("rejected");
+    if (done.kind !== "rejected") return;
+    expect(done.retryPrompt).toContain("plan: done and nothing else");
+    expect(done.retryPrompt).toContain("Do not explain");
+  });
+
   it("rejects multiple steps in a single assembly response", () => {
     const response = [
       "plan:",
@@ -270,7 +313,7 @@ describe("iterative plan assembly", () => {
     expect(result.kind).toBe("rejected");
     if (result.kind !== "rejected") return;
     expect(result.reason).toContain("exactly one step");
-    expect(result.retryPrompt).toContain("exactly one YAML plan");
+    expect(result.retryPrompt).toContain("exactly one <Step>-wrapped YAML plan");
   });
 
   it("rejects malformed extra YAML steps instead of ignoring them", () => {
@@ -306,6 +349,9 @@ describe("iterative plan assembly", () => {
     expect(duplicate.kind).toBe("rejected");
     if (duplicate.kind !== "rejected") return;
     expect(duplicate.reason).toContain("Duplicate step name");
+    expect(duplicate.retryPrompt).toContain(
+      "A new step adds new work; it does not replace or restate an accepted step under a new name.",
+    );
     expect(duplicate.retryPrompt).toContain(
       "Already accepted step names: explore.",
     );

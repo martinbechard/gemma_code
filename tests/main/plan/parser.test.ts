@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   containsCompletePlan,
   findNextPlan,
+  findNextStepPlan,
   parsedPlanFromSteps,
 } from "../../../src/main/plan/parser";
 
@@ -94,6 +95,28 @@ describe("findNextPlan - YAML plans", () => {
     const r = findNextPlan("plan:\n  steps:\n    - prompt: Missing name");
     if (r === null || r === "incomplete") throw new Error("expected plan");
     expect(r.steps).toEqual([]);
+  });
+});
+
+describe("findNextStepPlan - Step-wrapped YAML plans", () => {
+  it("parses a plan wrapped in Step tags while ignoring prose", () => {
+    const text = ["I will return the step now.", "<Step>", yamlPlan, "</Step>"].join(
+      "\n",
+    );
+
+    const r = findNextStepPlan(text);
+
+    expect(r).not.toBeNull();
+    expect(r).not.toBe("incomplete");
+    if (r === null || r === "incomplete") return;
+    expect(r.steps[0].name).toBe("explore");
+    expect(text.slice(r.start, r.end)).toBe(yamlPlan);
+  });
+
+  it("returns incomplete for an unclosed Step tag", () => {
+    expect(findNextStepPlan(["<Step>", yamlPlan].join("\n"))).toBe(
+      "incomplete",
+    );
   });
 });
 

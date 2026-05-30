@@ -447,10 +447,10 @@ const FAILED_EDIT_PREVIEW_CHARS = 240;
 const INCOMPLETE_ACTION_PREVIEW_CHARS = 240;
 const MODEL_REQUEST_MESSAGE_PREVIEW_CHARS = 320;
 const CODE_PLAN_NUDGE =
-  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.";
+  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, plan: done with no prose, or one focused question wrapped in <Question>...</Question>.";
 const PLAN_ASSEMBLY_NO_PROGRESS_PROMPT = [
   "The previous response was not one of the allowed planning responses.",
-  "Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.",
+  "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, plan: done with no prose, or one focused question wrapped in <Question>...</Question>.",
 ].join("\n");
 const BUILD_ACTION_NUDGE =
   "Good plan. Now start building - emit a write_file action with the first file immediately.";

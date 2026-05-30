@@ -46,7 +46,7 @@
 
 - Allowed response choices for the first prompt:
   - one read-only inspection action
-  - one YAML plan step
+  - one Step-wrapped YAML plan step
   - one focused question wrapped in a question tag
   - WHY DOES THE LLM NEED TO KNOW? The first response may need evidence, a plan step, or clarification; these choices prevent accidental implementation or rambling.
 
@@ -58,12 +58,14 @@
 </action>
 ```
 
-```yaml
+```xml
+<Step>
 plan:
   steps:
     - name: short_step_name
       prompt: Direct instruction for the coding assistant.
       verify: Observable condition that proves the step is complete.
+</Step>
 ```
 
 ```xml
@@ -82,8 +84,8 @@ plan:
 
 - Allowed response choices for a next-step prompt:
   - one read-only inspection action if more evidence is needed
-  - one YAML plan step
-  - plan done
+  - one Step-wrapped YAML plan step
+  - plan done with no prose and no Step wrapper
   - one focused question wrapped in a question tag
   - WHY DOES THE LLM NEED TO KNOW? Later planning turns still need the same response discipline, plus the option to stop.
 

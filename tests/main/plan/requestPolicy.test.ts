@@ -84,6 +84,7 @@ describe("request policy", () => {
 
     expect(message).toContain("planning may only inspect");
     expect(message).toContain("read-only inspection action");
+    expect(message).toContain("<Step>...</Step>");
     expect(message).toContain("<Question>...</Question>");
   });
 });

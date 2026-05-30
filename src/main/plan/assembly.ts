@@ -4,7 +4,12 @@ import type {
   PlanReviewChecklistItem,
   PlanReviewVerdict,
 } from "../../shared/types";
-import { findNextPlan, type ParsedPlan, type ParsedStep } from "./parser";
+import {
+  findNextPlan,
+  findNextStepPlan,
+  type ParsedPlan,
+  type ParsedStep,
+} from "./parser";
 import { validatePlanForExecution, validatePlanStepText } from "./validation";
 
 const MAX_PLAN_ASSEMBLY_STEPS = 16;
@@ -14,6 +19,7 @@ const WHOLE_RESPONSE_YAML_FENCE_RE =
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
 const PLAN_QUESTION_RE =
   /^\s*<Question\b[^>]*>([\s\S]*?)<\/Question\s*>\s*$/i;
+const STEP_TAG_RE = /<\/?Step\b/i;
 const PLAN_SEMANTIC_REVIEW_VERDICT_PASS = "pass";
 const PLAN_SEMANTIC_REVIEW_VERDICT_NEEDS_CORRECTION = "needs_correction";
 const PLAN_SEMANTIC_REVIEW_VERDICTS: readonly PlanReviewVerdict[] = [
@@ -86,12 +92,12 @@ const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
 const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "Our task is to create clear, executable instructions for an AI coding agent.";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
-  "Respond with exactly one of: one read-only inspection action, one YAML plan step, or one focused question wrapped in <Question>...</Question>.";
+  "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, or one focused question wrapped in <Question>...</Question>.";
 
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
   "Continue preparing the plan for the AI coding agent.",
-  "Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.",
-  "Return plan: done only when the accepted steps form a complete executable plan for the user request.",
+  "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, plan: done, or one focused question wrapped in <Question>...</Question>.",
+  "Return exactly plan: done, with no prose and no <Step> wrapper, only when the accepted steps form a complete executable plan for the user request.",
   "Do not pass target discovery to the coding agent; mutation steps must name exact files or artifacts.",
 ].join("\n");
 
@@ -176,7 +182,7 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
     "",
     "Prepare a plan for another AI coding agent; include all information that agent needs.",
     "Use one read-only inspection action first if project evidence is missing.",
-    "When enough evidence is visible, emit exactly one YAML plan step.",
+    "When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
     "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     "",
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
@@ -200,7 +206,7 @@ export function applyPlanAssemblyResponse(
     return { kind: "finished", state, plan };
   }
 
-  const parsed = findNextPlan(response);
+  const parsed = findPlanAssemblyStep(response);
   if (parsed === "incomplete") {
     return rejected(state, "The response contains incomplete YAML.", task);
   }
@@ -208,8 +214,8 @@ export function applyPlanAssemblyResponse(
     return rejected(
       state,
       state.steps.length > 0
-        ? "The response must contain exactly one YAML plan step or plan: done."
-        : "The response must contain exactly one YAML plan step.",
+        ? "The response must contain exactly one <Step>-wrapped YAML plan step or exactly plan: done."
+        : "The response must contain exactly one <Step>-wrapped YAML plan step.",
       task,
     );
   }
@@ -371,6 +377,21 @@ export function applyPlanCorrectionResponse(
   const validation = validatePlanForExecution(parsed);
   if (!validation.valid) return planCorrectionRejected(validation.reason);
   return { kind: "accepted", plan: parsed };
+}
+
+function findPlanAssemblyStep(
+  response: string,
+): ParsedPlan | "incomplete" | null {
+  const wrapped = findNextStepPlan(response);
+  if (wrapped) return wrapped;
+  if (STEP_TAG_RE.test(response)) return "incomplete";
+
+  const text = normalizeWholeResponseYaml(response);
+  const parsed = findNextPlan(text);
+  if (!parsed || parsed === "incomplete") return parsed;
+  const isWholeResponse =
+    text.slice(parsed.start, parsed.end).trim() === text.trim();
+  return isWholeResponse ? parsed : null;
 }
 
 type StructuredPlanSemanticReviewResult =
@@ -694,6 +715,8 @@ function rejected(
           "",
           `Already accepted step names: ${acceptedStepNames.join(", ")}.`,
           "The new step name must be unique and must not reuse any accepted step name.",
+          "A new step adds new work; it does not replace or restate an accepted step under a new name.",
+          "If the accepted steps already cover the task, return only " + PLAN_ASSEMBLY_DONE_TEXT + ".",
         ]
       : [];
   const duplicateNameGuidance = options.duplicateStepName
@@ -712,9 +735,16 @@ function rejected(
       ...acceptedNameGuidance,
       ...duplicateNameGuidance,
       "",
-      "Return exactly one YAML plan containing one step, with name, prompt, and verify string fields.",
+      "Return exactly one <Step>-wrapped YAML plan containing one step, with name, prompt, and verify string fields.",
       ...(acceptedStepNames.length > 0
-        ? ["If the assembled plan is complete, return exactly " + PLAN_ASSEMBLY_DONE_TEXT + "."]
+        ? [
+            "If the assembled plan is complete, return exactly " +
+              PLAN_ASSEMBLY_DONE_TEXT +
+              " and nothing else.",
+            "Do not explain, introduce, or wrap " +
+              PLAN_ASSEMBLY_DONE_TEXT +
+              " in <Step> tags.",
+          ]
         : []),
       "Use exact task-specific files, artifacts, commands, and verification evidence; do not use placeholders.",
     ].join("\n"),

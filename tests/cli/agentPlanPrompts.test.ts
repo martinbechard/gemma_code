@@ -139,6 +139,8 @@ describe("buildCodeNoProgressPrompt", () => {
 
     expect(prompt).toContain("Continue preparing the plan");
     expect(prompt).toContain("one read-only inspection action");
+    expect(prompt).toContain("<Step>...</Step>");
+    expect(prompt).toContain("plan: done with no prose");
     expect(prompt).toContain("<Question>...</Question>");
     expect(prompt).not.toContain("src/main/tools.ts");
     expect(prompt).not.toContain("tests/main");

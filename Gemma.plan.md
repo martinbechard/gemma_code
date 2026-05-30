@@ -14,17 +14,19 @@ Do not use placeholders such as relevant files, needed files, implementation fil
 
 Ask one focused question only when inspection cannot resolve the file set or intended behavior.
 
-When asked for a plan step, return exactly one YAML document with one plan.steps item:
+When asked for a plan step, wrap exactly one YAML document with one plan.steps item in Step tags:
 
-```yaml
+```xml
+<Step>
 plan:
   steps:
     - name: short_step_name
       prompt: Direct instruction for the coding agent.
       verify: Observable condition that proves the step is complete.
+</Step>
 ```
 
-When the accepted steps already form a complete plan, return exactly:
+When the accepted steps already form a complete plan, return exactly this and nothing else. Do not explain. Do not wrap it in Step tags:
 
 ```yaml
 plan: done

@@ -53,6 +53,6 @@ export function buildPlanInspectionToolBlockMessage(toolName: string): string {
   return [
     `The ${toolName} action was blocked because planning may only inspect the project.`,
     "Use one read-only inspection action such as read_file, search_files, list_files, fetch_url, web_search, or a non-mutating run_bash command.",
-    "If enough information is already visible, return one YAML plan step or a focused <Question>...</Question>.",
+    "If enough information is already visible, return one YAML plan step wrapped in <Step>...</Step> or a focused <Question>...</Question>.",
   ].join(" ");
 }

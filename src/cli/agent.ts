@@ -82,9 +82,9 @@ const MAX_NESTED_PLAN_REJECTIONS = 3;
 const MAX_PLAN_ASSEMBLY_VALIDATION_RETRIES = 6;
 const MAX_PLAN_SEMANTIC_REVIEW_RETRIES = 4;
 const CODE_PLAN_NUDGE =
-  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.";
+  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, plan: done with no prose, or one focused question wrapped in <Question>...</Question>.";
 const PLAN_ONLY_CONTINUE_NUDGE =
-  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step, plan: done, or one focused question wrapped in <Question>...</Question>.";
+  "Continue preparing the plan. Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, plan: done with no prose, or one focused question wrapped in <Question>...</Question>.";
 const INCOMPLETE_ACTION_NUDGE =
   'Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly with <error reason="short reason"/>. Do not emit a verify tag about the malformed response.';
 const MAX_PLAN_ONLY_NUDGES = 3;

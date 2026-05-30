@@ -24,6 +24,8 @@ interface PlanYamlDocument {
 }
 
 const PLAN_KEY_RE = /^plan\s*:\s*(?:#.*)?$/gm;
+const STEP_OPEN_RE = /<Step\b[^>]*>/gi;
+const STEP_CLOSE_RE = /<\/Step\s*>/gi;
 const VERIFY_TAG_RE = /<verify\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/verify\s*>)/i;
 const RESULT_RE = /result\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
 const REASON_RE = /reason\s*=\s*(?:"([^"]*)"|'([^']*)'|([a-zA-Z_][\w-]*))/i;
@@ -53,6 +55,30 @@ export function findNextPlan(
     raw,
     start,
     end: start + raw.length,
+  };
+}
+
+export function findNextStepPlan(
+  text: string,
+  from = 0,
+): ParsedPlan | "incomplete" | null {
+  STEP_OPEN_RE.lastIndex = from;
+  const open = STEP_OPEN_RE.exec(text);
+  if (!open) return null;
+
+  STEP_CLOSE_RE.lastIndex = STEP_OPEN_RE.lastIndex;
+  const close = STEP_CLOSE_RE.exec(text);
+  if (!close) return "incomplete";
+
+  const contentStart = STEP_OPEN_RE.lastIndex;
+  const inner = text.slice(contentStart, close.index);
+  const parsed = findNextPlan(inner);
+  if (!parsed) return null;
+  if (parsed === "incomplete") return parsed;
+  return {
+    ...parsed,
+    start: contentStart + parsed.start,
+    end: contentStart + parsed.end,
   };
 }
 
