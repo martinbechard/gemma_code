@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AVAILABLE_MODELS,
   type AgentMode,
@@ -863,9 +863,7 @@ function ExecutionLogViewer({
                       #{entry.line}
                     </span>
                   </summary>
-                  <pre className="selectable mx-3 mb-3 max-h-80 overflow-auto rounded-md border border-white/[0.07] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
-                    {executionLogDetails(entry)}
-                  </pre>
+                  <ExecutionLogEntryDetails entry={entry} />
                 </details>
               ))}
               <div ref={endRef} />
@@ -873,6 +871,112 @@ function ExecutionLogViewer({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+export function ExecutionLogEntryDetails({
+  entry,
+}: {
+  entry: ExecutionLogEntry;
+}) {
+  const data = isLogRecord(entry.data) ? entry.data : null;
+  if (entry.event === "model_request" && data) {
+    return <ModelRequestLogDetails entry={entry} data={data} />;
+  }
+  return (
+    <pre className="selectable mx-3 mb-3 max-h-80 overflow-auto rounded-md border border-white/[0.07] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
+      {executionLogDetails(entry)}
+    </pre>
+  );
+}
+
+function ModelRequestLogDetails({
+  entry,
+  data,
+}: {
+  entry: ExecutionLogEntry;
+  data: Record<string, unknown>;
+}) {
+  const messages = logRecordArrayField(data, "messages");
+  const newMessages = logRecordArrayField(data, "newMessages");
+  const [showAll, setShowAll] = useState(false);
+  const visibleMessages =
+    showAll || newMessages.length === 0 ? messages : newMessages;
+  const visibleLabel =
+    showAll || newMessages.length === 0 ? "all messages" : "new messages";
+  return (
+    <div className="mx-3 mb-3 overflow-hidden rounded-md border border-white/[0.07] bg-black/25 text-[11px] text-ink-200">
+      <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-3 py-2">
+        <div className="min-w-0">
+          <div className="font-medium text-ink-100">Model request context</div>
+          <div className="mt-0.5 break-all text-ink-500">
+            Snapshot file is overwritten each request:{" "}
+            {logStringField(data, "promptPath")}
+          </div>
+        </div>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll((value) => !value)}
+            className="shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[11px] text-ink-300 transition hover:bg-white/[0.08] hover:text-ink-100"
+          >
+            {showAll
+              ? `Show new messages (${newMessages.length})`
+              : `Show all ${messages.length} messages`}
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2 border-b border-white/[0.06] px-3 py-2 text-ink-400">
+        <span>source: {logStringField(data, "requestSource") || "unknown"}</span>
+        <span>total: {String(data.messageCount ?? "")}</span>
+        <span>added: {String(data.newMessageCount ?? "")}</span>
+      </div>
+      <div className="border-b border-white/[0.06] px-3 py-2 text-ink-500">
+        Showing {visibleLabel}. These are hidden model-context messages; many
+        are system, harness, tool-result, or retry messages that are not shown
+        as separate bubbles in the main chat.
+      </div>
+      <div className="border-b border-sky-300/10 bg-sky-300/[0.035] px-3 py-2 text-sky-100/80">
+        Tool calls appear as separate tool_call and tool_result log entries.
+        The next model_request includes the tool result as a hidden user
+        message beginning with [ok] or [error].
+      </div>
+      <div className="selectable max-h-80 overflow-auto px-3 py-2">
+        {visibleMessages.length === 0 ? (
+          <div className="text-ink-500">
+            No per-message summary was logged for this entry.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {visibleMessages.map((message) => (
+              <div
+                key={`${String(message.index)}-${logStringField(message, "role")}`}
+                className="rounded border border-white/[0.05] bg-black/25 px-2 py-1.5"
+              >
+                <div className="mb-1 flex items-center gap-2 text-ink-500">
+                  <span className="font-mono">#{String(message.index)}</span>
+                  <span className="rounded border border-white/[0.08] px-1.5 py-0.5 uppercase text-ink-300">
+                    {logStringField(message, "role") || "message"}
+                  </span>
+                  <span>{String(message.chars ?? 0)} chars</span>
+                </div>
+                <div className="whitespace-pre-wrap break-words leading-5 text-ink-200">
+                  {logStringField(message, "preview")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <details className="border-t border-white/[0.06]">
+        <summary className="cursor-pointer px-3 py-2 text-ink-400 marker:text-ink-600">
+          Raw JSON
+        </summary>
+        <pre className="selectable max-h-80 overflow-auto border-t border-white/[0.06] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
+          {executionLogDetailsJson(entry)}
+        </pre>
+      </details>
     </div>
   );
 }
@@ -979,16 +1083,21 @@ export function executionLogDetails(entry: ExecutionLogEntry): string {
 
 function modelRequestSummary(data: Record<string, unknown>): string {
   const messageCount = String(data.messageCount ?? "");
+  const newMessageCount = String(data.newMessageCount ?? "");
   const messages = logRecordArrayField(data, "messages");
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage) {
+  const newMessages = logRecordArrayField(data, "newMessages");
+  const latestMessage =
+    newMessages[newMessages.length - 1] ?? messages[messages.length - 1];
+  if (!latestMessage) {
     return compactLogText(
       `${messageCount} messages ${logStringField(data, "promptPath")}`,
     );
   }
-  const role = logStringField(lastMessage, "role") || "message";
-  const preview = logStringField(lastMessage, "preview");
-  return compactLogText(`${messageCount} messages · last ${role}: ${preview}`);
+  const role = logStringField(latestMessage, "role") || "message";
+  const preview = logStringField(latestMessage, "preview");
+  return compactLogText(
+    `${messageCount} messages | ${newMessageCount} new | latest ${role}: ${preview}`,
+  );
 }
 
 function modelChunkSummary(data: Record<string, unknown>): string {

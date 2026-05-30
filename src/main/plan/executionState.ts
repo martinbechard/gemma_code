@@ -91,6 +91,7 @@ export class PlanExecutionState {
         `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making so your edit fits the project's existing shape. ` +
         `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
         `If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply exactly BLOCKED: followed by one short reason, then stop. Do not write waiting prose. Do not assume hidden tool output or continue from guessed information. ` +
+        `If this step requires changing files, describing the change is not enough; you must emit a file-changing <action> tag and receive a successful tool result. ` +
         `If this step says to add something only if missing or avoid editing when it is already present, and the latest file evidence shows it is already present, summarize that evidence and do not edit the file. ` +
         `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
         `If this step asks you to remove, edit, update, replace, delete, or modify code, a read-only action is not enough; run a successful edit_file, write_file, delete_file, or clearly modifying run_bash command before summarizing. ` +
@@ -109,8 +110,10 @@ export class PlanExecutionState {
     this.startVerify(f);
     const text =
       `Verify: ${step.verify}\n\n` +
-      `Use only prior tool results and visible file evidence from this step. ` +
-      `Do not guess, infer, or rely on intended behavior. If no tool result proves the condition, fail and name the missing evidence. ` +
+      `Use prior tool results and visible file evidence from this step. ` +
+      `If the existing evidence is not enough to verify the condition, issue read-only <action> tags now, such as read_file, search_files, list_files, or a non-mutating run_bash command, and wait for the tool result before deciding. ` +
+      `Do not mutate files during verify. ` +
+      `Do not guess, infer, or rely on intended behavior. If no available or newly gathered tool result proves the condition, fail and name the missing evidence. ` +
       `A targeted search result with no match for the exact requested text is valid evidence that the text was not found in the searched files. ` +
       `For remove, edit, update, replace, delete, or modify steps, pass only if the prior step includes successful mutation evidence; for removal steps, also require post-mutation absence evidence. ` +
       `If any required edit failed or any required command exited nonzero without a later successful rerun, fail and name that evidence. ` +

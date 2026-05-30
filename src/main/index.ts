@@ -449,6 +449,13 @@ const PSEUDO_TOOL_RESPONSE_RE = /<\/?tool_response\b/i;
 const TOOL_RESULT_WAITING_SELF_REPORT_RE =
   /\b(?:waiting for|wait for|awaiting|results? (?:are|is) not yet available|not yet available)\b[\s\S]{0,120}\b(?:tool|result|results|output|search_files|read_file|list_files)\b/i;
 
+interface ModelRequestMessageSummary {
+  index: number;
+  role: MLXChatMessage["role"];
+  chars: number;
+  preview: string;
+}
+
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
     "The edit_file action failed because old_string could not be applied safely.",
@@ -539,12 +546,7 @@ function compactModelRequestLogText(text: string): string {
 
 function summarizeModelRequestMessages(
   messages: MLXChatMessage[],
-): Array<{
-  index: number;
-  role: MLXChatMessage["role"];
-  chars: number;
-  preview: string;
-}> {
+): ModelRequestMessageSummary[] {
   return messages.map((message, index) => ({
     index: index + 1,
     role: message.role,
@@ -782,6 +784,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     let planSemanticReviewMessages: MLXChatMessage[] | null = null;
     let planSemanticReviewRetries = 0;
     let planAssemblyValidationRetries = 0;
+    const lastModelRequestMessageCounts = new Map<string, number>();
     let lastActionKey: string | null = null;
     let repeatedActionCount = 0;
     let stepIncompletePromptCount = 0;
@@ -1052,6 +1055,21 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       emitRuntimeActivity("connecting to MLX");
       emitRuntimeActivity("waiting for first token");
       const requestMessages = planSemanticReviewMessages ?? baseMessages;
+      const requestSource = planSemanticReviewMessages
+        ? "plan_semantic_review"
+        : "conversation";
+      const previousMessageCount =
+        lastModelRequestMessageCounts.get(requestSource) ?? 0;
+      const newMessageStart =
+        previousMessageCount <= requestMessages.length
+          ? previousMessageCount
+          : 0;
+      const messageSummaries = summarizeModelRequestMessages(requestMessages);
+      const newMessages = messageSummaries.slice(newMessageStart);
+      lastModelRequestMessageCounts.set(
+        requestSource,
+        requestMessages.length,
+      );
       // Persist the assembled conversation to <userData>/debug/last-system-prompt.txt
       // so the human can inspect what the model actually receives. Overwritten
       // every round so the file always reflects the latest call.
@@ -1062,8 +1080,11 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         });
         logExecution("model_request", {
           promptPath,
+          requestSource,
           messageCount: requestMessages.length,
-          messages: summarizeModelRequestMessages(requestMessages),
+          newMessageCount: newMessages.length,
+          messages: messageSummaries,
+          newMessages,
         });
       } catch {
         // debug aid only; never let a write failure abort the chat round

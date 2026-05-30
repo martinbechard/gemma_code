@@ -44,6 +44,8 @@ describe("PlanExecutionState — single step happy path", () => {
     expect(p1?.text).toMatch(/read.*canonical/i);
     expect(p1?.text).toMatch(/multiple files to read/i);
     expect(p1?.text).toMatch(/gather.*evidence/i);
+    expect(p1?.text).toContain("describing the change is not enough");
+    expect(p1?.text).toContain("file-changing <action> tag");
     expect(p1?.text).toContain("avoid editing when it is already present");
     expect(p1?.text).toContain("run that exact command with run_bash");
     expect(p1?.text).toContain("preserve the current file content");
@@ -58,7 +60,9 @@ describe("PlanExecutionState — single step happy path", () => {
     expect(p2?.kind).toBe("verify");
     expect(p2?.text).toContain("explore ok");
     expect(p2?.text).not.toMatch(/\bhost\b/i);
-    expect(p2?.text).toContain("Use only prior tool results");
+    expect(p2?.text).toContain("Use prior tool results");
+    expect(p2?.text).toContain("issue read-only <action> tags now");
+    expect(p2?.text).toContain("Do not mutate files during verify");
     expect(p2?.text).toContain("any required edit failed");
     expect(p2?.text).toContain("targeted search result with no match");
     expect(s.currentVerifyCriterion()).toBe("explore ok");
