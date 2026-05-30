@@ -68,7 +68,7 @@ import { PlanExecutionState } from "./plan/executionState";
 import { stripPlanArtifacts } from "./plan/stripPlanArtifacts";
 import { loadPlan, savePlan } from "./plan/planStore";
 import {
-  EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+  buildExecutablePlanValidationPrompt,
   validatePlanForExecution,
 } from "./plan/validation";
 import {
@@ -97,6 +97,11 @@ import {
   repeatedActionForcedFailureReason,
   summarizePlanStepEvidence,
 } from "./plan/evidence";
+import {
+  buildReadOnlyRequestToolBlockMessage,
+  isFileMutationToolName,
+  requestForbidsFileMutation,
+} from "./plan/requestPolicy";
 import { killAllBackgroundTasks } from "./backgroundTasks";
 import {
   createExecutionLogger,
@@ -725,6 +730,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       planningTaskMessageIndex >= 0
         ? req.messages[planningTaskMessageIndex]?.content.trim()
         : "";
+    const readOnlyRequest = requestForbidsFileMutation(planningTask);
     const pushPlanningHarnessPrompt = (
       label: string,
       content: string,
@@ -733,17 +739,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       pushHarnessPrompt(label, content);
     };
     const buildPlanValidationPrompt = (reason: string): string => {
-      return [
-        "The assembled plan is not executable yet: " + reason,
-        "",
-        "Executable-plan validation gates:",
-        ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
-        "",
-        "Return exactly one additional YAML plan step that is directly executable by the coding agent.",
-        "Do not describe rewriting, correcting, or ensuring a previous step.",
-        "The new step's prompt and verify fields must contain exact task-specific files, artifacts, commands, or verification evidence.",
-        "Do not return plan: done; the assembled plan did not pass validation yet.",
-      ].join("\n");
+      return buildExecutablePlanValidationPrompt(reason);
     };
 
     for (const message of replayRequestMessages({
@@ -1302,25 +1298,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               lastActionKey = actionKey;
               repeatedActionCount = 1;
             }
-            try {
-              result = await runTool(found.name, found.args, ctx);
-              hadError = isToolErrorResult(result);
-              const toolResultLog = {
-                id: call.id,
-                tool: found.name,
-                args: found.args,
-                status: hadError ? "error" : "ok",
-                output: result,
-                ...(hadError ? { error: result } : { result }),
-              };
-              logExecution("tool_result", toolResultLog);
-              emit(
-                hadError
-                  ? { type: "tool_result", id: call.id, error: result }
-                  : { type: "tool_result", id: call.id, result },
-              );
-            } catch (e) {
-              result = `Error: ${(e as Error).message}`;
+            if (readOnlyRequest && isFileMutationToolName(found.name)) {
+              result = buildReadOnlyRequestToolBlockMessage(found.name);
               hadError = true;
               logExecution("tool_result", {
                 id: call.id,
@@ -1331,6 +1310,37 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
                 error: result,
               });
               emit({ type: "tool_result", id: call.id, error: result });
+            } else {
+              try {
+                result = await runTool(found.name, found.args, ctx);
+                hadError = isToolErrorResult(result);
+                const toolResultLog = {
+                  id: call.id,
+                  tool: found.name,
+                  args: found.args,
+                  status: hadError ? "error" : "ok",
+                  output: result,
+                  ...(hadError ? { error: result } : { result }),
+                };
+                logExecution("tool_result", toolResultLog);
+                emit(
+                  hadError
+                    ? { type: "tool_result", id: call.id, error: result }
+                    : { type: "tool_result", id: call.id, result },
+                );
+              } catch (e) {
+                result = `Error: ${(e as Error).message}`;
+                hadError = true;
+                logExecution("tool_result", {
+                  id: call.id,
+                  tool: found.name,
+                  args: found.args,
+                  status: "error",
+                  output: result,
+                  error: result,
+                });
+                emit({ type: "tool_result", id: call.id, error: result });
+              }
             }
 
             baseMessages.push({

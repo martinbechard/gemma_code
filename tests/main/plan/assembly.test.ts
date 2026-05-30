@@ -256,6 +256,39 @@ describe("iterative plan assembly", () => {
     );
   });
 
+  it("rejects report-only final-answer steps during assembly", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "plan:",
+        "  steps:",
+        "    - name: read_package_json",
+        "      prompt: Read package.json.",
+        "      verify: package.json has been read.",
+      ].join("\n"),
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const reportOnly = applyPlanAssemblyResponse(
+      first.state,
+      [
+        "plan:",
+        "  steps:",
+        "    - name: report_package_name",
+        "      prompt: Report the package name found in the previous step output.",
+        "      verify: The final output of the plan is the package name.",
+      ].join("\n"),
+    );
+
+    expect(reportOnly.kind).toBe("rejected");
+    if (reportOnly.kind !== "rejected") return;
+    expect(reportOnly.state.steps.map((step) => step.name)).toEqual([
+      "read_package_json",
+    ]);
+    expect(reportOnly.reason).toContain("report-only");
+    expect(reportOnly.retryPrompt).toContain("report-only");
+  });
+
   it("finalizes an executable plan using only deterministic validation", () => {
     let result = applyPlanAssemblyResponse(createPlanAssemblyState(), exploreStep);
     if (result.kind !== "accepted") throw new Error("expected explore step");

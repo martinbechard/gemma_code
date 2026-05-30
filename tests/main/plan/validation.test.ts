@@ -74,6 +74,69 @@ describe("validatePlanForExecution", () => {
     expect(result.reason).toContain("prompt");
   });
 
+  it("rejects report-only final-answer steps", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "read_package_json",
+          prompt: "Read package.json.",
+          verify: "package.json has been read.",
+        },
+        {
+          name: "report_package_name",
+          prompt:
+            "Report the package name found in the previous step output.",
+          verify: "The final output of the plan is the package name.",
+        },
+      ]),
+    );
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("report_package_name");
+    expect(result.reason).toContain("report-only");
+  });
+
+  it("rejects extraction steps that only reuse previous results", () => {
+    const result = validatePlanStepText({
+      name: "extract_package_name",
+      prompt:
+        "Extract the package name from the result of reading package.json and confirm it is the final output.",
+      verify: "The final package name has been extracted and confirmed.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("extract_package_name");
+    expect(result.reason).toContain("report-only");
+  });
+
+  it("accepts executable steps that report from their own evidence", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "read_package_json",
+          prompt:
+            "Read package.json and report only the package name in the step summary.",
+          verify: "package.json has been read.",
+        },
+      ]),
+    );
+
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("accepts extraction wording when the step names a real action", () => {
+    const result = validatePlanStepText({
+      name: "extract_helper",
+      prompt:
+        "Extract the package-name parsing helper by editing src/cli/agent.ts.",
+      verify: "src/cli/agent.ts contains the extracted helper.",
+    });
+
+    expect(result).toEqual({ valid: true });
+  });
+
   it("accepts concrete plans that use project-specific paths outside tests/main", () => {
     const result = validatePlanForExecution(
       parsedPlan([

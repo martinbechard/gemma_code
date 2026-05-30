@@ -34,6 +34,40 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses code approval mode", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "code",
+      "--approve",
+      "build the tool",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "code",
+      approve: true,
+      auto: false,
+      prompt: "build the tool",
+    });
+  });
+
+  it("parses explicit code auto mode", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "code",
+      "--auto",
+      "build the tool",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "code",
+      approve: false,
+      auto: true,
+      prompt: "build the tool",
+    });
+  });
+
   it("parses execute-plan with a plan file and prompt", () => {
     const parsed = parseCliArgs([
       "node",
@@ -80,5 +114,24 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["node", "cli", "plan"])).toThrow(
       "prompt required",
     );
+  });
+
+  it("rejects approval mode outside code", () => {
+    expect(() =>
+      parseCliArgs(["node", "cli", "plan", "--approve", "build the tool"]),
+    ).toThrow("--approve only applies");
+  });
+
+  it("rejects conflicting code workflow modes", () => {
+    expect(() =>
+      parseCliArgs([
+        "node",
+        "cli",
+        "code",
+        "--auto",
+        "--approve",
+        "build the tool",
+      ]),
+    ).toThrow("--auto and --approve");
   });
 });

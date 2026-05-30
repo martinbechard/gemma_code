@@ -1,7 +1,7 @@
 // CLI entrypoint that reuses the runtime modules behind the Electron app.
 // Usage:
 //   npm run cli -- chat "your prompt"
-//   npm run cli -- code "build a landing page for ..."
+//   npm run cli -- code [--auto|--approve] "build a landing page for ..."
 //   npm run cli -- plan "add a tool"
 //   npm run cli -- plan-ask-done "add a tool"
 //   npm run cli -- execute-plan --plan plan.yaml "your original prompt"
@@ -38,7 +38,7 @@ function printUsage(): void {
       "  cli setup [--model <hf-id>]",
       "  cli status [--model <hf-id>]",
       "  cli chat [--model <hf-id>] [--worktree] <prompt>",
-      "  cli code [--model <hf-id>] [--worktree] <prompt>",
+      "  cli code [--model <hf-id>] [--worktree] [--auto|--approve] <prompt>",
       "  cli plan [--model <hf-id>] [--worktree] <prompt>",
       "  cli plan-ask-done [--model <hf-id>] [--worktree] <prompt>",
       "  cli execute-plan [--model <hf-id>] [--worktree] --plan <file> <prompt>",
@@ -47,6 +47,7 @@ function printUsage(): void {
       `Default model: ${DEFAULT_MODEL}`,
       "Set RUN_BASH=1 to allow the run_bash tool.",
       "Pass --worktree to run inside an isolated git worktree at .worktrees/<id>.",
+      "code runs plan-review-execute automatically by default; --approve pauses after the reviewed plan.",
       "",
     ].join("\n"),
   );
@@ -84,6 +85,7 @@ async function main(): Promise<void> {
         prompt: args.prompt,
         enableBash: args.enableBash,
         worktree: args.worktree,
+        approveBeforeExecute: args.approve,
       });
       return;
     case "plan":

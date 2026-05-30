@@ -25,6 +25,7 @@ I perform deterministic validation of plan shape only:
 - The plan must contain at least one executable step.
 - Every step must have non-empty string name, prompt, and verify fields.
 - Every step name must be unique.
+- Do not create report-only or final-answer steps; include final reporting in the summary of the evidence-gathering step.
 - The deterministic validator only checks plan document shape and obvious placeholders; task-specific completeness is reviewed semantically by the model.
 - Do not use placeholder names such as exampleTool.test.ts, newToolName.test.ts, or requested_tool_name.
 - Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.

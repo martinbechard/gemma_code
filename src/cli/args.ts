@@ -14,6 +14,8 @@ export interface ParsedArgs {
   prompt: string;
   enableBash: boolean;
   worktree: boolean;
+  auto: boolean;
+  approve: boolean;
   planPath?: string;
   conversationPath?: string;
 }
@@ -26,6 +28,8 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   const command = parseCommand(args[0]);
   let model = DEFAULT_MODEL;
   let worktree = false;
+  let auto = false;
+  let approve = false;
   let planPath: string | undefined;
   let conversationPath: string | undefined;
   const remaining: string[] = [];
@@ -36,6 +40,10 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
       model = args[++i] ?? DEFAULT_MODEL;
     } else if (a === "--worktree") {
       worktree = true;
+    } else if (a === "--auto") {
+      auto = true;
+    } else if (a === "--approve") {
+      approve = true;
     } else if (a === "--plan") {
       planPath = args[++i];
     } else if (a === "--conversation") {
@@ -76,6 +84,15 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
       "--worktree only applies to chat/code/plan/plan-ask-done/execute-plan commands",
     );
   }
+  if (auto && command !== "code") {
+    throw new Error("--auto only applies to the code command");
+  }
+  if (approve && command !== "code") {
+    throw new Error("--approve only applies to the code command");
+  }
+  if (auto && approve) {
+    throw new Error("--auto and --approve cannot be used together");
+  }
 
   return {
     command,
@@ -83,6 +100,8 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
     prompt,
     enableBash: process.env.RUN_BASH === "1",
     worktree,
+    auto,
+    approve,
     ...(planPath ? { planPath } : {}),
     ...(conversationPath ? { conversationPath } : {}),
   };

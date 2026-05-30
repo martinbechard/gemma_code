@@ -1,5 +1,7 @@
 import { chatStream, type MLXChatMessage } from "../main/mlx";
 import { existsSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
 import {
   chatSystemPrompt,
   codeSystemPrompt,
@@ -25,7 +27,7 @@ import {
 import { PlanExecutionState } from "../main/plan/executionState";
 import { saveLastPrompt } from "../main/debugPrompt";
 import {
-  EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+  buildExecutablePlanValidationPrompt,
   validatePlanForExecution,
 } from "../main/plan/validation";
 import {
@@ -59,6 +61,11 @@ import {
   saveCliConversation,
 } from "./conversation";
 import { appendToolResultMessage } from "../main/chatHistory";
+import {
+  buildReadOnlyRequestToolBlockMessage,
+  isFileMutationToolName,
+  requestForbidsFileMutation,
+} from "../main/plan/requestPolicy";
 
 export {
   buildIncompleteStepPrompt,
@@ -93,6 +100,7 @@ export interface AgentRunOptions {
   harnessMode?: "active" | "passive";
   planOnly?: boolean;
   planCompletionMode?: PlanCompletionMode;
+  approveBeforeExecute?: boolean;
 }
 
 export interface ContinueRunOptions {
@@ -124,6 +132,20 @@ function out(s: string): void {
 
 function meta(line: string): void {
   process.stdout.write(`\n[cli] ${line}\n`);
+}
+
+async function askForPlanApproval(): Promise<boolean> {
+  if (!stdin.isTTY) {
+    meta("plan approval requested but stdin is not interactive");
+    return false;
+  }
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = await rl.question("\nApprove this plan for execution? [y/N] ");
+    return /^(?:y|yes)$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
 }
 
 function displaySystemPrompt(_label: string, _content: string): void {
@@ -217,17 +239,7 @@ export function buildCodeNoProgressPrompt(
 export function buildPlanAmendmentPrompt(
   reason: string,
 ): string {
-  return [
-    `The assembled plan is not executable yet: ${reason}`,
-    "",
-    "Executable-plan validation gates:",
-    ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
-    "",
-    "Do not use tools. Emit exactly one additional well-formed YAML plan step now.",
-    "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
-    "The new step's prompt and verify fields must contain exact task-specific files, artifacts, commands, or verification evidence.",
-    "Do not return plan: done; the assembled plan did not pass validation yet.",
-  ].join("\n");
+  return buildExecutablePlanValidationPrompt(reason);
 }
 
 export function buildEditFailureRecoveryPrompt(path: string): string {
@@ -553,9 +565,9 @@ async function runAgentLoop(
     meta("system prompt: plan semantic review");
   };
 
-  const handleAssembledPlan = (
+  const handleAssembledPlan = async (
     plan: ParsedPlan,
-  ): AssembledPlanHandlingResult => {
+  ): Promise<AssembledPlanHandlingResult> => {
     const validation = validatePlanForExecution(plan);
     if (!validation.valid) {
       pushHarnessPrompt(
@@ -572,12 +584,21 @@ async function runAgentLoop(
       meta("done — assembled plan ready");
       return "done";
     }
+    if (opts.approveBeforeExecute) {
+      const approved = await askForPlanApproval();
+      if (!approved) {
+        meta("done — plan execution not approved");
+        return "done";
+      }
+      meta("plan approved");
+    }
     planState = new PlanExecutionState(plan);
     usePlanExecutionPrompt();
     return "started";
   };
 
   const harnessMode = opts.harnessMode ?? "active";
+  const readOnlyRequest = requestForbidsFileMutation(opts.prompt);
 
   if (initialPlan) {
     if (opts.mode !== "code") {
@@ -701,6 +722,23 @@ async function runAgentLoop(
         prepareStepEvidence(next);
         pushHarnessPrompt(messages, next.kind, next.text);
         awaitingVerify = next.kind === "verify";
+        continue;
+      }
+
+      if (readOnlyRequest && isFileMutationToolName(action.name)) {
+        const result = buildReadOnlyRequestToolBlockMessage(action.name);
+        meta(`tool blocked by read-only request: ${action.name}`);
+        messages.push({
+          role: "assistant",
+          content: buffer.slice(0, action.end),
+        });
+        appendToolResultMessage(messages, {
+          toolName: action.name,
+          args: action.args,
+          result,
+          hadError: true,
+        });
+        pushHarnessPrompt(messages, "read-only request policy", result);
         continue;
       }
 
@@ -1014,7 +1052,7 @@ async function runAgentLoop(
       planSemanticReviewRetries = 0;
       planAssemblyState = null;
       planAssemblyValidationRetries = 0;
-      const handling = handleAssembledPlan(review.plan);
+      const handling = await handleAssembledPlan(review.plan);
       if (handling === "retry") continue;
       if (handling === "done") return;
       logPlanEvents();

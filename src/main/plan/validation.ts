@@ -13,9 +13,15 @@ export const EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES = [
   "The plan must contain at least one executable step.",
   "Every step must have non-empty string name, prompt, and verify fields.",
   "Every step name must be unique.",
+  "Do not create report-only or final-answer steps; include final reporting in the summary of the evidence-gathering step.",
   "The deterministic validator only checks plan document shape and obvious placeholders; task-specific completeness is reviewed semantically by the model.",
   "Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.",
 ] as const;
+
+const REPORT_ONLY_STEP_START_RE =
+  /^\s*(?:report|summari[sz]e|return|output|provide|tell|respond|extract|confirm)\b/i;
+const EXECUTION_ACTION_RE =
+  /\b(?:read(?:ing)?|inspect(?:ing)?|list(?:ing)?|search(?:ing)?|grep|run(?:ning)?|execut(?:e|ing)|edit(?:ing)?|updat(?:e|ing)|writ(?:e|ing)|creat(?:e|ing)|delet(?:e|ing)|modify(?:ing)?|test(?:ing)?|build(?:ing)?|verify(?:ing)?|open(?:ing)?|retriev(?:e|ing))\b/i;
 
 const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
   { label: "relevant tests", pattern: /\brelevant tests?\b/i },
@@ -99,7 +105,30 @@ export function validatePlanStepText(
         "Name exact files, artifacts, commands, or verification evidence before the plan can run.",
     };
   }
+  if (isReportOnlyStep(step)) {
+    return {
+      valid: false,
+      reason:
+        `Step "${step.name}" is a report-only or final-answer step. ` +
+        "Keep final reporting in the summary of the evidence-gathering step instead of adding a separate plan step.",
+    };
+  }
   return { valid: true };
+}
+
+export function buildExecutablePlanValidationPrompt(reason: string): string {
+  return [
+    "The assembled plan is not executable yet: " + reason,
+    "",
+    "Executable-plan validation gates:",
+    ...EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES,
+    "",
+    "Do not use tools. Return exactly one additional well-formed YAML plan step that is directly executable by the coding agent.",
+    "Do not describe rewriting, correcting, reporting, or ensuring a previous step.",
+    "The YAML plan must have top-level plan.steps with exactly one item, and the step must have string name, prompt, and verify fields.",
+    "The new step's prompt and verify fields must contain exact task-specific files, artifacts, commands, or verification evidence.",
+    "Do not return plan: done; the assembled plan did not pass validation yet.",
+  ].join("\n");
 }
 
 function validateStepFields(step: ParsedStep): PlanValidationResult {
@@ -119,4 +148,15 @@ function validateStepFields(step: ParsedStep): PlanValidationResult {
     };
   }
   return { valid: true };
+}
+
+function isReportOnlyStep(step: ParsedStep): boolean {
+  const prompt = step.prompt.trim();
+  if (!REPORT_ONLY_STEP_START_RE.test(prompt)) return false;
+  const promptWithoutPriorResultReferences = prompt.replace(
+    /\bresult of reading\b/gi,
+    "prior result",
+  );
+  if (EXECUTION_ACTION_RE.test(promptWithoutPriorResultReferences)) return false;
+  return true;
 }
