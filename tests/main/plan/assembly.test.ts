@@ -149,9 +149,11 @@ describe("iterative plan assembly", () => {
     expect(prompt).toContain(
       "Use one read-only inspection action first if project evidence is missing.",
     );
+    expect(prompt).toContain("Emit plan steps one at a time.");
     expect(prompt).toContain(
       "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     );
+    expect(prompt).toContain("Research and emit the first step now.");
     expect(prompt).toContain(
       "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>",
     );

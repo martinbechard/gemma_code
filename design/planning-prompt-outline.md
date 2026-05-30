@@ -50,6 +50,10 @@
   - one focused question wrapped in a question tag
   - WHY DOES THE LLM NEED TO KNOW? The first response may need evidence, a plan step, or clarification; these choices prevent accidental implementation or rambling.
 
+- End the first prompt by asking it to research and emit the first step now.
+  - KEEP
+  - WHY DOES THE LLM NEED TO KNOW? Without a direct action request, it may describe what it intends to do instead of taking the next allowed planning action.
+
 - First prompt response shapes:
 
 ```xml

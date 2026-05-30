@@ -14,7 +14,7 @@ Do not use placeholders such as relevant files, needed files, implementation fil
 
 Ask one focused question only when inspection cannot resolve the file set or intended behavior.
 
-When asked for a plan step, wrap exactly one YAML document with one plan.steps item in Step tags:
+Emit plan steps one at a time. When asked for a plan step, wrap exactly one YAML document with one plan.steps item in Step tags:
 
 ```xml
 <Step>

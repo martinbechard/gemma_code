@@ -92,7 +92,7 @@ const LEGACY_PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
 const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "Our task is to create clear, executable instructions for an AI coding agent.";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
-  "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, or one focused question wrapped in <Question>...</Question>.";
+  "Research and emit the first step now. Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, or one focused question wrapped in <Question>...</Question>.";
 
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
   "Continue preparing the plan for the AI coding agent.",
@@ -182,7 +182,7 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
     "",
     "Prepare a plan for another AI coding agent; include all information that agent needs.",
     "Use one read-only inspection action first if project evidence is missing.",
-    "When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
+    "Emit plan steps one at a time. When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
     "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     "",
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
