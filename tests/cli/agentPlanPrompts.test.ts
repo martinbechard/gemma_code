@@ -11,9 +11,11 @@ import {
   buildRepeatedRecoveryReadPrompt,
   createPlanInspectionEvidence,
   recordPlanInspectionEvidence,
+  resetCliMessagesForPlanExecution,
   shouldHandlePlanAssemblyBuffer,
   type AgentRunOptions,
 } from "../../src/cli/agent";
+import type { MLXChatMessage } from "../../src/main/mlx";
 import {
   createPlanStepEvidence,
   recordPlanToolEvidence,
@@ -31,6 +33,44 @@ const codeOpts: AgentRunOptions = {
   enableBash: true,
   worktree: true,
 };
+
+describe("resetCliMessagesForPlanExecution", () => {
+  it("drops planning and semantic review context before execution", () => {
+    const messages: MLXChatMessage[] = [
+      { role: "system", content: "code plan system prompt" },
+      { role: "user", content: "planning request" },
+      { role: "assistant", content: "assembled plan" },
+      { role: "user", content: "plan semantic review prompt" },
+      { role: "assistant", content: "review: pass" },
+    ];
+
+    const changed = resetCliMessagesForPlanExecution(
+      messages,
+      "code execute system prompt",
+    );
+
+    expect(changed).toBe(true);
+    expect(messages).toEqual([
+      { role: "system", content: "code execute system prompt" },
+    ]);
+  });
+
+  it("leaves an existing fresh execution context untouched", () => {
+    const messages: MLXChatMessage[] = [
+      { role: "system", content: "code execute system prompt" },
+    ];
+
+    const changed = resetCliMessagesForPlanExecution(
+      messages,
+      "code execute system prompt",
+    );
+
+    expect(changed).toBe(false);
+    expect(messages).toEqual([
+      { role: "system", content: "code execute system prompt" },
+    ]);
+  });
+});
 
 describe("plan inspection evidence", () => {
   it("ignores failed tool results", () => {

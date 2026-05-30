@@ -165,6 +165,25 @@ function pushHarnessPrompt(
   messages.push({ role: "user", content });
 }
 
+export function resetCliMessagesForPlanExecution(
+  messages: MLXChatMessage[],
+  planExecutionSystemPrompt: string | null,
+): boolean {
+  if (!planExecutionSystemPrompt) return false;
+  if (
+    messages.length === 1 &&
+    messages[0]?.role === "system" &&
+    messages[0].content === planExecutionSystemPrompt
+  ) {
+    return false;
+  }
+  messages.splice(0, messages.length, {
+    role: "system",
+    content: planExecutionSystemPrompt,
+  });
+  return true;
+}
+
 export function createPlanInspectionEvidence(): PlanInspectionEvidence {
   return {
     listedFiles: false,
@@ -537,13 +556,16 @@ async function runAgentLoop(
   };
 
   const usePlanExecutionPrompt = (): void => {
-    if (!planExecutionSystemPrompt || messages[0]?.role !== "system") return;
-    messages[0] = {
-      role: "system",
-      content: planExecutionSystemPrompt,
-    };
-    displaySystemPrompt("code execute", planExecutionSystemPrompt);
-    meta("system prompt: code execute");
+    if (
+      resetCliMessagesForPlanExecution(
+        messages,
+        planExecutionSystemPrompt,
+      ) &&
+      planExecutionSystemPrompt
+    ) {
+      displaySystemPrompt("code execute", planExecutionSystemPrompt);
+      meta("system prompt: code execute");
+    }
   };
 
   const startPlanSemanticReview = (plan: ParsedPlan): void => {
