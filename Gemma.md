@@ -160,7 +160,7 @@ Example:
 
 Create or overwrite a file in the workspace. Use this to generate code, HTML, CSS, JSON, etc.
 
-**Read before write.** write_file replaces the entire file. If the file already exists, you MUST read_file it first (or have done so earlier in the conversation) before issuing a write_file for that path. Use write_file for file changes for now. Overwriting an existing file you have not read is a destructive action and will be treated as a failure during verification.
+**Read before write.** write_file replaces the entire file. If the file already exists, you MUST read_file it first or have refreshed it with a successful edit_file or write_file result before issuing a write_file for that path. Use write_file for new files or full-file rewrites that preserve the current file content. Overwriting an existing file you have not read is a destructive action and will be treated as a failure during verification.
 
 Parameters:
 
@@ -197,9 +197,26 @@ Example:
 </action>
 ```
 
-### Editing existing files
+### edit_file
 
-For now, use read_file followed by write_file for existing file changes. The write_file content must include the full current file content plus the requested change.
+Replace a snippet in an existing file. Use this for targeted changes after reading the file. The old_string must appear exactly once unless replace_all is true. A successful edit refreshes the updated file in context.
+
+Parameters:
+
+- path (required): file path.
+- old_string (required, multi-line): exact text to find.
+- new_string (required, multi-line): replacement text.
+- replace_all: true to replace every occurrence.
+
+Example:
+
+```
+<action name="edit_file">
+<path>index.html</path>
+<old_string>Hello</old_string>
+<new_string>Hello, world</new_string>
+</action>
+```
 
 ### list_files
 

@@ -1,5 +1,6 @@
 import { wsReadFile, wsWriteFile } from "../workspace";
 import { cleanFileContent } from "./fileContent";
+import { formatFileContextResult } from "./fileContext";
 import { PROTECTED_OVERWRITE_PATH_RE } from "./protectedFiles";
 import type { ToolContext, ToolSpec } from "./types";
 
@@ -46,7 +47,12 @@ async function writeFile(
   await wsWriteFile(ctx.conversationId, path, content);
   ctx.onFileChange?.();
   const lines = content.split("\n").length;
-  return `Wrote ${path} (${content.length} bytes, ${lines} lines).`;
+  const summary = `Wrote ${path} (${content.length} bytes, ${lines} lines).`;
+  return [
+    summary,
+    "",
+    formatFileContextResult(ctx.conversationId, path, content),
+  ].join("\n");
 }
 
 async function detectDestructiveOverwrite(

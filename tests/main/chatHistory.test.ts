@@ -127,6 +127,59 @@ describe("replayRequestMessages", () => {
     expect(replayedText).toContain(OTHER_READ_RESULT);
   });
 
+  it("keeps only the latest refreshed file context across reads and edits", () => {
+    const messages: ChatRequest["messages"] = [
+      { role: "user", content: "Read and edit the file" },
+      {
+        role: "assistant",
+        content: "I read it",
+        toolCalls: [
+          {
+            id: "call-1",
+            name: "read_file",
+            args: { path: READ_PATH },
+            result: [
+              "Files in context:",
+              `- ${READ_PATH}`,
+              "",
+              `Current file: ${READ_PATH}`,
+              OLD_READ_RESULT,
+            ].join("\n"),
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: "I edited it",
+        toolCalls: [
+          {
+            id: "call-2",
+            name: "edit_file",
+            args: { path: READ_PATH },
+            result: [
+              `Edited ${READ_PATH} (1 replacement).`,
+              "",
+              "Files in context:",
+              `- ${READ_PATH}`,
+              "",
+              `Current file: ${READ_PATH}`,
+              NEW_READ_RESULT,
+            ].join("\n"),
+          },
+        ],
+      },
+    ];
+
+    const replayed = replayRequestMessages({
+      ...COMMON_REQUEST,
+      messages,
+    });
+    const replayedText = replayed.map((message) => message.content).join("\n");
+
+    expect(replayedText).not.toContain(OLD_READ_RESULT);
+    expect(replayedText).toContain(NEW_READ_RESULT);
+  });
+
   it("removes an earlier read result when a newer read for the same path is appended", () => {
     const messages = [
       {
@@ -152,6 +205,48 @@ describe("replayRequestMessages", () => {
       toolName: "read_file",
       args: { path: READ_PATH },
       result: [
+        "Files in context:",
+        `- ${READ_PATH}`,
+        "",
+        `Current file: ${READ_PATH}`,
+        NEW_READ_RESULT,
+      ].join("\n"),
+      hadError: false,
+    });
+
+    const replayedText = messages.map((message) => message.content).join("\n");
+
+    expect(replayedText).not.toContain(OLD_READ_RESULT);
+    expect(replayedText).toContain(NEW_READ_RESULT);
+  });
+
+  it("removes earlier file context when an edit result refreshes the same path", () => {
+    const messages = [
+      {
+        role: "assistant" as const,
+        content:
+          '<action name="read_file">\n<path>src/main/tools.ts</path>\n</action>',
+      },
+    ];
+
+    appendToolResultMessage(messages, {
+      toolName: "read_file",
+      args: { path: READ_PATH },
+      result: [
+        "Files in context:",
+        `- ${READ_PATH}`,
+        "",
+        `Current file: ${READ_PATH}`,
+        OLD_READ_RESULT,
+      ].join("\n"),
+      hadError: false,
+    });
+    appendToolResultMessage(messages, {
+      toolName: "edit_file",
+      args: { path: READ_PATH },
+      result: [
+        `Edited ${READ_PATH} (1 replacement).`,
+        "",
         "Files in context:",
         `- ${READ_PATH}`,
         "",

@@ -4,6 +4,11 @@ import type { MLXChatMessage } from "./mlx";
 const TOOL_RESULT_STATUS_OK = "ok";
 const TOOL_RESULT_STATUS_ERROR = "error";
 const READ_FILE_TOOL_NAME = "read_file";
+const FILE_CONTEXT_TOOL_NAMES = new Set([
+  READ_FILE_TOOL_NAME,
+  "edit_file",
+  "write_file",
+]);
 const CURRENT_FILE_LINE_RE = /^Current file: (.+)$/m;
 const TOOL_RESULT_ERROR_RE =
   /^(Error\b|Error reading|Error editing|Error writing|Error deleting|Error fetching)/i;
@@ -25,7 +30,7 @@ export function replayRequestMessages(
   if (req.executePlan) return [];
 
   const planningTaskMessageIndex = req.planningTaskMessageIndex ?? -1;
-  const latestReadResultKeys = latestReadResultKeysFor(
+  const latestFileContextResultKeys = latestFileContextResultKeysFor(
     req.messages,
     planningTaskMessageIndex,
   );
@@ -46,8 +51,8 @@ export function replayRequestMessages(
     ).entries()) {
       if (toolCall.result == null) continue;
       if (
-        isReadFileToolCall(toolCall.name) &&
-        !latestReadResultKeys.has(readResultKey(messageIndex, toolCallIndex))
+        isFileContextToolCall(toolCall) &&
+        !latestFileContextResultKeys.has(resultKey(messageIndex, toolCallIndex))
       ) {
         continue;
       }
@@ -69,12 +74,9 @@ export function appendToolResultMessage(
   messages: MLXChatMessage[],
   input: AppendToolResultMessageInput,
 ): void {
-  const path =
-    !input.hadError && isReadFileToolCall(input.toolName)
-      ? readFileToolPath(input.args)
-      : null;
+  const path = !input.hadError ? fileContextPath(input.toolName, input.args) : null;
   if (path) {
-    removeReadResultMessagesForPath(messages, path);
+    removeFileContextMessagesForPath(messages, path);
   }
   messages.push({
     role: "user",
@@ -94,7 +96,7 @@ export function formatToolResultMessage(
   return `[${hadError ? TOOL_RESULT_STATUS_ERROR : TOOL_RESULT_STATUS_OK}] ${toolName} tool result:\n${result}`;
 }
 
-function latestReadResultKeysFor(
+function latestFileContextResultKeysFor(
   messages: ChatRequest["messages"],
   planningTaskMessageIndex: number,
 ): Set<string> {
@@ -105,60 +107,74 @@ function latestReadResultKeysFor(
     for (const [toolCallIndex, toolCall] of (
       message.toolCalls ?? []
     ).entries()) {
-      if (!isUsableReadFileToolCall(toolCall)) continue;
-      const path = readFileToolPath(toolCall.args);
+      if (!isUsableFileContextToolCall(toolCall)) continue;
+      const path = fileContextToolCallPath(toolCall);
       if (!path) continue;
-      latestByPath.set(path, readResultKey(messageIndex, toolCallIndex));
+      latestByPath.set(path, resultKey(messageIndex, toolCallIndex));
     }
   }
   return new Set(latestByPath.values());
 }
 
-function isUsableReadFileToolCall(
+function isUsableFileContextToolCall(
   toolCall: NonNullable<ChatRequest["messages"][number]["toolCalls"]>[number],
 ): boolean {
   return (
-    isReadFileToolCall(toolCall.name) &&
+    isFileContextToolCall(toolCall) &&
     typeof toolCall.result === "string" &&
     !TOOL_RESULT_ERROR_RE.test(toolCall.result.trimStart())
   );
 }
 
-function isReadFileToolCall(toolName: string): boolean {
-  return toolName === READ_FILE_TOOL_NAME;
+function isFileContextToolCall(
+  toolCall: NonNullable<ChatRequest["messages"][number]["toolCalls"]>[number],
+): boolean {
+  return fileContextToolCallPath(toolCall) !== null;
 }
 
-function readFileToolPath(args: Record<string, unknown>): string | null {
+function fileContextToolCallPath(
+  toolCall: NonNullable<ChatRequest["messages"][number]["toolCalls"]>[number],
+): string | null {
+  if (!FILE_CONTEXT_TOOL_NAMES.has(toolCall.name)) return null;
+  if (
+    toolCall.name !== READ_FILE_TOOL_NAME &&
+    typeof toolCall.result === "string" &&
+    !CURRENT_FILE_LINE_RE.test(toolCall.result)
+  ) {
+    return null;
+  }
+  return fileContextPath(toolCall.name, toolCall.args);
+}
+
+function fileContextPath(
+  toolName: string,
+  args: Record<string, unknown>,
+): string | null {
+  if (!FILE_CONTEXT_TOOL_NAMES.has(toolName)) return null;
   const path = args.path;
   if (typeof path !== "string") return null;
   const trimmed = path.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function readResultKey(messageIndex: number, toolCallIndex: number): string {
+function resultKey(messageIndex: number, toolCallIndex: number): string {
   return `${messageIndex}:${toolCallIndex}`;
 }
 
-function removeReadResultMessagesForPath(
+function removeFileContextMessagesForPath(
   messages: MLXChatMessage[],
   path: string,
 ): void {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== "user") continue;
-    if (readResultPathFromContent(message.content) !== path) continue;
+    if (fileContextPathFromContent(message.content) !== path) continue;
     messages.splice(index, 1);
   }
 }
 
-function readResultPathFromContent(content: string): string | null {
-  if (
-    !content.startsWith(
-      `[${TOOL_RESULT_STATUS_OK}] ${READ_FILE_TOOL_NAME} tool result:\n`,
-    )
-  ) {
-    return null;
-  }
+function fileContextPathFromContent(content: string): string | null {
+  if (!content.startsWith(`[${TOOL_RESULT_STATUS_OK}] `)) return null;
   const currentFileMatch = content.match(CURRENT_FILE_LINE_RE);
   return currentFileMatch?.[1]?.trim() || null;
 }

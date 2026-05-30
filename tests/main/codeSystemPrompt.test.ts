@@ -67,43 +67,44 @@ describe("codeSystemPrompt", () => {
     );
   });
 
-  it("teaches execute mode to use write_file for file changes", () => {
+  it("teaches execute mode to use edit_file for targeted existing-file changes", () => {
     const executePrompt = readFileSync(
       join(process.cwd(), "Gemma.execute.md"),
       "utf8",
     );
 
-    expect(executePrompt).toContain("Use write_file for file changes");
+    expect(executePrompt).toContain(
+      "Use edit_file for targeted changes to existing files",
+    );
     expect(executePrompt).toContain("Do not invent tool results");
-    expect(executePrompt).toContain("A visible tool result that begins with [ok] is usable output");
+    expect(executePrompt).toContain(
+      "A visible tool result that begins with [ok] is usable output",
+    );
     expect(executePrompt).toContain('reply exactly with <error reason="short reason"/>');
     expect(executePrompt).toContain("no more than 3 non-empty lines");
-    expect(executePrompt).toContain("Do not write waiting prose");
-    expect(executePrompt).toContain("list_files returns the workspace tree");
-    expect(executePrompt).toContain("search_files searches file contents");
+    expect(executePrompt).toContain("write waiting prose");
+    expect(executePrompt).toContain("list_files is not automatic");
+    expect(executePrompt).toContain("Use search_files for references");
     expect(executePrompt).toContain(
-      "use search_files before list_files or run_bash",
+      "Use list_files only when you need the workspace tree",
     );
     expect(executePrompt).toContain(
       "a read-only action is not enough",
     );
-    expect(executePrompt).toContain("post-edit absence evidence");
+    expect(executePrompt).toContain("post-mutation absence evidence");
     expect(executePrompt).toContain(
-      "The content must preserve the current file content",
+      "full-file rewrites that preserve the current file content",
     );
-    expect(executePrompt).toContain("Execution starts with a fresh model context");
+    expect(executePrompt).toContain("fresh model context");
     const prompt = codeSystemPrompt("/workspace", "http://preview", "execute");
     expect(prompt).toContain('<action name="tool_name"/> is also valid');
     expect(prompt).toContain("### write_file");
-    expect(prompt).not.toContain("### edit_file");
+    expect(prompt).toContain("### edit_file");
     expect(executePrompt).toContain(
-      "use run_bash with that exact command",
+      "run that exact command with run_bash",
     );
     expect(executePrompt).toContain(
       "including pnpm test, pnpm test tests/main/someTool.test.ts, or pnpm run build",
-    );
-    expect(executePrompt).toContain(
-      "Do not replace exact commands with run_project_script",
     );
     expect(executePrompt).toContain("preserve the current file content");
   });

@@ -22,7 +22,8 @@ The rules below are calibrated for the gemma-chat-public repo itself. You know y
 
 ```
 src/main/         Electron main process (Node). Tool runtime, plan engine, IPC handlers.
-  tools.ts        Single TOOLS registry — every tool is one entry here.
+  tools.ts        Compatibility export for the tools folder.
+  tools/          Tool modules and registry, one file per tool plus index.ts.
   index.ts        IPC entry, agent loop, plan dispatch.
   plan/           Plan parser, execution state machine, plan store.
   workspace.ts    Sandboxed file ops used by code/build tools.
@@ -42,11 +43,11 @@ Gemma.chat.md     Chat-mode addendum.
 
 ### Where to add things — read the canonical file FIRST
 
-For each kind of change, read the listed file before deciding on a shape. The existing entries are the template for your new entry; copy their structure. Use write_file for file changes for now, and preserve the full current file content when updating large project files.
+For each kind of change, read the listed file before deciding on a shape. The existing entries are the template for your new entry; copy their structure. Use edit_file for targeted changes to existing files, and use write_file only for new files or full-file rewrites that preserve the current content.
 
 | Feature kind                                      | Read first                                                   | What to add                                                                                                                                                 |
 | ------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| New code/build tool, such as get_current_datetime | src/main/tools.ts                                            | One new entry in the TOOLS map with name, description, params, example, mode, and run. Then document it as a new tool section in Gemma.md next to the other tools. |
+| New code/build tool, such as get_current_datetime | src/main/tools/index.ts and nearby src/main/tools modules    | Add one module for the tool, import it in the index file, register it in the TOOLS map, and document it as a new tool section in Gemma.md next to the other tools. |
 | New CLI flag or command                           | src/cli/agent.ts                                             | Extend the argument parsing and dispatch in this file.                                                                                                      |
 | New IPC channel                                   | src/preload/index.ts and src/main/index.ts                   | Both must change in lockstep.                                                                                                                               |
 | New shared type                                   | src/shared/types.ts                                          | Add the type here so main, preload, renderer, and cli all see it.                                                                                            |

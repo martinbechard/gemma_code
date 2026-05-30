@@ -86,6 +86,9 @@ describe("write_file tool", () => {
     );
 
     expect(result).toContain("Wrote tests/main/newTool.test.ts");
+    expect(result).toContain("Files in context:");
+    expect(result).toContain("Current file: tests/main/newTool.test.ts");
+    expect(result).toContain("import { describe, it } from 'vitest';");
   });
 });
 

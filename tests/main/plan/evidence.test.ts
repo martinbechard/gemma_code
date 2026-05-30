@@ -102,6 +102,12 @@ describe("plan step evidence", () => {
 
     recordPlanToolEvidence(
       evidence,
+      "write_file",
+      "Error writing src/main/tools/index.ts: destructive overwrite blocked.",
+      { path: "src/main/tools/index.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
       "edit_file",
       "Edited src/main/tools.ts (2 replacements).",
       { path: "src/main/tools.ts" },
@@ -121,6 +127,36 @@ describe("plan step evidence", () => {
     ).toBeNull();
   });
 
+  it("reports missing final removal evidence instead of failing only because an earlier write failed", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "write_file",
+      "Wrote src/main/tools/getCurrentWorkingDirectory.ts (0 bytes, 1 lines).",
+      { path: "src/main/tools/getCurrentWorkingDirectory.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "write_file",
+      "Error writing src/main/tools/index.ts: destructive overwrite blocked.",
+      { path: "src/main/tools/index.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      "import { getCurrentWorkingDirectoryTool } from './getCurrentWorkingDirectory';",
+      { path: "src/main/tools/index.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        'The code implementing the "LLM tool to get the current working directory" has been successfully removed from the application files.',
+        evidence,
+      ),
+    ).toContain("missing post-mutation absence evidence");
+  });
+
   it("accepts current-working-directory removal after post-mutation read absence", () => {
     const evidence = createPlanStepEvidence();
 
@@ -135,6 +171,32 @@ describe("plan step evidence", () => {
       "read_file",
       "export const tools = { get_current_datetime: {} };",
       { path: "src/main/tools.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        'The code implementing the "LLM tool to get the current working directory" has been successfully removed from the application files.',
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("accepts removal evidence from refreshed write_file content", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "write_file",
+      [
+        "Wrote src/main/tools/index.ts (100 bytes, 5 lines).",
+        "",
+        "Files in context:",
+        "- src/main/tools/index.ts",
+        "",
+        "Current file: src/main/tools/index.ts",
+        "export const tools = { get_current_datetime: {} };",
+      ].join("\n"),
+      { path: "src/main/tools/index.ts" },
     );
 
     expect(

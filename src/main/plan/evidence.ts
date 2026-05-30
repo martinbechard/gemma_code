@@ -95,6 +95,7 @@ const TRUNCATED_OUTPUT_RE = /\[(?:…|\.\.\.)?(?:output )?truncated\]/i;
 const NO_SEARCH_MATCHES_RE = /^No matches found for (.+?) in (.+?)\./;
 const MISSING_TOOL_RESULT_REASON_RE =
   /\b(?:result|results|output|tool result|search|listing|file evidence)\b[\s\S]{0,80}\b(?:not yet available|not available|missing|not visible|not found|unavailable)\b|\b(?:not yet available|not available|missing|not visible|unavailable)\b[\s\S]{0,80}\b(?:result|results|output|tool result|search|listing|file evidence)\b/i;
+const CURRENT_FILE_LINE_PREFIX = "Current file: ";
 
 export function createPlanStepEvidence(): PlanStepEvidence {
   return {
@@ -290,14 +291,19 @@ export function recordPlanToolEvidence(
     path.length > 0 &&
     !TOOL_ERROR_RE.test(trimmedResult)
   ) {
-    evidence.readPaths.add(path);
-    evidence.readResults.set(path, result);
-    evidence.readActions.push({
-      path,
-      sequence,
-      truncated: TRUNCATED_OUTPUT_RE.test(result),
-      content: result,
-    });
+    recordReadEvidence(evidence, path, sequence, result, result);
+  }
+
+  if (
+    (toolName === "write_file" || toolName === "edit_file") &&
+    typeof path === "string" &&
+    path.length > 0 &&
+    !TOOL_ERROR_RE.test(trimmedResult)
+  ) {
+    const refreshedContent = refreshedFileContentFromToolResult(result, path);
+    if (refreshedContent !== null) {
+      recordReadEvidence(evidence, path, sequence, refreshedContent, result);
+    }
   }
 
   if (
@@ -359,10 +365,6 @@ export function forcedVerifyFailureReason(
   criterion: string,
   evidence: PlanStepEvidence,
 ): string | null {
-  if (evidence.toolFailures.length > 0) {
-    return `tool failure during step: ${last(evidence.toolFailures)}`;
-  }
-
   if (evidence.recoverableEditFailures.size > 0) {
     return `tool failure during step: ${last([
       ...evidence.recoverableEditFailures.values(),
@@ -377,7 +379,16 @@ export function forcedVerifyFailureReason(
     return null;
   }
 
-  if (requiresMutationEvidence(criterion) && evidence.mutationActions.length === 0) {
+  const mutationRequired = requiresMutationEvidence(criterion);
+  const readRequired =
+    READ_CRITERION_RE.test(criterion) ||
+    READ_ACTION_REQUIREMENT_RE.test(criterion);
+  const allowsFailure = ALLOWS_FAILURE_RE.test(criterion);
+  const requiresSuccess = REQUIRES_SUCCESS_RE.test(criterion);
+  const requiresCommandEvidence = COMMAND_CRITERION_RE.test(criterion);
+  const requiredCommands = extractRequiredCommands(criterion);
+
+  if (mutationRequired && evidence.mutationActions.length === 0) {
     return "missing mutation evidence: no successful edit_file, write_file, delete_file, or modifying command ran during this step";
   }
 
@@ -389,10 +400,7 @@ export function forcedVerifyFailureReason(
     if (absenceReason) return absenceReason;
   }
 
-  if (
-    READ_CRITERION_RE.test(criterion) ||
-    READ_ACTION_REQUIREMENT_RE.test(criterion)
-  ) {
+  if (readRequired) {
     const missingReadPaths = extractCriterionPaths(criterion).filter(
       (path) => !evidence.readPaths.has(path) && !evidence.listedPaths.has(path),
     );
@@ -400,11 +408,6 @@ export function forcedVerifyFailureReason(
       return `missing file evidence for: ${missingReadPaths.join(", ")}`;
     }
   }
-
-  const allowsFailure = ALLOWS_FAILURE_RE.test(criterion);
-  const requiresSuccess = REQUIRES_SUCCESS_RE.test(criterion);
-  const requiresCommandEvidence = COMMAND_CRITERION_RE.test(criterion);
-  const requiredCommands = extractRequiredCommands(criterion);
 
   if (requiredCommands.length > 0) {
     const missingSuccessfulCommands = requiredCommands.filter(
@@ -422,15 +425,23 @@ export function forcedVerifyFailureReason(
     return null;
   }
 
-  if (evidence.commandFailures.length === 0) {
-    if (requiresCommandEvidence && evidence.commandResults.length === 0) {
-      return "missing command evidence for verify criterion";
-    }
+  if (requiresCommandEvidence && evidence.commandResults.length === 0) {
+    return "missing command evidence for verify criterion";
+  }
+
+  if (
+    evidence.commandFailures.length > 0 &&
+    (requiresSuccess || !allowsFailure)
+  ) {
+    return `command failure during step: ${last(evidence.commandFailures)}`;
+  }
+
+  if (mutationRequired || readRequired) {
     return null;
   }
 
-  if (requiresSuccess || !allowsFailure) {
-    return `command failure during step: ${last(evidence.commandFailures)}`;
+  if (evidence.toolFailures.length > 0) {
+    return `tool failure during step: ${last(evidence.toolFailures)}`;
   }
 
   return null;
@@ -536,7 +547,7 @@ function missingRemovalAbsenceEvidenceReason(
       ) ||
       evidence.readActions.some(
         (read) =>
-          read.sequence > lastMutationSequence &&
+          read.sequence >= lastMutationSequence &&
           !read.truncated &&
           isRelevantRemovalRead(read.path, relevantReadPaths),
       );
@@ -591,12 +602,15 @@ function hasPostMutationReadAbsence(
   lastMutationSequence: number,
   relevantReadPaths: Set<string>,
 ): boolean {
-  return evidence.readActions.some(
+  const relevantReads = evidence.readActions.filter(
     (read) =>
-      read.sequence > lastMutationSequence &&
+      read.sequence >= lastMutationSequence &&
       !read.truncated &&
-      isRelevantRemovalRead(read.path, relevantReadPaths) &&
-      !read.content.includes(term),
+      isRelevantRemovalRead(read.path, relevantReadPaths),
+  );
+  return (
+    relevantReads.length > 0 &&
+    relevantReads.every((read) => !read.content.includes(term))
   );
 }
 
@@ -604,9 +618,15 @@ function removalReadPaths(
   criterion: string,
   evidence: PlanStepEvidence,
 ): Set<string> {
-  const paths = new Set(extractCriterionPaths(criterion));
+  const criterionPaths = extractCriterionPaths(criterion);
+  const paths = new Set(criterionPaths);
   for (const mutation of evidence.mutationActions) {
     if (mutation.path) paths.add(mutation.path);
+  }
+  if (criterionPaths.length === 0) {
+    for (const read of evidence.readActions) {
+      paths.add(read.path);
+    }
   }
   return paths;
 }
@@ -616,6 +636,34 @@ function isRelevantRemovalRead(
   relevantReadPaths: Set<string>,
 ): boolean {
   return relevantReadPaths.size === 0 || relevantReadPaths.has(path);
+}
+
+function recordReadEvidence(
+  evidence: PlanStepEvidence,
+  path: string,
+  sequence: number,
+  content: string,
+  resultForTruncation: string,
+): void {
+  evidence.readPaths.add(path);
+  evidence.readResults.set(path, content);
+  evidence.readActions.push({
+    path,
+    sequence,
+    truncated: TRUNCATED_OUTPUT_RE.test(resultForTruncation),
+    content,
+  });
+}
+
+function refreshedFileContentFromToolResult(
+  result: string,
+  path: string,
+): string | null {
+  const lines = result.split(/\r?\n/);
+  const heading = `${CURRENT_FILE_LINE_PREFIX}${path}`;
+  const headingIndex = lines.findIndex((line) => line.trim() === heading);
+  if (headingIndex < 0) return null;
+  return lines.slice(headingIndex + 1).join("\n");
 }
 
 function isSuccessfulMutationTool(

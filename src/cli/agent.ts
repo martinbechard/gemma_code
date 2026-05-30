@@ -6,6 +6,7 @@ import {
   chatSystemPrompt,
   codeSystemPrompt,
   findNextAction,
+  isToolErrorResult,
   runTool,
   type ToolContext,
 } from "../main/tools";
@@ -803,6 +804,7 @@ async function runAgentLoop(
       } catch (e) {
         result = `Error: ${(e as Error).message}`;
       }
+      const hadError = isToolErrorResult(result);
       if (!planState) {
         recordPlanInspectionEvidence(
           planInspectionEvidence,
@@ -825,7 +827,7 @@ async function runAgentLoop(
         toolName: action.name,
         args: action.args,
         result,
-        hadError: false,
+        hadError,
       });
       if (planState?.currentStepId) {
         recordPlanToolEvidence(stepEvidence, action.name, result, action.args);
