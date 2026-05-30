@@ -5,62 +5,62 @@
 - Plan one step at a time.
   - KEEP
   - The prompt should say to emit one plan step per response, or plan: done when complete.
-  - BECAUSE: The harness accumulates one fragment at a time and asks for the next fragment.
+  - WHY DOES THE LLM NEED TO KNOW? The harness accumulates one fragment at a time and asks for the next fragment.
 
 - Allow read-only inspection during planning.
   - KEEP
   - The prompt should allow listing, searching, reading files, and safe read-only commands before writing a plan step.
-  - BECAUSE: The planner must look at the real project to choose correct files and avoid guessed plans.
+  - WHY DOES THE LLM NEED TO KNOW? The planner must look at the real project to choose correct files and avoid guessed plans.
 
 - Forbid mutation during planning.
   - KEEP
   - The prompt should forbid editing, writing, creating, deleting, and mutating shell commands.
-  - BECAUSE: Planning decides what should happen; execution performs approved changes later.
+  - WHY DOES THE LLM NEED TO KNOW? Planning decides what should happen; execution performs approved changes later.
 
 - Mention execution context reset.
   - KEEP
   - The prompt should say execution starts from the approved plan, not the full planning chat.
-  - BECAUSE: Any fact needed later must be captured in a plan step or discovered again by a step.
+  - WHY DOES THE LLM NEED TO KNOW? Any fact needed later must be captured in a plan step or discovered again by a step.
 
 - Require exact target files after inspection.
   - KEEP
   - The prompt should say mutation steps must name exact files or artifacts.
-  - BECAUSE: Execution steps like change the identified files are not executable after context reset.
+  - WHY DOES THE LLM NEED TO KNOW? Execution steps like change the identified files are not executable after context reset.
 
 - Forbid locator-only execution steps.
   - KEEP
   - The prompt should say not to add execution steps whose only purpose is locate, determine, or identify targets.
-  - BECAUSE: Target discovery belongs in planning inspection, not in an approved execution step.
+  - WHY DOES THE LLM NEED TO KNOW? Target discovery belongs in planning inspection, not in an approved execution step.
 
 - Require executable verification.
   - KEEP
   - The prompt should say include only verification needed by the request and project rules.
-  - BECAUSE: The final plan must prove the work was done without bloating every plan with every possible check.
+  - WHY DOES THE LLM NEED TO KNOW? The final plan must prove the work was done without bloating every plan with every possible check.
 
 - Forbid filler steps.
   - KEEP
   - The prompt should forbid report, summarize, conclude, cleanup, final-check, and repeated verification steps.
-  - BECAUSE: These do not change or verify the project and waste execution turns.
+  - WHY DOES THE LLM NEED TO KNOW? These do not change or verify the project and waste execution turns.
 
 - Forbid placeholders.
   - KEEP
   - The prompt should reject placeholder names and wording such as relevant files, needed files, and example file names.
-  - BECAUSE: Placeholders hide missing project knowledge and produce non-executable plans.
+  - WHY DOES THE LLM NEED TO KNOW? Placeholders hide missing project knowledge and produce non-executable plans.
 
 - Define the YAML shape.
   - KEEP
   - The prompt should define plan.steps with one item containing name, prompt, and verify.
-  - BECAUSE: The harness parser needs a stable shape.
+  - WHY DOES THE LLM NEED TO KNOW? The harness parser needs a stable shape.
 
 - Define the done signal.
   - KEEP
   - The prompt should show plan: done.
-  - BECAUSE: The harness needs a clear stop signal for plan assembly.
+  - WHY DOES THE LLM NEED TO KNOW? The harness needs a clear stop signal for plan assembly.
 
 - Ask a clarifying question only when inspection cannot resolve ambiguity.
   - KEEP
   - The prompt should allow one focused question when file set or behavior remains ambiguous.
-  - BECAUSE: A guessed plan is worse than pausing on a real ambiguity.
+  - WHY DOES THE LLM NEED TO KNOW? A guessed plan is worse than pausing on a real ambiguity.
 
 ## Remove From The Prompt
 
