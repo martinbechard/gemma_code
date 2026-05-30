@@ -84,26 +84,16 @@ export class PlanExecutionState {
           prompt: step.prompt,
         });
       }
-      const header =
-        `Execute step "${step.name}" now. Use <action> tags to do the work. ` +
-        `Do NOT emit a YAML plan in this turn; you are already inside a plan and I am driving each step. Any nested plan you emit here will be rejected and this step will be re-prompted unchanged. ` +
-        `If the step is too big, do as much as you can with <action> tags and let verify fail with a reason naming what's left; do not try to nest a sub-plan. ` +
-        `Before writing any new code, read the canonical source-of-truth file for the kind of change you're making so your edit fits the project's existing shape. ` +
-        `If this step names multiple files to read, keep issuing read_file actions until every named path has a tool result before you summarize. ` +
-        `If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply exactly BLOCKED: followed by one short reason, then stop. Do not write waiting prose. Do not assume hidden tool output or continue from guessed information. ` +
-        `If this step requires changing files, describing the change is not enough; you must emit a file-changing <action> tag and receive a successful tool result. ` +
-        `If this step says to add something only if missing or avoid editing when it is already present, and the latest file evidence shows it is already present, summarize that evidence and do not edit the file. ` +
-        `If this step's verify condition requires test, build, file, or command evidence, gather that evidence with action tags during this step before writing the summary. ` +
-        `If this step asks you to remove, edit, update, replace, delete, or modify code, a read-only action is not enough; run a successful edit_file, write_file, delete_file, or clearly modifying run_bash command before summarizing. ` +
-        `If this step asks you to remove code, gather post-edit absence evidence with search_files or read_file after the mutation before summarizing. ` +
-        `If this step names an exact command, run that exact command with run_bash; do not substitute run_project_script. ` +
-        `Do not use write_file to replace an existing source, test, prompt, or package file with only a new snippet; preserve the current file content if a full-file rewrite is necessary. ` +
-        `If any required write, edit, or command action fails, the step is not complete until you fix the cause and rerun the action successfully. ` +
-        `When this step's work is done, write a brief plain-text summary and stop; I will then ask you to verify.`;
       const body = f.retryReason
         ? `${step.prompt}\n\nPrevious attempt failed: ${f.retryReason}. Try a different approach.`
         : step.prompt;
-      const text = `${header}\n\n${body}`;
+      const instructions = [
+        "Use <action> tags to invoke tools to do file operations and other external work.",
+        "If a required tool result is not visible, says Error, is empty when useful output was required, or is truncated before the required evidence appears, reply exactly BLOCKED: followed by one short reason, then stop.",
+        "If this requires changing files, emit a file-changing <action> tag and receive a successful tool result before summarizing.",
+        "Summarize the work that was done.",
+      ];
+      const text = `${body}\n\n${instructions.join("\n")}`;
       return { kind: "step", stepId: f.currentStepNodeId!, text };
     }
 

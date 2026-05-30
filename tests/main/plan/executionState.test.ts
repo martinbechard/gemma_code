@@ -36,23 +36,17 @@ describe("PlanExecutionState — single step happy path", () => {
 
     const p1 = s.nextPrompt();
     expect(p1?.kind).toBe("step");
-    expect(p1?.text).toContain("do explore");
+    expect(p1?.text?.startsWith("do explore")).toBe(true);
     expect(p1?.text).not.toMatch(/\bhost\b/i);
-    expect(p1?.text).toMatch(/do not emit a YAML plan/i);
-    // Grounding reminder: every step prompt nudges the model to read
-    // the canonical file before adding code to this project.
-    expect(p1?.text).toMatch(/read.*canonical/i);
-    expect(p1?.text).toMatch(/multiple files to read/i);
-    expect(p1?.text).toMatch(/gather.*evidence/i);
-    expect(p1?.text).toContain("describing the change is not enough");
-    expect(p1?.text).toContain("file-changing <action> tag");
-    expect(p1?.text).toContain("avoid editing when it is already present");
-    expect(p1?.text).toContain("run that exact command with run_bash");
-    expect(p1?.text).toContain("preserve the current file content");
-    expect(p1?.text).toMatch(/required write, edit, or command action fails/i);
+    expect(p1?.text).not.toMatch(/\bplan\b/i);
+    expect(p1?.text).toContain(
+      "Use <action> tags to invoke tools to do file operations and other external work.",
+    );
+    expect(p1?.text).toContain(
+      "If this requires changing files, emit a file-changing <action> tag and receive a successful tool result before summarizing.",
+    );
     expect(p1?.text).toContain("reply exactly BLOCKED:");
-    expect(p1?.text).toContain("Do not write waiting prose");
-    expect(p1?.text).toContain("Do not assume hidden tool output");
+    expect(p1?.text).toContain("Summarize the work that was done.");
 
     s.finishStepBody();
 
