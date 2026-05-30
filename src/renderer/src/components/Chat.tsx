@@ -838,6 +838,9 @@ export function ExecutionLogEntryDetails({
   if (entry.event === "model_request" && data) {
     return <ModelRequestLogDetails entry={entry} data={data} />;
   }
+  if (entry.event === "model_response" && data) {
+    return <ModelResponseLogDetails entry={entry} data={data} />;
+  }
   return (
     <pre className="selectable mx-3 mb-3 max-h-80 overflow-auto rounded-md border border-white/[0.07] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
       {executionLogDetails(entry)}
@@ -854,11 +857,19 @@ function ModelRequestLogDetails({
 }) {
   const messages = logRecordArrayField(data, "messages");
   const newMessages = logRecordArrayField(data, "newMessages");
+  const fullMessages = logRecordArrayField(data, "fullMessages");
+  const newFullMessages = logRecordArrayField(data, "newFullMessages");
+  const requestBody = logRecordField(data, "requestBody");
   const [showAll, setShowAll] = useState(false);
+  const allRecords = fullMessages.length > 0 ? fullMessages : messages;
+  const newRecords =
+    newFullMessages.length > 0 || fullMessages.length > 0
+      ? newFullMessages
+      : newMessages;
   const visibleMessages =
-    showAll || newMessages.length === 0 ? messages : newMessages;
+    showAll || newRecords.length === 0 ? allRecords : newRecords;
   const visibleLabel =
-    showAll || newMessages.length === 0 ? "all messages" : "new messages";
+    showAll || newRecords.length === 0 ? "all messages" : "new messages";
   return (
     <div className="mx-3 mb-3 overflow-hidden rounded-md border border-white/[0.07] bg-black/25 text-[11px] text-ink-200">
       <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-3 py-2">
@@ -869,15 +880,15 @@ function ModelRequestLogDetails({
             {logStringField(data, "promptPath")}
           </div>
         </div>
-        {messages.length > 0 && (
+        {allRecords.length > 0 && (
           <button
             type="button"
             onClick={() => setShowAll((value) => !value)}
             className="shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[11px] text-ink-300 transition hover:bg-white/[0.08] hover:text-ink-100"
           >
             {showAll
-              ? `Show new messages (${newMessages.length})`
-              : `Show all ${messages.length} messages`}
+              ? `Show new messages (${newRecords.length})`
+              : `Show all ${allRecords.length} messages`}
           </button>
         )}
       </div>
@@ -887,7 +898,7 @@ function ModelRequestLogDetails({
         <span>added: {String(data.newMessageCount ?? "")}</span>
       </div>
       <div className="border-b border-white/[0.06] px-3 py-2 text-ink-500">
-        Showing {visibleLabel}. These are hidden model-context messages; many
+        Showing exact {visibleLabel}. These are hidden model-context messages; many
         are system, harness, tool-result, or retry messages that are not shown
         as separate bubbles in the main chat.
       </div>
@@ -916,14 +927,58 @@ function ModelRequestLogDetails({
                   <span>{String(message.chars ?? 0)} chars</span>
                 </div>
                 <div className="whitespace-pre-wrap break-words leading-5 text-ink-200">
-                  {logStringField(message, "preview")}
+                  {logStringField(message, "content") ||
+                    logStringField(message, "preview")}
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+      {requestBody && (
+        <details className="border-t border-white/[0.06]">
+          <summary className="cursor-pointer px-3 py-2 text-ink-400 marker:text-ink-600">
+            Exact request body
+          </summary>
+          <pre className="selectable max-h-80 overflow-auto border-t border-white/[0.06] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
+            {JSON.stringify(requestBody, null, 2)}
+          </pre>
+        </details>
+      )}
       <details className="border-t border-white/[0.06]">
+        <summary className="cursor-pointer px-3 py-2 text-ink-400 marker:text-ink-600">
+          Raw JSON
+        </summary>
+        <pre className="selectable max-h-80 overflow-auto border-t border-white/[0.06] bg-black/35 p-3 text-[11px] leading-5 text-ink-200">
+          {executionLogDetailsJson(entry)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function ModelResponseLogDetails({
+  entry,
+  data,
+}: {
+  entry: ExecutionLogEntry;
+  data: Record<string, unknown>;
+}) {
+  return (
+    <div className="mx-3 mb-3 overflow-hidden rounded-md border border-white/[0.07] bg-black/25 text-[11px] text-ink-200">
+      <div className="grid grid-cols-3 gap-2 border-b border-white/[0.06] px-3 py-2 text-ink-400">
+        <span>call: {logStringField(data, "callId") || "unknown"}</span>
+        <span>source: {logStringField(data, "requestSource") || "unknown"}</span>
+        <span>chars: {String(data.chars ?? 0)}</span>
+      </div>
+      <div className="border-b border-white/[0.06] px-3 py-2 text-ink-500">
+        Exact assistant response assembled from the streamed chunks for this
+        model call.
+      </div>
+      <pre className="selectable max-h-96 overflow-auto whitespace-pre-wrap border-b border-white/[0.06] bg-black/25 p-3 text-[11px] leading-5 text-ink-200">
+        {logStringField(data, "content")}
+      </pre>
+      <details>
         <summary className="cursor-pointer px-3 py-2 text-ink-400 marker:text-ink-600">
           Raw JSON
         </summary>
@@ -1005,6 +1060,8 @@ export function executionLogSummary(entry: ExecutionLogEntry): string {
       );
     case "model_request":
       return modelRequestSummary(data);
+    case "model_response":
+      return modelResponseSummary(data);
     case "model_chunk":
       return modelChunkSummary(data);
     case "stream_chunk":
@@ -1018,6 +1075,9 @@ export function executionLogDetails(entry: ExecutionLogEntry): string {
   const data = isLogRecord(entry.data) ? entry.data : null;
   if (entry.event === "model_request" && data) {
     return modelRequestDetails(entry, data);
+  }
+  if (entry.event === "model_response" && data) {
+    return modelResponseDetails(entry, data);
   }
   return JSON.stringify(
     {
@@ -1051,6 +1111,12 @@ function modelRequestSummary(data: Record<string, unknown>): string {
   const preview = logStringField(latestMessage, "preview");
   return compactLogText(
     `${messageCount} messages | ${newMessageCount} new | latest ${role}: ${preview}`,
+  );
+}
+
+function modelResponseSummary(data: Record<string, unknown>): string {
+  return compactLogText(
+    `${String(data.chars ?? 0)} chars ${logStringField(data, "content")}`,
   );
 }
 
@@ -1129,7 +1195,9 @@ function modelRequestDetails(
   entry: ExecutionLogEntry,
   data: Record<string, unknown>,
 ): string {
-  const messages = logRecordArrayField(data, "messages");
+  const fullMessages = logRecordArrayField(data, "fullMessages");
+  const messages =
+    fullMessages.length > 0 ? fullMessages : logRecordArrayField(data, "messages");
   const lines = [
     `line: ${entry.line}`,
     `timestamp: ${entry.timestamp}`,
@@ -1150,12 +1218,35 @@ function modelRequestDetails(
       const chars = logNumberField(message, "chars");
       lines.push(
         `  ${index ?? "?"}. ${role} (${chars ?? 0} chars)`,
-        `     ${logStringField(message, "preview")}`,
+        `     ${logStringField(message, "content") || logStringField(message, "preview")}`,
       );
     }
   }
   lines.push("", "raw:", executionLogDetailsJson(entry));
   return lines.join("\n");
+}
+
+function modelResponseDetails(
+  entry: ExecutionLogEntry,
+  data: Record<string, unknown>,
+): string {
+  return [
+    `line: ${entry.line}`,
+    `timestamp: ${entry.timestamp}`,
+    `conversationId: ${entry.conversationId ?? ""}`,
+    `mode: ${entry.mode ?? ""}`,
+    `model: ${entry.model ?? ""}`,
+    `callId: ${logStringField(data, "callId")}`,
+    `requestSource: ${logStringField(data, "requestSource")}`,
+    `outcome: ${logStringField(data, "outcome")}`,
+    `chars: ${String(data.chars ?? 0)}`,
+    "",
+    "content:",
+    logStringField(data, "content"),
+    "",
+    "raw:",
+    executionLogDetailsJson(entry),
+  ].join("\n");
 }
 
 function executionLogDetailsJson(entry: ExecutionLogEntry): string {

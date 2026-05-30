@@ -1038,6 +1038,32 @@ export interface MLXChatOptions {
   temperature?: number;
 }
 
+export interface MLXChatRequestMessage {
+  role: MLXChatMessage["role"];
+  content: string;
+}
+
+export interface MLXChatRequestBody {
+  model: string;
+  messages: MLXChatRequestMessage[];
+  stream: boolean;
+  temperature: number;
+  max_tokens: number;
+}
+
+export function buildChatRequestBody(opts: MLXChatOptions): MLXChatRequestBody {
+  return {
+    model: opts.model,
+    messages: opts.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    })),
+    stream: true,
+    temperature: opts.temperature ?? MLX_CHAT_TEMPERATURE,
+    max_tokens: MLX_CHAT_MAX_TOKENS,
+  };
+}
+
 export async function* chatStream(
   opts: MLXChatOptions,
 ): AsyncGenerator<{ content?: string; done?: boolean }> {
@@ -1064,19 +1090,11 @@ export async function* chatStream(
   }, MLX_FIRST_TOKEN_TIMEOUT_MS);
 
   try {
+    const requestBody = buildChatRequestBody(opts);
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: opts.model,
-        messages: opts.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        stream: true,
-        temperature: opts.temperature ?? MLX_CHAT_TEMPERATURE,
-        max_tokens: MLX_CHAT_MAX_TOKENS,
-      }),
+      body: JSON.stringify(requestBody),
       signal: abortController.signal,
     });
 

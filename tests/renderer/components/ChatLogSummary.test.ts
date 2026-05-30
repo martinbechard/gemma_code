@@ -36,12 +36,14 @@ describe("execution log summaries", () => {
           role: "system",
           chars: 12,
           preview: "System prompt",
+          content: "System prompt",
         },
         {
           index: 3,
           role: "user",
           chars: 42,
           preview: "Execute step Remove_Tool now.",
+          content: "Execute step Remove_Tool now.",
         },
       ],
       newMessages: [
@@ -50,6 +52,7 @@ describe("execution log summaries", () => {
           role: "user",
           chars: 42,
           preview: "Execute step Remove_Tool now.",
+          content: "Execute step Remove_Tool now.",
         },
       ],
     });
@@ -65,6 +68,7 @@ describe("execution log summaries", () => {
 
   it("renders a model request message toggle", () => {
     const logEntry = entry("model_request", {
+      callId: "model-1",
       promptPath: "/tmp/last-system-prompt.txt",
       requestSource: "conversation",
       messageCount: 46,
@@ -76,6 +80,15 @@ describe("execution log summaries", () => {
         preview:
           index === 45 ? "Latest harness prompt" : `Message ${index + 1}`,
       })),
+      fullMessages: Array.from({ length: 46 }, (_, index) => ({
+        index: index + 1,
+        role: index === 0 ? "system" : "user",
+        chars: 20,
+        content:
+          index === 45
+            ? "Exact latest harness prompt"
+            : `Exact message ${index + 1}`,
+      })),
       newMessages: [
         {
           index: 46,
@@ -84,6 +97,19 @@ describe("execution log summaries", () => {
           preview: "Latest harness prompt",
         },
       ],
+      newFullMessages: [
+        {
+          index: 46,
+          role: "user",
+          chars: 27,
+          content: "Exact latest harness prompt",
+        },
+      ],
+      requestBody: {
+        model: "gemma",
+        stream: true,
+        messages: [{ role: "user", content: "Exact latest harness prompt" }],
+      },
     });
 
     const html = renderToStaticMarkup(
@@ -95,9 +121,36 @@ describe("execution log summaries", () => {
     expect(html).toContain("Show all 46 messages");
     expect(html).toContain("source: conversation");
     expect(html).toContain("added: 2");
+    expect(html).toContain("Showing exact new messages");
+    expect(html).toContain("Exact request body");
     expect(html).toContain("Tool calls appear as separate tool_call");
     expect(html).toContain("hidden user message beginning with [ok] or [error]");
-    expect(html).toContain("Latest harness prompt");
+    expect(html).toContain("Exact latest harness prompt");
+  });
+
+  it("summarizes and renders exact model responses", () => {
+    const logEntry = entry("model_response", {
+      callId: "model-1",
+      requestSource: "conversation",
+      outcome: "received",
+      chars: 33,
+      content: "Full assistant response\nwith lines.",
+    });
+
+    expect(executionLogSummary(logEntry)).toContain(
+      "33 chars Full assistant response with lines.",
+    );
+    expect(executionLogDetails(logEntry)).toContain("content:");
+    expect(executionLogDetails(logEntry)).toContain(
+      "Full assistant response\nwith lines.",
+    );
+
+    const html = renderToStaticMarkup(
+      createElement(ExecutionLogEntryDetails, { entry: logEntry }),
+    );
+
+    expect(html).toContain("Exact assistant response");
+    expect(html).toContain("Full assistant response");
   });
 
   it("summarizes stream chunk activity with useful state", () => {

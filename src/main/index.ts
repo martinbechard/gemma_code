@@ -17,6 +17,7 @@ import {
   startServer,
   stopServer,
   chatStream,
+  buildChatRequestBody,
   listLocalModels,
   inspectModelCache,
   isModelCacheReadyForInference,
@@ -468,6 +469,13 @@ interface ModelRequestMessageSummary {
   preview: string;
 }
 
+interface ModelRequestMessageLog {
+  index: number;
+  role: MLXChatMessage["role"];
+  chars: number;
+  content: string;
+}
+
 function buildEditFailureRecoveryPrompt(path: string): string {
   return [
     "The edit_file action failed because old_string could not be applied safely.",
@@ -556,6 +564,17 @@ function summarizeModelRequestMessages(
     role: message.role,
     chars: message.content.length,
     preview: compactModelRequestLogText(message.content),
+  }));
+}
+
+function serializeModelRequestMessages(
+  messages: MLXChatMessage[],
+): ModelRequestMessageLog[] {
+  return messages.map((message, index) => ({
+    index: index + 1,
+    role: message.role,
+    chars: message.content.length,
+    content: message.content,
   }));
 }
 
@@ -1062,10 +1081,25 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           : 0;
       const messageSummaries = summarizeModelRequestMessages(requestMessages);
       const newMessages = messageSummaries.slice(newMessageStart);
+      const fullMessages = serializeModelRequestMessages(requestMessages);
+      const newFullMessages = fullMessages.slice(newMessageStart);
       lastModelRequestMessageCounts.set(
         requestSource,
         requestMessages.length,
       );
+      const modelCallId = `model_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      let modelResponseLogged = false;
+      const logModelResponse = (outcome: string): void => {
+        if (modelResponseLogged) return;
+        modelResponseLogged = true;
+        logExecution("model_response", {
+          callId: modelCallId,
+          requestSource,
+          outcome,
+          chars: buffer.length,
+          content: buffer,
+        });
+      };
       // Persist the assembled conversation to <userData>/debug/last-system-prompt.txt
       // so the human can inspect what the model actually receives. Overwritten
       // every round so the file always reflects the latest call.
@@ -1075,22 +1109,31 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           model: req.model,
         });
         logExecution("model_request", {
+          callId: modelCallId,
           promptPath,
           requestSource,
           messageCount: requestMessages.length,
           newMessageCount: newMessages.length,
           messages: messageSummaries,
           newMessages,
+          fullMessages,
+          newFullMessages,
+          requestBody: buildChatRequestBody({
+            model: req.model,
+            messages: requestMessages,
+            signal: abort.signal,
+          }),
         });
       } catch {
         // debug aid only; never let a write failure abort the chat round
       }
-      streamLoop: for await (const chunk of chatStream({
-        model: req.model,
-        messages: requestMessages,
-        signal: abort.signal,
-      })) {
-        logExecution("model_chunk", chunk);
+      try {
+        streamLoop: for await (const chunk of chatStream({
+          model: req.model,
+          messages: requestMessages,
+          signal: abort.signal,
+        })) {
+          logExecution("model_chunk", { callId: modelCallId, ...chunk });
         if (chunk.content) {
           if (firstToken) {
             firstToken = false;
@@ -1632,6 +1675,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         if (chunk.done) {
           break streamLoop;
         }
+        }
+      } finally {
+        logModelResponse(abort.signal.aborted ? "aborted" : "received");
       }
 
       if (executedAction) {
