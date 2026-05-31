@@ -127,6 +127,65 @@ describe("plan step evidence", () => {
     ).toBeNull();
   });
 
+  it("blocks removal steps when a post-mutation search still finds the removed term in an affected file", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "edit_file",
+      "Edited src/main/tools/index.ts (1 replacement).",
+      { path: "src/main/tools/index.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "search_files",
+      [
+        'Found 2 matches for "get_current_working_directory" in src/main/tools.',
+        "src/main/tools/index.ts:43:  get_current_working_directory: getCurrentWorkingDirectoryTool,",
+        'src/main/tools/searchFiles.ts:56:    \'<action name="search_files">\\n<query>get_current_working_directory</query>\'',
+      ].join("\n"),
+      { query: "get_current_working_directory", path: "src/main/tools" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "src/main/tools/index.ts no longer references get_current_working_directory.",
+        evidence,
+      ),
+    ).toContain(
+      'post-mutation search still found removed term "get_current_working_directory" in src/main/tools/index.ts',
+    );
+  });
+
+  it("blocks removal verification when a refreshed file still contains the camelCase tool symbol", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "edit_file",
+      [
+        "Edited src/main/tools/index.ts (1 replacement).",
+        "",
+        "Files in context:",
+        "- src/main/tools/index.ts",
+        "",
+        "Current file: src/main/tools/index.ts",
+        "// getCurrentWorkingDirectoryTool removed",
+        "export const TOOLS = {",
+        "  get_current_working_directory: getCurrentWorkingDirectoryTool,",
+        "};",
+      ].join("\n"),
+      { path: "src/main/tools/index.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "Remove usage of getCurrentWorkingDirectoryTool in src/main/tools/index.ts. src/main/tools/index.ts no longer references getCurrentWorkingDirectoryTool.",
+        evidence,
+      ),
+    ).toContain("getCurrentWorkingDirectoryTool");
+  });
+
   it("reports missing final removal evidence instead of failing only because an earlier write failed", () => {
     const evidence = createPlanStepEvidence();
 
@@ -176,6 +235,70 @@ describe("plan step evidence", () => {
     expect(
       forcedVerifyFailureReason(
         'The code implementing the "LLM tool to get the current working directory" has been successfully removed from the application files.',
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("accepts exact file deletion evidence without requiring repository-wide symbol absence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "delete_file",
+      "Deleted src/main/tools/getCurrentWorkingDirectory.ts.",
+      { path: "src/main/tools/getCurrentWorkingDirectory.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "The file src/main/tools/getCurrentWorkingDirectory.ts is deleted from the workspace.",
+        evidence,
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores file-context paths when checking post-mutation read absence", () => {
+    const evidence = createPlanStepEvidence();
+
+    recordPlanToolEvidence(
+      evidence,
+      "delete_file",
+      "Deleted src/main/tools/getCurrentWorkingDirectory.ts.",
+      { path: "src/main/tools/getCurrentWorkingDirectory.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "edit_file",
+      [
+        "Edited src/main/tools/index.ts (1 replacement).",
+        "",
+        "Files in context:",
+        "- src/main/tools/getCurrentWorkingDirectory.ts",
+        "- src/main/tools/index.ts",
+        "",
+        "Current file: src/main/tools/index.ts",
+        "export const tools = { get_current_datetime: {} };",
+      ].join("\n"),
+      { path: "src/main/tools/index.ts" },
+    );
+    recordPlanToolEvidence(
+      evidence,
+      "read_file",
+      [
+        "Files in context:",
+        "- src/main/tools/getCurrentWorkingDirectory.ts",
+        "- src/main/tools/index.ts",
+        "",
+        "Current file: src/main/tools/index.ts",
+        "export const tools = { get_current_datetime: {} };",
+      ].join("\n"),
+      { path: "src/main/tools/index.ts" },
+    );
+
+    expect(
+      forcedVerifyFailureReason(
+        "src/main/tools/getCurrentWorkingDirectory.ts is deleted, and src/main/tools/index.ts no longer references the current working directory functionality.",
         evidence,
       ),
     ).toBeNull();

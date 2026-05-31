@@ -5,7 +5,8 @@ import { PROTECTED_OVERWRITE_PATH_RE } from "./protectedFiles";
 import type { ToolContext, ToolSpec } from "./types";
 
 const DESTRUCTIVE_OVERWRITE_MIN_EXISTING_BYTES = 1_000;
-const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.5;
+const DESTRUCTIVE_OVERWRITE_MAX_NEW_TO_OLD_RATIO = 0.8;
+const REMOVAL_COMMENT_RE = /^\s*(?:\/\/|\/\*)[^\n]*\b(?:removed|deleted)\b/im;
 
 export const writeFileTool: ToolSpec = {
   name: "write_file",
@@ -44,6 +45,8 @@ async function writeFile(
     content,
   );
   if (destructiveOverwriteError) return destructiveOverwriteError;
+  const removalCommentError = detectRemovalCommentWrite(path, content);
+  if (removalCommentError) return removalCommentError;
   await wsWriteFile(ctx.conversationId, path, content);
   ctx.onFileChange?.();
   const lines = content.split("\n").length;
@@ -53,6 +56,15 @@ async function writeFile(
     "",
     formatFileContextResult(ctx.conversationId, path, content),
   ].join("\n");
+}
+
+function detectRemovalCommentWrite(path: string, content: string): string | null {
+  if (!PROTECTED_OVERWRITE_PATH_RE.test(path)) return null;
+  if (!REMOVAL_COMMENT_RE.test(content)) return null;
+  return [
+    `Error writing ${path}: removal comment blocked.`,
+    "When removing code from protected project files, delete obsolete lines instead of leaving comments that mention removed code.",
+  ].join(" ");
 }
 
 async function detectDestructiveOverwrite(

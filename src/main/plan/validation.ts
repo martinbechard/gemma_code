@@ -14,14 +14,21 @@ export const EXECUTABLE_PLAN_VALIDATION_GUIDANCE_LINES = [
   "Every step must have non-empty string name, prompt, and verify fields.",
   "Every step name must be unique.",
   "Do not create report-only or final-answer steps; include final reporting in the summary of the evidence-gathering step.",
-  "The deterministic validator only checks plan document shape and obvious placeholders; task-specific completeness is reviewed semantically by the model.",
-  "Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, and prompt files needed.",
+  "The deterministic validator checks plan document shape, obvious placeholders, and target-discovery instructions that should have happened during planning.",
+  "Do not use placeholder wording such as relevant tests, relevant files, needed files, files needed, implementation files, documentation files needed, runtime files needed, prompt files needed, search through the codebase, find the file or module, identify and locate, or related code.",
 ] as const;
 
 const REPORT_ONLY_STEP_START_RE =
   /^\s*(?:report|summari[sz]e|return|output|provide|tell|respond|extract|confirm)\b/i;
 const EXECUTION_ACTION_RE =
   /\b(?:read(?:ing)?|inspect(?:ing)?|list(?:ing)?|search(?:ing)?|grep|run(?:ning)?|execut(?:e|ing)|edit(?:ing)?|updat(?:e|ing)|writ(?:e|ing)|creat(?:e|ing)|delet(?:e|ing)|modify(?:ing)?|test(?:ing)?|build(?:ing)?|verify(?:ing)?|open(?:ing)?|retriev(?:e|ing))\b/i;
+const TOOL_MODULE_REMOVAL_RE =
+  /\b(?:remove|delete|deleted|deleting|disable|disabled|disabling)\b[\s\S]*\bsrc\/main\/tools\/(?!index\.ts\b)[A-Za-z0-9_-]+\.ts\b/i;
+const TOOL_MODULE_DELETE_RE =
+  /\bdelete\b[\s\S]*\bsrc\/main\/tools\/(?!index\.ts\b)[A-Za-z0-9_-]+\.ts\b/i;
+const TOOL_REGISTRY_PATH = "src/main/tools/index.ts";
+const REMOVAL_ABSENCE_VERIFY_RE =
+  /\b(?:no longer|does not exist|deleted|removed|no matches|no references|not reference|not contain|absent)\b/i;
 
 const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
   { label: "relevant tests", pattern: /\brelevant tests?\b/i },
@@ -61,6 +68,68 @@ const PLACEHOLDER_PATTERNS: PlaceholderPattern[] = [
     label: "TBD",
     pattern: /\bTBD\b/i,
   },
+  {
+    label: "search through the codebase",
+    pattern: /\bsearch\s+(?:(?:through|in)\s+)?(?:the\s+)?(?:codebase|file\s+tree|src\/[A-Za-z0-9_./-]+)\b/i,
+  },
+  {
+    label: "find the file or module",
+    pattern: /\bfind\s+(?:the\s+)?(?:file|module|path)(?:\s+or\s+(?:module|file|path))?\b|\bfile\s+that\s+(?:handles|implements|contains|owns)\b/i,
+  },
+  {
+    label: "identify the file",
+    pattern: /\bidentif(?:y|ied)\s+(?:the\s+)?(?:file|module|path|code\s+module)\b/i,
+  },
+  {
+    label: "locate the file",
+    pattern: /\bloc(?:ate|ated|ating)\s+(?:the\s+)?(?:file|module|path|code\s+module)\b/i,
+  },
+  {
+    label: "identify and locate",
+    pattern:
+      /\bidentif(?:y|ied|ying)\b[\s\S]{0,80}\bloc(?:ate|ated|ating)\b|\bloc(?:ate|ated|ating)\b[\s\S]{0,80}\bidentif(?:y|ied|ying)\b/i,
+  },
+  {
+    label: "confirm which module",
+    pattern: /\bconfirm\s+which\s+(?:file|module|path|code\s+module)\b/i,
+  },
+  {
+    label: "confirm target",
+    pattern:
+      /\bconfirm\s+(?:this\s+file|the\s+(?:file|module|path)|.*\bcorrect\s+target|.*\bmodule\s+to\s+be\s+removed)\b/i,
+  },
+  {
+    label: "related code",
+    pattern: /\b(?:code|paths?|files?|references?)\s+related\s+to\b/i,
+  },
+  {
+    label: "relevant files",
+    pattern: /\brelevant\s+(?:files?|modules?|paths?)\b/i,
+  },
+  {
+    label: "neutralized",
+    pattern: /\bneutraliz(?:e|ed|ing)\b/i,
+  },
+  {
+    label: "disable",
+    pattern: /\bdisabl(?:e|ed|ing)\b/i,
+  },
+  {
+    label: "commented out",
+    pattern: /\bcomment(?:ed|ing)?\s+out\b/i,
+  },
+  {
+    label: "non-functional state",
+    pattern: /\bnon-functional\s+state\b/i,
+  },
+  {
+    label: "empty the file",
+    pattern: /\b(?:empty|emptied|emptying)\b|\bemptied\s+of\b/i,
+  },
+  {
+    label: "starting with",
+    pattern: /\bstarting\s+with\b/i,
+  },
 ];
 
 export function validatePlanForExecution(
@@ -83,6 +152,8 @@ export function validatePlanForExecution(
     }
     names.add(name);
   }
+  const crossStepValidation = validateCrossStepPlanText(plan);
+  if (!crossStepValidation.valid) return crossStepValidation;
 
   return { valid: true };
 }
@@ -93,7 +164,7 @@ export function validatePlanStepText(
   const fieldValidation = validateStepFields(step);
   if (!fieldValidation.valid) return fieldValidation;
 
-  const text = `${step.prompt}\n${step.verify}`;
+  const text = `${step.name}\n${step.prompt}\n${step.verify}`;
   const placeholder = PLACEHOLDER_PATTERNS.find(({ pattern }) =>
     pattern.test(text),
   );
@@ -147,6 +218,38 @@ function validateStepFields(step: ParsedStep): PlanValidationResult {
     return {
       valid: false,
       reason: `Step "${step.name}" verify must be a non-empty string.`,
+    };
+  }
+  return { valid: true };
+}
+
+function validateCrossStepPlanText(plan: ParsedPlan): PlanValidationResult {
+  const text = plan.steps
+    .map((step) => `${step.name}\n${step.prompt}\n${step.verify}`)
+    .join("\n");
+  if (TOOL_MODULE_REMOVAL_RE.test(text) && !text.includes(TOOL_REGISTRY_PATH)) {
+    return {
+      valid: false,
+      reason:
+        `A tool module removal plan must also update ${TOOL_REGISTRY_PATH}. ` +
+        "Name the registry file explicitly before the plan can run.",
+    };
+  }
+  if (TOOL_MODULE_REMOVAL_RE.test(text) && !TOOL_MODULE_DELETE_RE.test(text)) {
+    return {
+      valid: false,
+      reason:
+        "A tool module removal plan must delete the obsolete tool module file, not only remove references inside it.",
+    };
+  }
+  if (
+    TOOL_MODULE_REMOVAL_RE.test(text) &&
+    !plan.steps.some((step) => REMOVAL_ABSENCE_VERIFY_RE.test(step.verify))
+  ) {
+    return {
+      valid: false,
+      reason:
+        "A tool module removal plan must verify absence of the deleted file or removed references, not only compile or run.",
     };
   }
   return { valid: true };

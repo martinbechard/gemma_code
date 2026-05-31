@@ -28,6 +28,202 @@ describe("validatePlanForExecution", () => {
     expect(result.reason).toContain("relevant tests");
   });
 
+  it("rejects target discovery passed to the execution agent", () => {
+    const result = validatePlanStepText({
+      name: "identify_cwd_tool",
+      prompt:
+        "Search through the codebase to find the file or module that implements getting the current working directory.",
+      verify:
+        "The file path or module name containing the current working directory retrieval logic is identified.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("search through the codebase");
+  });
+
+  it("rejects scoped search instructions that still defer locating files", () => {
+    const result = validatePlanStepText({
+      name: "identify_cwd_module",
+      prompt:
+        "Search in `src/main/tools/` for the file that handles retrieving the current working directory.",
+      verify:
+        "The file `src/main/tools/getCurrentWorkingDirectory.ts` is confirmed to exist and be related to the functionality.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("find the file or module");
+  });
+
+  it("rejects inspection steps that only identify and locate already known files", () => {
+    const result = validatePlanStepText({
+      name:
+        "Identify and locate the code responsible for getting the current working directory.",
+      prompt:
+        "Examine src/main/tools/getCurrentWorkingDirectory.ts and src/main/tools/index.ts to confirm which module handles the functionality.",
+      verify:
+        "The file paths and module structure clearly indicate the purpose of getCurrentWorkingDirectory.ts.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("identify and locate");
+  });
+
+  it("rejects confirmation-only target steps after planning discovery", () => {
+    const result = validatePlanStepText({
+      name: "Confirm the module to be removed.",
+      prompt:
+        "Based on the search result, the module is in src/main/tools/getCurrentWorkingDirectory.ts. Confirm this file is the correct target for removal.",
+      verify:
+        "The file src/main/tools/getCurrentWorkingDirectory.ts is confirmed as the module to be removed.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("confirm target");
+  });
+
+  it("rejects vague related-code removal steps", () => {
+    const result = validatePlanStepText({
+      name: "remove_related_cwd_code",
+      prompt:
+        "Remove the code related to the get current working directory tool from the application.",
+      verify:
+        "The code paths related to current working directory retrieval are removed or neutralized.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("related code");
+  });
+
+  it("rejects partial removal instructions that start from one file without naming the full mutation set", () => {
+    const result = validatePlanStepText({
+      name: "remove_unused_functionality",
+      prompt:
+        "Remove all references to the current working directory retrieval in the application code, starting with deleting or disabling src/main/tools/getCurrentWorkingDirectory.ts.",
+      verify:
+        "src/main/tools/getCurrentWorkingDirectory.ts is removed or commented out in a non-functional state.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("disable");
+  });
+
+  it("rejects removal plans that allow commenting out obsolete code", () => {
+    const result = validatePlanStepText({
+      name: "remove_cwd_tool",
+      prompt:
+        "Delete or comment out src/main/tools/getCurrentWorkingDirectory.ts and remove its usage from src/main/tools/index.ts.",
+      verify:
+        "src/main/tools/getCurrentWorkingDirectory.ts is deleted or commented out.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("commented out");
+  });
+
+  it("rejects removal plans that empty files instead of deleting obsolete modules", () => {
+    const result = validatePlanStepText({
+      name: "remove_cwd_tool",
+      prompt:
+        "Remove src/main/tools/getCurrentWorkingDirectory.ts by emptying the file and update src/main/tools/index.ts.",
+      verify:
+        "src/main/tools/getCurrentWorkingDirectory.ts is deleted or emptied of its functionality.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("empty the file");
+  });
+
+  it("rejects removal plans that allow disabling instead of deleting references", () => {
+    const result = validatePlanStepText({
+      name: "remove_cwd_tool",
+      prompt:
+        "Remove or disable the functionality exposed in src/main/tools/getCurrentWorkingDirectory.ts and src/main/tools/index.ts.",
+      verify:
+        "The current working directory functionality is removed or commented out in a non-functional state.",
+    });
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("disable");
+  });
+
+  it("rejects tool module removal plans that omit the tools registry", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "remove_cwd_module",
+          prompt:
+            "Delete the file src/main/tools/getCurrentWorkingDirectory.ts.",
+          verify:
+            "src/main/tools/getCurrentWorkingDirectory.ts no longer exists.",
+        },
+      ]),
+    );
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("src/main/tools/index.ts");
+  });
+
+  it("rejects tool module removal plans that do not delete the obsolete module file", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "remove_cwd_tool",
+          prompt:
+            "Remove references to getCurrentWorkingDirectoryTool in src/main/tools/getCurrentWorkingDirectory.ts and update src/main/tools/index.ts.",
+          verify:
+            "src/main/tools/index.ts no longer references getCurrentWorkingDirectoryTool.",
+        },
+      ]),
+    );
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("must delete");
+  });
+
+  it("rejects tool module removal plans with only compile verification", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "remove_cwd_tool",
+          prompt:
+            "Delete src/main/tools/getCurrentWorkingDirectory.ts and update src/main/tools/index.ts.",
+          verify: "The code compiles and runs without errors.",
+        },
+      ]),
+    );
+
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.reason).toContain("must verify absence");
+  });
+
+  it("accepts tool module removal plans that name the tools registry update", () => {
+    const result = validatePlanForExecution(
+      parsedPlan([
+        {
+          name: "remove_cwd_tool",
+          prompt:
+            "Delete src/main/tools/getCurrentWorkingDirectory.ts and edit src/main/tools/index.ts to remove the import and TOOLS entry for getCurrentWorkingDirectoryTool.",
+          verify:
+            "src/main/tools/getCurrentWorkingDirectory.ts does not exist and src/main/tools/index.ts no longer references getCurrentWorkingDirectoryTool.",
+        },
+      ]),
+    );
+
+    expect(result).toEqual({ valid: true });
+  });
+
   it("rejects plans with no executable steps", () => {
     const result = validatePlanForExecution(parsedPlan([]));
 

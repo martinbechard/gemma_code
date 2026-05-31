@@ -53,7 +53,7 @@ describe("codeSystemPrompt", () => {
     );
     expect(planPrompt).toContain("read-only inspection actions");
     expect(planPrompt).toContain("Mutation steps must name exact files");
-    expect(planPrompt).toContain("Emit plan steps one at a time");
+    expect(planPrompt).toContain("Emit executable plan steps one at a time");
     expect(planPrompt).toContain("<Step>");
     expect(planPrompt).toContain("</Step>");
     expect(planPrompt).toContain("<Question>One focused question.</Question>");

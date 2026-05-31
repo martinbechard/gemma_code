@@ -149,7 +149,7 @@ describe("iterative plan assembly", () => {
     expect(prompt).toContain(
       "Use one read-only inspection action first if project evidence is missing.",
     );
-    expect(prompt).toContain("Emit plan steps one at a time.");
+    expect(prompt).toContain("Emit executable plan steps one at a time.");
     expect(prompt).toContain(
       "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     );
@@ -165,7 +165,11 @@ describe("iterative plan assembly", () => {
 
   it("accepts one step and asks for the next prompt", () => {
     const state = createPlanAssemblyState();
-    const result = applyPlanAssemblyResponse(state, exploreStep);
+    const result = applyPlanAssemblyResponse(
+      state,
+      exploreStep,
+      "Update the plan parser.",
+    );
 
     expect(result.kind).toBe("accepted");
     if (result.kind !== "accepted") return;
@@ -184,9 +188,59 @@ describe("iterative plan assembly", () => {
     expect(result.nextPrompt).toContain("one read-only inspection action");
     expect(result.nextPrompt).toContain("<Step>...</Step>");
     expect(result.nextPrompt).toContain("plan: done");
+    expect(result.nextPrompt).toContain(
+      "Original user request: Update the plan parser.",
+    );
+    expect(result.nextPrompt).toContain("prompt: List src/main/plan");
+    expect(result.nextPrompt).toContain("verify: src/main/plan");
+    expect(result.nextPrompt).toContain(
+      "Only add a new step if it is a distinct remaining action needed for the original request.",
+    );
     expect(result.nextPrompt).not.toMatch(/\bhost\b/i);
     expect(result.nextPrompt).not.toContain("tests/main");
     expect(result.nextPrompt).not.toContain("get_current");
+  });
+
+  it("rejects unrelated follow-up steps after relevant planning has started", () => {
+    const state = createPlanAssemblyState();
+    const relevantStep = [
+      "<Step>",
+      "plan:",
+      "  steps:",
+      "    - name: remove_cwd_tool",
+      "      prompt: Remove get_current_working_directory from src/main/tools/index.ts and src/main/tools/getCurrentWorkingDirectory.ts.",
+      "      verify: get_current_working_directory is no longer registered in src/main/tools/index.ts.",
+      "</Step>",
+    ].join("\n");
+    const unrelatedStep = [
+      "<Step>",
+      "plan:",
+      "  steps:",
+      "    - name: extract_runtime_paths",
+      "      prompt: Refactor MLX setup into src/main/runtimePaths.ts.",
+      "      verify: src/main/runtimePaths.ts owns app runtime paths.",
+      "</Step>",
+    ].join("\n");
+
+    const first = applyPlanAssemblyResponse(
+      state,
+      relevantStep,
+      "there is an LLM tool to get the current working directory. Remove it from the app.",
+    );
+    expect(first.kind).toBe("accepted");
+    if (first.kind !== "accepted") return;
+
+    const second = applyPlanAssemblyResponse(
+      first.state,
+      unrelatedStep,
+      "there is an LLM tool to get the current working directory. Remove it from the app.",
+    );
+
+    expect(second.kind).toBe("rejected");
+    if (second.kind !== "rejected") return;
+    expect(second.reason).toContain("unrelated");
+    expect(second.retryPrompt).toContain("Original user request");
+    expect(second.retryPrompt).toContain("return only plan: done");
   });
 
   it("parses focused planning questions", () => {
@@ -264,6 +318,28 @@ describe("iterative plan assembly", () => {
     expect(result.kind).toBe("accepted");
     if (result.kind !== "accepted") return;
     expect(result.state.steps[0].name).toBe("explore");
+  });
+
+  it("accepts a Step-wrapped one-line prompt that contains an unquoted colon", () => {
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      [
+        "<Step>",
+        "plan:",
+        "  steps:",
+        "    - name: Remove cwd tool",
+        "      prompt: Delete src/main/tools/getCurrentWorkingDirectory.ts and remove the line `get_current_working_directory: getCurrentWorkingDirectoryTool,` from src/main/tools/index.ts.",
+        "      verify: src/main/tools/index.ts no longer references getCurrentWorkingDirectoryTool.",
+        "</Step>",
+        "</Step>",
+      ].join("\n"),
+    );
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.state.steps[0].prompt).toContain(
+      "get_current_working_directory: getCurrentWorkingDirectoryTool",
+    );
   });
 
   it("rejects prose around an unwrapped plan step", () => {

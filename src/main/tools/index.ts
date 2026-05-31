@@ -244,7 +244,11 @@ export function findNextAction(
 ): ParsedAction | "incomplete" | null {
   const openRe = /<action\s+name\s*=\s*["']?([a-zA-Z_][\w]*)["']?\s*(\/?)>/gi;
   openRe.lastIndex = from;
-  const open = openRe.exec(text);
+  let open: RegExpExecArray | null;
+  while ((open = openRe.exec(text)) !== null) {
+    if (!isInsideMarkdownCodeFence(text, open.index)) break;
+    openRe.lastIndex = open.index + open[0].length;
+  }
   if (!open) return null;
   const name = open[1];
   if (open[2] === "/") {
@@ -257,18 +261,53 @@ export function findNextAction(
     };
   }
   const bodyStart = open.index + open[0].length;
-  const closeMatch = text.slice(bodyStart).match(/<\/action\s*>/i);
-  if (!closeMatch || closeMatch.index === undefined) return "incomplete";
-  const closeIdx = bodyStart + closeMatch.index;
-  const body = text.slice(bodyStart, closeIdx);
+  const close = findActionClose(text, bodyStart);
+  if (close === null) return "incomplete";
+  const body = text.slice(bodyStart, close.index);
   const args = parseActionBody(body);
   return {
     name,
     args,
-    raw: text.slice(open.index, closeIdx + closeMatch[0].length),
+    raw: text.slice(open.index, close.index + close.length),
     start: open.index,
-    end: closeIdx + closeMatch[0].length,
+    end: close.index + close.length,
   };
+}
+
+function findActionClose(
+  text: string,
+  bodyStart: number,
+): { index: number; length: number } | null {
+  const closeRe = /<\/action\s*>/gi;
+  closeRe.lastIndex = bodyStart;
+  let closeMatch: RegExpExecArray | null;
+  while ((closeMatch = closeRe.exec(text)) !== null) {
+    const closeIdx = closeMatch.index;
+    const body = text.slice(bodyStart, closeIdx);
+    if (hasUnclosedMultilineArgument(body)) continue;
+    return { index: closeIdx, length: closeMatch[0].length };
+  }
+  return null;
+}
+
+function hasUnclosedMultilineArgument(body: string): boolean {
+  return ["content", "old_string", "new_string"].some((tag) => {
+    const openTag = `<${tag}>`;
+    const closeTag = `</${tag}>`;
+    const openIndex = body.indexOf(openTag);
+    return openIndex >= 0 && body.indexOf(closeTag, openIndex + openTag.length) < 0;
+  });
+}
+
+function isInsideMarkdownCodeFence(text: string, index: number): boolean {
+  const fenceRe = /```/g;
+  let inside = false;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRe.exec(text)) !== null) {
+    if (match.index >= index) break;
+    inside = !inside;
+  }
+  return inside;
 }
 
 function parseActionBody(body: string): Record<string, unknown> {

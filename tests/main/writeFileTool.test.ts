@@ -73,6 +73,56 @@ describe("write_file tool", () => {
     );
   });
 
+  it("blocks protected source rewrites that drop too much current content", async () => {
+    createWorkspace();
+    const existing = [
+      "import { keep } from './keep';",
+      "",
+      "export const TOOLS = {",
+      "  keep,",
+      "};",
+      "",
+    ].join("\n").repeat(80);
+    writeWorkspaceFile("src/main/tools/index.ts", existing);
+
+    const result = await runTool(
+      "write_file",
+      {
+        path: "src/main/tools/index.ts",
+        content: existing.slice(0, Math.floor(existing.length * 0.7)),
+      },
+      { conversationId: TEST_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("destructive overwrite blocked");
+    expect(readFileSync(join(workspace, "src/main/tools/index.ts"), "utf8")).toBe(
+      existing,
+    );
+  });
+
+  it("blocks removal comments in protected source rewrites", async () => {
+    createWorkspace();
+    writeWorkspaceFile("src/main/tools/index.ts", LARGE_SOURCE_TEXT);
+
+    const result = await runTool(
+      "write_file",
+      {
+        path: "src/main/tools/index.ts",
+        content: [
+          LARGE_SOURCE_TEXT,
+          "// Removed get_current_working_directory entry",
+          "",
+        ].join("\n"),
+      },
+      { conversationId: TEST_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("removal comment blocked");
+    expect(readFileSync(join(workspace, "src/main/tools/index.ts"), "utf8")).toBe(
+      LARGE_SOURCE_TEXT,
+    );
+  });
+
   it("allows creating a new protected project file", async () => {
     createWorkspace();
 
@@ -119,6 +169,88 @@ describe("edit_file tool", () => {
     expect(readFileSync(join(workspace, "src/main/tools.ts"), "utf8")).toBe(
       LARGE_SOURCE_TEXT + "\nconst value = undefined;\n",
     );
+  });
+
+  it("blocks comment-only replacements when removing code from protected files", async () => {
+    createWorkspace();
+    writeWorkspaceFile(
+      "src/main/tools/index.ts",
+      [
+        'import { getCurrentWorkingDirectoryTool } from "./getCurrentWorkingDirectory";',
+        "",
+        "export const TOOLS = {",
+        "  get_current_working_directory: getCurrentWorkingDirectoryTool,",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runTool(
+      "edit_file",
+      {
+        path: "src/main/tools/index.ts",
+        old_string:
+          'import { getCurrentWorkingDirectoryTool } from "./getCurrentWorkingDirectory";',
+        new_string: "// Removed unused import for getCurrentWorkingDirectoryTool",
+      },
+      { conversationId: TEST_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("removal comment blocked");
+    expect(readFileSync(join(workspace, "src/main/tools/index.ts"), "utf8"))
+      .toContain(
+        'import { getCurrentWorkingDirectoryTool } from "./getCurrentWorkingDirectory";',
+      );
+  });
+
+  it("blocks removal comments that put the removed symbol before the word removed", async () => {
+    createWorkspace();
+    writeWorkspaceFile(
+      "src/main/tools/index.ts",
+      'import { getCurrentWorkingDirectoryTool } from "./getCurrentWorkingDirectory";\n',
+    );
+
+    const result = await runTool(
+      "edit_file",
+      {
+        path: "src/main/tools/index.ts",
+        old_string:
+          'import { getCurrentWorkingDirectoryTool } from "./getCurrentWorkingDirectory";',
+        new_string: "// getCurrentWorkingDirectoryTool removed",
+      },
+      { conversationId: TEST_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("removal comment blocked");
+  });
+
+  it("accepts quoted property keys when the current TypeScript key is unquoted", async () => {
+    createWorkspace();
+    writeWorkspaceFile(
+      "src/main/tools/index.ts",
+      [
+        "export const TOOLS = {",
+        "  get_current_working_directory: getCurrentWorkingDirectoryTool,",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runTool(
+      "edit_file",
+      {
+        path: "src/main/tools/index.ts",
+        old_string:
+          '  "get_current_working_directory": getCurrentWorkingDirectoryTool,',
+        new_string: "",
+        replace_all: true,
+      },
+      { conversationId: TEST_CONVERSATION_ID },
+    );
+
+    expect(result).toContain("Edited src/main/tools/index.ts");
+    const updated = readFileSync(join(workspace, "src/main/tools/index.ts"), "utf8");
+    expect(updated).not.toContain("get_current_working_directory");
   });
 
   it("rereads the updated file into context after a successful edit", async () => {

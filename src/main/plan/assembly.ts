@@ -93,10 +93,49 @@ const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "Our task is to create clear, executable instructions for an AI coding agent.";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
   "Research and emit the first step now. Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, or one focused question wrapped in <Question>...</Question>.";
+const PLAN_ASSEMBLY_RELEVANT_TERM_MIN_LENGTH = 4;
+const PLAN_ASSEMBLY_RELEVANT_TERM_MIN_COUNT = 2;
+const PLAN_ASSEMBLY_RELEVANT_TERM_RE = /[a-z0-9_]+/gi;
+const PLAN_ASSEMBLY_TASK_TERM_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "agent",
+  "also",
+  "another",
+  "application",
+  "around",
+  "before",
+  "build",
+  "change",
+  "changes",
+  "check",
+  "code",
+  "coding",
+  "create",
+  "current",
+  "file",
+  "files",
+  "from",
+  "implementation",
+  "make",
+  "plan",
+  "project",
+  "remove",
+  "request",
+  "should",
+  "task",
+  "that",
+  "there",
+  "this",
+  "update",
+  "with",
+]);
 
 export const PLAN_ASSEMBLY_NEXT_PROMPT = [
   "Continue preparing the plan for the AI coding agent.",
   "Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, plan: done, or one focused question wrapped in <Question>...</Question>.",
+  "Read-only inspection actions are planning work, not plan steps; do not create steps that read, search, inspect, locate, identify, confirm, or trace targets.",
+  "When evidence has identified the files, emit the next executable mutation or verification step.",
   "Return exactly plan: done, with no prose and no <Step> wrapper, only when the accepted steps form a complete executable plan for the user request.",
   "Do not pass target discovery to the coding agent; mutation steps must name exact files or artifacts.",
 ].join("\n");
@@ -182,7 +221,8 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
     "",
     "Prepare a plan for another AI coding agent; include all information that agent needs.",
     "Use one read-only inspection action first if project evidence is missing.",
-    "Emit plan steps one at a time. When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
+    "Read-only inspection actions are planning work, not plan steps; do not create steps that read, search, inspect, locate, identify, confirm, or trace targets.",
+    "Emit executable plan steps one at a time. When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
     "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     "",
     PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
@@ -220,11 +260,14 @@ export function applyPlanAssemblyResponse(
     );
   }
   const planShapeReason = validateRawPlanDocumentShape(parsed.raw);
-  if (planShapeReason) {
+  if (
+    planShapeReason &&
+    (rawPlanDocumentParses(parsed.raw) || parsed.steps.length === 0)
+  ) {
     return rejected(state, planShapeReason, task);
   }
   const rawStepCount = countRawPlanSteps(parsed.raw);
-  if (rawStepCount !== 1) {
+  if ((rawStepCount ?? parsed.steps.length) !== 1) {
     return rejected(
       state,
       "The response must contain exactly one step; received " +
@@ -262,12 +305,20 @@ export function applyPlanAssemblyResponse(
       duplicateStepName: step.name,
     });
   }
+  if (!isStepRelevantToTask(step, task, state)) {
+    return rejected(
+      state,
+      "The new step appears unrelated to the original user request.",
+      task,
+      { unrelatedStep: true },
+    );
+  }
 
   const nextState = { steps: [...state.steps, step] };
   return {
     kind: "accepted",
     state: nextState,
-    nextPrompt: buildPlanAssemblyNextPrompt(nextState),
+    nextPrompt: buildPlanAssemblyNextPrompt(nextState, task),
   };
 }
 
@@ -289,6 +340,8 @@ export function buildPlanSemanticReviewPrompt(
     "Deterministic syntax validation has already passed. Do not critique YAML formatting unless the corrected plan you return would fail the documented shape.",
     "Check whether the plan has enough concrete grounding, implementation, test, documentation, and verification work for this specific request. Some requests may not need every category.",
     "Check that files, folders, commands, and artifacts are task-specific choices made by the plan, not placeholders.",
+    "If a plan removes a tool module under src/main/tools, check that it also updates src/main/tools/index.ts and any prompt, documentation, or tests that would still expose or require the removed tool.",
+    "For removal requests, a plan must delete the obsolete references; disabling or commenting them out is not sufficient unless the original request explicitly asks for that.",
     "",
     "Checklist questions and allowed answers:",
     ...PLAN_SEMANTIC_REVIEW_CHECKLIST_ITEMS.map(
@@ -705,10 +758,11 @@ function extractLegacyPlanAssemblyTask(text: string): string | null {
 function rejected(
   state: PlanAssemblyState,
   reason: string,
-  _task = "",
-  options: { duplicateStepName?: string } = {},
+  task = "",
+  options: { duplicateStepName?: string; unrelatedStep?: boolean } = {},
 ): PlanAssemblyResult {
   const acceptedStepNames = state.steps.map((step) => step.name);
+  const originalRequest = originalRequestLine(task);
   const acceptedNameGuidance =
     acceptedStepNames.length > 0
       ? [
@@ -719,6 +773,17 @@ function rejected(
           "If the accepted steps already cover the task, return only " + PLAN_ASSEMBLY_DONE_TEXT + ".",
         ]
       : [];
+  const relevanceGuidance = options.unrelatedStep
+    ? [
+        "",
+        "A new step must directly advance the original user request.",
+        ...(originalRequest ? [originalRequest] : []),
+        "Do not continue from unrelated files, examples, or previous design documents.",
+        "If the accepted steps already cover the request, return only " +
+          PLAN_ASSEMBLY_DONE_TEXT +
+          ".",
+      ]
+    : [];
   const duplicateNameGuidance = options.duplicateStepName
     ? [
         `The rejected name "${options.duplicateStepName}" is already used.`,
@@ -733,9 +798,11 @@ function rejected(
     retryPrompt: [
       "The previous planning response was rejected: " + reason,
       ...acceptedNameGuidance,
+      ...relevanceGuidance,
       ...duplicateNameGuidance,
       "",
       "Return exactly one <Step>-wrapped YAML plan containing one step, with name, prompt, and verify string fields.",
+      "The step must be executable by the coding agent; do not return read/search/inspect/locate/identify/confirm/trace work as a step.",
       ...(acceptedStepNames.length > 0
         ? [
             "If the assembled plan is complete, return exactly " +
@@ -751,15 +818,65 @@ function rejected(
   };
 }
 
-function buildPlanAssemblyNextPrompt(state: PlanAssemblyState): string {
-  const acceptedSteps =
-    state.steps.length > 0
-      ? `Accepted steps so far: ${state.steps.map((step) => step.name).join(", ")}.`
-      : "";
+function buildPlanAssemblyNextPrompt(
+  state: PlanAssemblyState,
+  task = "",
+): string {
+  const originalRequest = originalRequestLine(task);
+  const acceptedSteps = acceptedStepsBlock(state);
   return [
     PLAN_ASSEMBLY_NEXT_PROMPT,
-    ...(acceptedSteps.length > 0 ? ["", acceptedSteps] : []),
+    ...(originalRequest ? ["", originalRequest] : []),
+    ...(acceptedSteps ? ["", acceptedSteps] : []),
+    "",
+    "Only add a new step if it is a distinct remaining action needed for the original request.",
+    "If the accepted steps already form a complete executable plan, return exactly " +
+      PLAN_ASSEMBLY_DONE_TEXT +
+      " and nothing else.",
   ].join("\n");
+}
+
+function originalRequestLine(task: string): string {
+  const request = extractPlanAssemblyUserRequest(task)?.trim() || task.trim();
+  return request ? "Original user request: " + request : "";
+}
+
+function acceptedStepsBlock(state: PlanAssemblyState): string {
+  if (state.steps.length === 0) return "";
+  return [
+    "Accepted steps so far:",
+    ...state.steps.map((step, index) =>
+      [
+        `${index + 1}. ${step.name}`,
+        `   prompt: ${step.prompt}`,
+        `   verify: ${step.verify}`,
+      ].join("\n"),
+    ),
+  ].join("\n");
+}
+
+function isStepRelevantToTask(
+  step: ParsedStep,
+  task: string,
+  state: PlanAssemblyState,
+): boolean {
+  if (state.steps.length === 0) return true;
+  const taskTerms = meaningfulTaskTerms(task);
+  if (taskTerms.size < PLAN_ASSEMBLY_RELEVANT_TERM_MIN_COUNT) return true;
+  const stepText = `${step.name}\n${step.prompt}\n${step.verify}`.toLowerCase();
+  return [...taskTerms].some((term) => stepText.includes(term));
+}
+
+function meaningfulTaskTerms(task: string): Set<string> {
+  const request = extractPlanAssemblyUserRequest(task)?.trim() || task.trim();
+  const terms = new Set<string>();
+  for (const match of request.matchAll(PLAN_ASSEMBLY_RELEVANT_TERM_RE)) {
+    const term = match[0].toLowerCase();
+    if (term.length < PLAN_ASSEMBLY_RELEVANT_TERM_MIN_LENGTH) continue;
+    if (PLAN_ASSEMBLY_TASK_TERM_STOP_WORDS.has(term)) continue;
+    terms.add(term);
+  }
+  return terms;
 }
 
 function semanticReviewRejected(reason: string): PlanSemanticReviewResult {
@@ -833,6 +950,15 @@ function countRawPlanSteps(raw: string): number | null {
   }
   if (!isRecord(doc) || !isRecord(doc.plan)) return null;
   return Array.isArray(doc.plan.steps) ? doc.plan.steps.length : null;
+}
+
+function rawPlanDocumentParses(raw: string): boolean {
+  try {
+    parse(raw);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeWholeResponseYaml(response: string): string {

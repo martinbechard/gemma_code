@@ -90,6 +90,7 @@ const INCOMPLETE_ACTION_NUDGE =
   'Your previous response started an <action> tag but did not close it with </action>. Re-send exactly one complete action tag now. If no action can be taken, reply exactly with <error reason="short reason"/>. Do not emit a verify tag about the malformed response.';
 const MAX_PLAN_ONLY_NUDGES = 3;
 const MAX_CODE_NO_PROGRESS_NUDGES = 3;
+const MAX_INCOMPLETE_STEP_NUDGES = 2;
 const REPEATED_FAILED_EDIT_THRESHOLD = 2;
 const FAILED_EDIT_PREVIEW_CHARS = 240;
 type PlanCompletionMode = "executable" | "model-done";
@@ -521,6 +522,7 @@ async function runAgentLoop(
   let repeatedActionCount = 0;
   let planOnlyNudges = 0;
   let codeNoProgressNudges = 0;
+  let incompleteStepNudges = 0;
   let stepEvidence = createPlanStepEvidence();
   let stepEvidenceStepId: string | null = null;
   const failedEditCounts = new Map<string, number>();
@@ -538,6 +540,7 @@ async function runAgentLoop(
     lastActionKey = null;
     repeatedActionCount = 0;
     pendingEditRecoveryPath = null;
+    incompleteStepNudges = 0;
   };
 
   const resetStepAttemptTracking = (): void => {
@@ -546,6 +549,7 @@ async function runAgentLoop(
     stepEvidence = createPlanStepEvidence();
     stepEvidenceStepId = null;
     pendingEditRecoveryPath = null;
+    incompleteStepNudges = 0;
   };
 
   const logPlanEvents = (): void => {
@@ -909,6 +913,7 @@ async function runAgentLoop(
       }
       codeNoProgressNudges = 0;
       planOnlyNudges = 0;
+      incompleteStepNudges = 0;
       if (
         action.name === "edit_file" &&
         isRecoverableEditFailureResult(result) &&
@@ -921,6 +926,32 @@ async function runAgentLoop(
           : 1;
         if (failedEdit) {
           failedEditCounts.set(failedEdit.key, failedEditAttempts);
+        }
+        if (
+          planState?.currentStepId &&
+          failedEditAttempts >= REPEATED_FAILED_EDIT_THRESHOLD
+        ) {
+          const reason =
+            `repeated failed edit_file old_string for ${action.args.path}. ` +
+            "The old_string is no longer present; retry the step with different current file content.";
+          meta(`step attempt failed: ${reason}`);
+          const outcome = planState.failCurrentStepAttempt(reason);
+          logPlanEvents();
+          awaitingVerify = false;
+          resetStepAttemptTracking();
+          if (outcome === "abort" || planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            meta("done — plan complete");
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(messages, next.kind, next.text);
+          awaitingVerify = next.kind === "verify";
+          continue;
         }
         pushHarnessPrompt(
           messages,
@@ -1388,6 +1419,27 @@ async function runAgentLoop(
       );
       if (incompleteReason) {
         messages.push({ role: "assistant", content: buffer });
+        if (incompleteStepNudges >= MAX_INCOMPLETE_STEP_NUDGES) {
+          meta(`step attempt failed: ${incompleteReason}`);
+          const outcome = planState.failCurrentStepAttempt(incompleteReason);
+          logPlanEvents();
+          awaitingVerify = false;
+          resetStepAttemptTracking();
+          if (outcome === "abort" || planState.state !== "running") {
+            meta(`done — plan ${planState.state}`);
+            return;
+          }
+          const next = planState.nextPrompt();
+          if (!next) {
+            meta("done — plan complete");
+            return;
+          }
+          prepareStepEvidence(next);
+          pushHarnessPrompt(messages, next.kind, next.text);
+          awaitingVerify = next.kind === "verify";
+          continue;
+        }
+        incompleteStepNudges += 1;
         pushHarnessPrompt(
           messages,
           "step incomplete",

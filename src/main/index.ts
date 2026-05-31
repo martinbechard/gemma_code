@@ -1539,6 +1539,45 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
               if (failedEdit) {
                 failedEditCounts.set(failedEdit.key, failedEditAttempts);
               }
+              if (
+                planState?.currentStepId &&
+                failedEditAttempts >= REPEATED_FAILED_EDIT_THRESHOLD
+              ) {
+                const reason =
+                  `repeated failed edit_file old_string for ${found.args.path}. ` +
+                  "The old_string is no longer present; retry the step with different current file content.";
+                const outcome = planState.failCurrentStepAttempt(reason);
+                drainPlanEvents();
+                awaitingVerify = false;
+                resetStepAttemptTracking();
+                if (outcome === "abort" || planState.state !== "running") {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                const next = planState.nextPrompt();
+                if (!next) {
+                  emit({ type: "activity", activity: { kind: "idle" } });
+                  emit({ type: "done" });
+                  return;
+                }
+                prepareStepEvidence(next);
+                pushHarnessPrompt(
+                  next.kind === "verify" ? "plan verify" : "plan step",
+                  next.text,
+                );
+                awaitingVerify = next.kind === "verify";
+                executedAction = true;
+                pendingAction = null;
+                livePath = null;
+                liveContentStart = -1;
+                lastEmittedContent = "";
+                emit({
+                  type: "activity",
+                  activity: { kind: "thinking", chars: 0 },
+                });
+                break streamLoop;
+              }
               pushHarnessPrompt(
                 "edit recovery",
                 failedEdit &&

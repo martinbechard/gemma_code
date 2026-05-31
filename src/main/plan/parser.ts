@@ -47,6 +47,15 @@ export function findNextPlan(
   try {
     doc = parse(raw);
   } catch {
+    const fallbackSteps = parseSimpleOneStepPlan(raw);
+    if (fallbackSteps.length > 0) {
+      return {
+        steps: fallbackSteps,
+        raw,
+        start,
+        end: start + raw.length,
+      };
+    }
     return "incomplete";
   }
 
@@ -150,6 +159,40 @@ function parseSteps(doc: unknown): ParsedStep[] {
     parsedSteps.push({ name, prompt, verify });
   }
   return parsedSteps;
+}
+
+function parseSimpleOneStepPlan(raw: string): ParsedStep[] {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim());
+  if (lines[0] !== "plan:" || lines[1] !== "steps:") return [];
+  const values = new Map<string, string>();
+  for (const line of lines.slice(2)) {
+    const nameMatch = /^-\s*name:\s*(.+)$/.exec(line);
+    if (nameMatch) {
+      values.set("name", cleanSimpleScalar(nameMatch[1]));
+      continue;
+    }
+    const fieldMatch = /^(prompt|verify):\s*(.+)$/.exec(line);
+    if (fieldMatch) {
+      values.set(fieldMatch[1], cleanSimpleScalar(fieldMatch[2]));
+    }
+  }
+  const name = values.get("name");
+  const prompt = values.get("prompt");
+  const verify = values.get("verify");
+  return name && prompt && verify ? [{ name, prompt, verify }] : [];
+}
+
+function cleanSimpleScalar(value: string): string {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  if (
+    (quote === '"' || quote === "'") &&
+    trimmed.endsWith(quote) &&
+    trimmed.length >= 2
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 function isPlanYamlDocument(value: unknown): value is PlanYamlDocument {

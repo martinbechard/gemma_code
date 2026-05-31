@@ -76,6 +76,7 @@ const MALFORMED_ACTION_SELF_REPORT_RE =
 const GUARDED_ALREADY_PRESENT_RE =
   /\b(?:only\s+if\s+missing|already\s+present|avoid\s+editing|do\s+not\s+edit)\b/i;
 const GET_CURRENT_TOOL_RE = /\bget_current_[a-z0-9_]+\b/g;
+const GET_CAMEL_TOOL_RE = /\bget[A-Z][A-Za-z0-9_]*\b/g;
 const BLOCKED_RESPONSE_RE = /^\s*BLOCKED:\s*(.+?)\s*$/is;
 const ERROR_RESPONSE_RE =
   /^\s*<error\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/error\s*>)\s*$/i;
@@ -291,7 +292,13 @@ export function recordPlanToolEvidence(
     path.length > 0 &&
     !TOOL_ERROR_RE.test(trimmedResult)
   ) {
-    recordReadEvidence(evidence, path, sequence, result, result);
+    recordReadEvidence(
+      evidence,
+      path,
+      sequence,
+      currentFileContentFromToolResult(result, path) ?? result,
+      result,
+    );
   }
 
   if (
@@ -376,6 +383,9 @@ export function forcedVerifyFailureReason(
   }
 
   if (hasGuardedAlreadyPresentEvidence(criterion, evidence)) {
+    return null;
+  }
+  if (hasDeletedFileEvidence(criterion, evidence)) {
     return null;
   }
 
@@ -528,6 +538,25 @@ function requiresRemovalEvidence(criterion: string): boolean {
   return REMOVAL_CRITERION_RE.test(criterion);
 }
 
+function hasDeletedFileEvidence(
+  criterion: string,
+  evidence: PlanStepEvidence,
+): boolean {
+  if (!/\b(?:deleted|removed|does\s+not\s+exist|no\s+longer\s+exists)\b/i.test(criterion)) {
+    return false;
+  }
+  const criterionPaths = extractCriterionPaths(criterion);
+  if (criterionPaths.length === 0) return false;
+  return criterionPaths.every((path) =>
+    evidence.mutationActions.some(
+      (mutation) =>
+        mutation.tool === "delete_file" &&
+        mutation.path === path &&
+        mutation.sequence > 0,
+    ),
+  );
+}
+
 function missingRemovalAbsenceEvidenceReason(
   criterion: string,
   evidence: PlanStepEvidence,
@@ -556,6 +585,18 @@ function missingRemovalAbsenceEvidenceReason(
       : "missing post-mutation absence evidence: run search_files for the removed symbol or read the affected file after the mutation";
   }
 
+  for (const term of targetTerms) {
+    const foundPath = postMutationSearchFoundRelevantPath(
+      evidence,
+      term,
+      lastMutationSequence,
+      relevantReadPaths,
+    );
+    if (foundPath) {
+      return `post-mutation search still found removed term "${term}" in ${foundPath}. Edit or delete the remaining reference before summarizing`;
+    }
+  }
+
   const missingTerms = targetTerms.filter(
     (term) =>
       !hasPostMutationNoMatchSearch(evidence, term, lastMutationSequence) &&
@@ -570,9 +611,34 @@ function missingRemovalAbsenceEvidenceReason(
   return `missing post-mutation absence evidence for: ${missingTerms.join(", ")}. Run search_files after the mutation or read the affected file after the mutation`;
 }
 
+function postMutationSearchFoundRelevantPath(
+  evidence: PlanStepEvidence,
+  term: string,
+  lastMutationSequence: number,
+  relevantReadPaths: Set<string>,
+): string | null {
+  for (const search of evidence.searchActions) {
+    if (
+      search.sequence <= lastMutationSequence ||
+      search.noMatches ||
+      search.truncated ||
+      search.query !== term
+    ) {
+      continue;
+    }
+    for (const path of relevantReadPaths) {
+      if (search.summary.includes(`${path}:`)) return path;
+    }
+  }
+  return null;
+}
+
 function removalTargetTerms(criterion: string): string[] {
   const terms = new Set<string>();
   for (const match of criterion.matchAll(GET_CURRENT_TOOL_RE)) {
+    terms.add(match[0]);
+  }
+  for (const match of criterion.matchAll(GET_CAMEL_TOOL_RE)) {
     terms.add(match[0]);
   }
   if (/\bcurrent\s+working\s+directory\b/i.test(criterion)) {
@@ -656,6 +722,13 @@ function recordReadEvidence(
 }
 
 function refreshedFileContentFromToolResult(
+  result: string,
+  path: string,
+): string | null {
+  return currentFileContentFromToolResult(result, path);
+}
+
+function currentFileContentFromToolResult(
   result: string,
   path: string,
 ): string | null {
