@@ -23,9 +23,9 @@ export function setRuntimePaths(p: RuntimePaths): void {
 function ensure(): RuntimePaths {
   if (paths) return paths
   // Default fallback for macOS so the CLI works without explicit init.
-  // Matches Electron's default userData location for productName "gemma-chat".
+  // Matches the Gemma Code userData location used by Electron startup.
   paths = {
-    userData: join(homedir(), 'Library', 'Application Support', 'gemma-chat'),
+    userData: join(homedir(), 'Library', 'Application Support', 'gemma-code'),
     appRoot: process.cwd(),
     packaged: false
   }

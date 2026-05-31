@@ -246,7 +246,12 @@ export function findNextAction(
   openRe.lastIndex = from;
   let open: RegExpExecArray | null;
   while ((open = openRe.exec(text)) !== null) {
-    if (!isInsideMarkdownCodeFence(text, open.index)) break;
+    if (
+      !isInsideMarkdownCodeFence(text, open.index) &&
+      !isInsideThinkingBlock(text, open.index)
+    ) {
+      break;
+    }
     openRe.lastIndex = open.index + open[0].length;
   }
   if (!open) return null;
@@ -310,6 +315,17 @@ function isInsideMarkdownCodeFence(text: string, index: number): boolean {
   return inside;
 }
 
+function isInsideThinkingBlock(text: string, index: number): boolean {
+  const tagRe = /<\/?think(?:ing)?>/gi;
+  let inside = false;
+  let match: RegExpExecArray | null;
+  while ((match = tagRe.exec(text)) !== null) {
+    if (match.index >= index) break;
+    inside = !match[0].startsWith("</");
+  }
+  return inside;
+}
+
 function parseActionBody(body: string): Record<string, unknown> {
   const args: Record<string, unknown> = {};
 
@@ -349,6 +365,7 @@ function parseActionBody(body: string): Record<string, unknown> {
 export function emitSafeBoundary(buffer: string, from: number): number {
   for (let index = buffer.length - 1; index >= from; index -= 1) {
     if (buffer[index] !== "<") continue;
+    if (isInsideThinkingBlock(buffer, index)) continue;
     const tail = buffer.slice(index).toLowerCase();
     if (tail.length < 8) {
       if ("<action".startsWith(tail)) return index;

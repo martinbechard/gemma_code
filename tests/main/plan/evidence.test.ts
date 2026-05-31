@@ -794,7 +794,7 @@ describe("plan step evidence", () => {
         "command=pnpm run build",
         "exit=1 (729ms)",
         "stdout:",
-        "> gemma-chat@0.1.0 build",
+        "> gemma-code@0.1.0 build",
         "stderr:",
         "Build failed",
       ].join("\n"),

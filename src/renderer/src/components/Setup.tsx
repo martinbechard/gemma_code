@@ -150,7 +150,7 @@ function WelcomeScreen({
           <div className="anim-fade-up mb-8 text-center">
             <GemmaLogo className="mx-auto mb-5 h-24 w-24" />
             <h1 className="text-[26px] font-semibold tracking-tight">
-              Welcome to Gemma Chat
+              Welcome to Gemma Code
             </h1>
             <p className="mt-2 text-[13.5px] leading-relaxed text-ink-400">
               A local AI assistant, powered by Google's Gemma.

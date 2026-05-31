@@ -6,13 +6,13 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const PORT = 11434;
+const PORT = 11435;
 const URL = `http://127.0.0.1:${PORT}`;
 const APP_DATA = join(
   homedir(),
   "Library",
   "Application Support",
-  "gemma-chat",
+  "gemma-code",
   "mlx",
 );
 const VENV_PY = join(APP_DATA, "venv", "bin", "python3");
@@ -45,6 +45,8 @@ const args = [
   MODEL,
   "--port",
   String(PORT),
+  "--chat-template-args",
+  '{"enable_thinking": false}',
 ];
 write(process.stdout, `python : ${VENV_PY}`);
 write(process.stdout, `model  : ${MODEL}`);

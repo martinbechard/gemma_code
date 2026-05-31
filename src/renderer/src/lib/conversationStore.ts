@@ -5,7 +5,7 @@
 import type { AgentMode } from "@shared/types";
 import type { ChatMessage, SystemPromptSnapshot } from "@shared/types";
 
-export const STORAGE_KEY = "gemma-chat:conversations:v2";
+export const STORAGE_KEY = "gemma-code:conversations:v2";
 export const AUTO_PLANNING_SUMMARY_ID = "auto-planning-summary";
 const AUTO_EXECUTION_SEPARATOR_ID = "auto-execution-separator";
 const NO_EXPANDED_PLANNING_SUMMARIES: ReadonlySet<string> = new Set();

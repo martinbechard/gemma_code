@@ -49,7 +49,8 @@ interface Conversation {
 // is the UI-level discriminant the renderer carries around.
 type PillKey = "chat" | "build" | "code";
 const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
-const EXECUTION_LOGGING_STORAGE_KEY = "gemma-chat:execution-logging";
+const EXECUTION_LOGGING_STORAGE_KEY = "gemma-code:execution-logging";
+const THINKING_ENABLED_STORAGE_KEY = "gemma-code:thinking-enabled";
 const LOG_VIEWER_REFRESH_MS = 2_000;
 const LOG_DETAIL_PREVIEW_MAX_CHARS = 220;
 const FILE_CONTEXT_TOOL_NAMES = new Set([
@@ -204,6 +205,13 @@ export default function Chat({ model, onSwitchModel }: Props) {
       return false;
     }
   });
+  const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(THINKING_ENABLED_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [executionLogPath, setExecutionLogPath] = useState("");
   const [executionLogViewerError, setExecutionLogViewerError] = useState("");
   const [logViewerOpen, setLogViewerOpen] = useState(false);
@@ -232,6 +240,17 @@ export default function Chat({ model, onSwitchModel }: Props) {
       // ignore
     }
   }, [executionLogging]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        THINKING_ENABLED_STORAGE_KEY,
+        thinkingEnabled ? "true" : "false",
+      );
+    } catch {
+      // ignore
+    }
+  }, [thinkingEnabled]);
 
   useEffect(() => {
     window.api
@@ -428,6 +447,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           workingDir: conv.workingDir,
           codeSubmode: conv.workingDir ? codeSubmode : undefined,
           debugLogging: executionLogging,
+          enableThinking: thinkingEnabled,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -613,6 +633,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           executePlan: true,
           executePlanSteps: proposalMsg.proposedPlan,
           debugLogging: executionLogging,
+          enableThinking: thinkingEnabled,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -674,9 +695,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
             executionLogging={executionLogging}
             executionLogPath={executionLogPath}
             executionLogOpenError={executionLogViewerError}
+            thinkingEnabled={thinkingEnabled}
             onToggleExecutionLogging={() =>
               setExecutionLogging((current) => !current)
             }
+            onToggleThinking={() => setThinkingEnabled((current) => !current)}
             onOpenExecutionLog={handleOpenExecutionLog}
           />
           {(activeConversation.mode === "code" || filesInContext.length > 0) && (
@@ -1414,7 +1437,9 @@ function Header({
   executionLogging,
   executionLogPath,
   executionLogOpenError,
+  thinkingEnabled,
   onToggleExecutionLogging,
+  onToggleThinking,
   onOpenExecutionLog,
 }: {
   model: string;
@@ -1430,7 +1455,9 @@ function Header({
   executionLogging: boolean;
   executionLogPath: string;
   executionLogOpenError: string;
+  thinkingEnabled: boolean;
   onToggleExecutionLogging: () => void;
+  onToggleThinking: () => void;
   onOpenExecutionLog: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1516,6 +1543,27 @@ function Header({
             </select>
           </label>
         )}
+        <button
+          type="button"
+          onClick={onToggleThinking}
+          title={
+            thinkingEnabled
+              ? "Thinking output on: MLX-LM reasoning chunks will be shown in assistant thinking blocks."
+              : "Thinking output off: MLX-LM reasoning chunks stay disabled."
+          }
+          className={`flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11.5px] transition ${
+            thinkingEnabled
+              ? "border-sky-300/30 bg-sky-300/10 text-sky-100"
+              : "border-white/[0.08] bg-white/[0.03] text-ink-400 hover:bg-white/[0.05] hover:text-ink-100"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              thinkingEnabled ? "bg-sky-200" : "bg-ink-500"
+            }`}
+          />
+          Think
+        </button>
         <button
           type="button"
           onClick={onToggleExecutionLogging}

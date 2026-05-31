@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
-const MLX_SERVER_PORT = "11434";
+const MLX_SERVER_PORT = "11435";
 const TERMINATE_SIGNAL = "SIGTERM";
 
 export interface ProcessInfo {

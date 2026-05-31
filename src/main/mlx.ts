@@ -15,7 +15,7 @@ import {
 } from "fs";
 import { userDataDir, appRootDir, isPackaged } from "./runtimePaths";
 
-const MLX_PORT = 11434;
+const MLX_PORT = 11435;
 export const MLX_SERVER_PORT = MLX_PORT;
 const MLX_HOST = `127.0.0.1:${MLX_PORT}`;
 const MLX_URL = `http://${MLX_HOST}`;
@@ -1036,6 +1036,7 @@ export interface MLXChatOptions {
   messages: MLXChatMessage[];
   signal?: AbortSignal;
   temperature?: number;
+  enableThinking?: boolean;
 }
 
 export interface MLXChatRequestMessage {
@@ -1049,6 +1050,9 @@ export interface MLXChatRequestBody {
   stream: boolean;
   temperature: number;
   max_tokens: number;
+  chat_template_kwargs: {
+    enable_thinking: boolean;
+  };
 }
 
 export function buildChatRequestBody(opts: MLXChatOptions): MLXChatRequestBody {
@@ -1061,6 +1065,9 @@ export function buildChatRequestBody(opts: MLXChatOptions): MLXChatRequestBody {
     stream: true,
     temperature: opts.temperature ?? MLX_CHAT_TEMPERATURE,
     max_tokens: MLX_CHAT_MAX_TOKENS,
+    chat_template_kwargs: {
+      enable_thinking: opts.enableThinking ?? false,
+    },
   };
 }
 
@@ -1114,6 +1121,13 @@ export async function* chatStream(
     }
 
     let didReceiveFirstEvent = false;
+    let reasoningOpen = false;
+
+    const closeReasoning = function* (): Generator<{ content: string }> {
+      if (!reasoningOpen) return;
+      reasoningOpen = false;
+      yield { content: "</think>" };
+    };
 
     const stream = res.body as unknown as ReadableStream<Uint8Array>;
     for await (const event of readSSE(stream)) {
@@ -1122,22 +1136,35 @@ export async function* chatStream(
           didReceiveFirstEvent = true;
           if (timeoutHandle) clearTimeout(timeoutHandle);
         }
+        yield* closeReasoning();
         yield { done: true };
         return;
       }
       try {
         const parsed = JSON.parse(event) as {
           choices?: Array<{
-            delta?: { content?: string; role?: string };
+            delta?: { content?: string; reasoning?: string; role?: string };
             finish_reason?: string | null;
           }>;
         };
         const choice = parsed.choices?.[0];
+        if (choice?.delta?.reasoning) {
+          if (!didReceiveFirstEvent) {
+            didReceiveFirstEvent = true;
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+          }
+          if (!reasoningOpen) {
+            reasoningOpen = true;
+            yield { content: "<think>" };
+          }
+          yield { content: choice.delta.reasoning };
+        }
         if (choice?.delta?.content) {
           if (!didReceiveFirstEvent) {
             didReceiveFirstEvent = true;
             if (timeoutHandle) clearTimeout(timeoutHandle);
           }
+          yield* closeReasoning();
           yield { content: choice.delta.content };
         }
         if (
@@ -1148,6 +1175,7 @@ export async function* chatStream(
             didReceiveFirstEvent = true;
             if (timeoutHandle) clearTimeout(timeoutHandle);
           }
+          yield* closeReasoning();
           yield { done: true };
           return;
         }

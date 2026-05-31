@@ -60,6 +60,33 @@ describe("findNextAction", () => {
     });
   });
 
+  it("ignores action tags inside thinking blocks", () => {
+    const response = [
+      "<think>",
+      'Maybe I should emit <action name="read_file"><path>old.ts</path></action> first.',
+      "</think>",
+      '<action name="read_file">',
+      "<path>src/main/tools/index.ts</path>",
+      "</action>",
+    ].join("\n");
+
+    expect(findNextAction(response)).toMatchObject({
+      name: "read_file",
+      args: { path: "src/main/tools/index.ts" },
+    });
+  });
+
+  it("does not treat incomplete actions inside thinking blocks as incomplete", () => {
+    const response = [
+      "<think>",
+      'Maybe <action name="read_file">',
+      "</think>",
+      "No tool yet.",
+    ].join("\n");
+
+    expect(findNextAction(response)).toBeNull();
+  });
+
   it("keeps action examples inside old_string from closing the outer action", () => {
     const action = [
       '<action name="edit_file">',

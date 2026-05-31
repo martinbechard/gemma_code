@@ -115,6 +115,9 @@ import {
   readExecutionLogSnapshot,
 } from "./executionLog";
 
+const APP_NAME = "Gemma Code";
+const APP_ID = "com.martinbechard.gemmacode";
+const APP_USER_DATA_DIR_NAME = "gemma-code";
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
 const LIVE_WRITE_PREVIEW_THROTTLE_MS = 450;
@@ -1122,6 +1125,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             model: req.model,
             messages: requestMessages,
             signal: abort.signal,
+            enableThinking: req.enableThinking,
           }),
         });
       } catch {
@@ -1132,6 +1136,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           model: req.model,
           messages: requestMessages,
           signal: abort.signal,
+          enableThinking: req.enableThinking,
         })) {
           logExecution("model_chunk", { callId: modelCallId, ...chunk });
         if (chunk.content) {
@@ -2442,13 +2447,16 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
 const chatAbortControllers = new Map<string, AbortController>();
 
+app.setName(APP_NAME);
+
 app.whenReady().then(async () => {
+  app.setPath("userData", join(app.getPath("appData"), APP_USER_DATA_DIR_NAME));
   setRuntimePaths({
     userData: app.getPath("userData"),
     appRoot: app.getAppPath(),
     packaged: app.isPackaged,
   });
-  electronApp.setAppUserModelId("com.ammaar.gemmachat");
+  electronApp.setAppUserModelId(APP_ID);
   nativeTheme.themeSource = "dark";
 
   // Set dock icon (macOS) — ensures the Gemma icon shows in dev mode

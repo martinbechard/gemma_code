@@ -8,7 +8,7 @@ describe("parseProcessList", () => {
   it("parses ps pid, ppid, command output", () => {
     const processes = parseProcessList(`
       10     1 node /repo/node_modules/.bin/tsx src/cli/index.ts code hello
-      11    10 /path/python -m mlx_lm server --model model --port 11434
+      11    10 /path/python -m mlx_lm server --model model --port 11435
     `);
 
     expect(processes).toEqual([
@@ -20,7 +20,7 @@ describe("parseProcessList", () => {
       {
         pid: 11,
         ppid: 10,
-        command: "/path/python -m mlx_lm server --model model --port 11434",
+        command: "/path/python -m mlx_lm server --model model --port 11435",
       },
     ]);
   });
@@ -38,7 +38,7 @@ describe("findCliCleanupTargets", () => {
         {
           pid: 11,
           ppid: 10,
-          command: "/path/python -m mlx_lm server --model model --port 11434",
+          command: "/path/python -m mlx_lm server --model model --port 11435",
         },
         {
           pid: 12,
@@ -58,7 +58,7 @@ describe("findCliCleanupTargets", () => {
         {
           pid: 20,
           ppid: 1,
-          command: "/path/python -m mlx_lm server --model model --port 11434",
+          command: "/path/python -m mlx_lm server --model model --port 11435",
         },
       ],
       999,

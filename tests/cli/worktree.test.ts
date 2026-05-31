@@ -29,7 +29,7 @@ function run(command: string, args: string[], cwd: string): Promise<void> {
 }
 
 async function createGitRepo(): Promise<string> {
-  const repoRoot = await mkdtemp(join(tmpdir(), "gemma-chat-worktree-test-"));
+  const repoRoot = await mkdtemp(join(tmpdir(), "gemma-code-worktree-test-"));
   await run("git", ["init"], repoRoot);
   await run("git", ["config", "user.email", "cli-test@example.test"], repoRoot);
   await run("git", ["config", "user.name", "CLI Test"], repoRoot);

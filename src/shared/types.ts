@@ -116,6 +116,9 @@ export interface ChatRequest {
   // When true, the main process appends raw harness execution events to the
   // local debug execution log for later reconstruction.
   debugLogging?: boolean;
+  // When true, request Gemma thinking tokens from MLX-LM and render them in
+  // the assistant thinking block instead of discarding delta.reasoning chunks.
+  enableThinking?: boolean;
 }
 
 export interface ExecutionLogEntry {

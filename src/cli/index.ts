@@ -23,7 +23,7 @@ import { DEFAULT_MODEL, parseCliArgs } from "./args";
 // Paths must be set BEFORE importing modules that reach for runtimePaths.
 const REPO_ROOT = resolve(process.cwd());
 setRuntimePaths({
-  userData: join(homedir(), "Library", "Application Support", "gemma-chat"),
+  userData: join(homedir(), "Library", "Application Support", "gemma-code"),
   appRoot: REPO_ROOT,
   packaged: false,
 });
