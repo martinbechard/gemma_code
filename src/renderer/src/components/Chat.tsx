@@ -52,6 +52,15 @@ const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
 const EXECUTION_LOGGING_STORAGE_KEY = "gemma-chat:execution-logging";
 const LOG_VIEWER_REFRESH_MS = 2_000;
 const LOG_DETAIL_PREVIEW_MAX_CHARS = 220;
+const FILE_CONTEXT_TOOL_NAMES = new Set([
+  "read_file",
+  "edit_file",
+  "write_file",
+]);
+const FILE_CONTEXT_HEADING = "Files in context:";
+const CURRENT_FILE_LINE_PREFIX = "Current file:";
+const TOOL_RESULT_ERROR_RE =
+  /^(Error\b|Error reading|Error editing|Error writing|Error deleting|Error fetching)/i;
 
 function pillKeyOf(c: Pick<Conversation, "mode" | "workingDir">): PillKey {
   if (c.mode === "chat") return "chat";
@@ -123,6 +132,62 @@ function requestHistory(messages: ChatMessage[]): Array<{
       content: m.content,
       toolCalls: m.toolCalls,
     }));
+}
+
+function collectFilesInContext(messages: ChatMessage[]): string[] {
+  const paths = new Set<string>();
+  for (const message of messages) {
+    for (const toolCall of message.toolCalls ?? []) {
+      if (!isSuccessfulFileContextToolCall(toolCall)) continue;
+      for (const path of fileContextPathsFromResult(toolCall.result ?? "")) {
+        paths.add(path);
+      }
+      const path = fileContextPathFromArgs(toolCall.args);
+      if (path) paths.add(path);
+    }
+  }
+  return [...paths];
+}
+
+function isSuccessfulFileContextToolCall(toolCall: ToolCall): boolean {
+  if (!FILE_CONTEXT_TOOL_NAMES.has(toolCall.name)) return false;
+  if (toolCall.error) return false;
+  if (typeof toolCall.result !== "string") return false;
+  return !TOOL_RESULT_ERROR_RE.test(toolCall.result.trimStart());
+}
+
+function fileContextPathFromArgs(args: Record<string, unknown>): string | null {
+  const path = args.path;
+  if (typeof path !== "string") return null;
+  const trimmed = path.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function fileContextPathsFromResult(result: string): string[] {
+  const paths: string[] = [];
+  let inFilesList = false;
+  for (const line of result.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === FILE_CONTEXT_HEADING) {
+      inFilesList = true;
+      continue;
+    }
+    if (inFilesList) {
+      if (!trimmed) {
+        inFilesList = false;
+        continue;
+      }
+      if (trimmed.startsWith("- ")) {
+        paths.push(trimmed.slice(2).trim());
+        continue;
+      }
+      inFilesList = false;
+    }
+    if (trimmed.startsWith(CURRENT_FILE_LINE_PREFIX)) {
+      paths.push(trimmed.slice(CURRENT_FILE_LINE_PREFIX.length).trim());
+    }
+  }
+  return paths.filter((path) => path.length > 0);
 }
 
 export default function Chat({ model, onSwitchModel }: Props) {
@@ -573,6 +638,10 @@ export default function Chat({ model, onSwitchModel }: Props) {
   }
 
   const modeLocked = isModeLocked(activeConversation);
+  const filesInContext = useMemo(
+    () => collectFilesInContext(activeConversation.messages),
+    [activeConversation.messages],
+  );
 
   return (
     <div className="flex h-full w-full">
@@ -610,6 +679,9 @@ export default function Chat({ model, onSwitchModel }: Props) {
             }
             onOpenExecutionLog={handleOpenExecutionLog}
           />
+          {(activeConversation.mode === "code" || filesInContext.length > 0) && (
+            <FileContextZone paths={filesInContext} />
+          )}
           <MessageList
             messages={activeConversation.messages}
             streaming={streaming}
@@ -705,6 +777,40 @@ function ResizableCanvas({
         streaming={streaming}
         onClose={onClose}
       />
+    </div>
+  );
+}
+
+function FileContextZone({ paths }: { paths: string[] }) {
+  return (
+    <div className="border-b border-white/[0.06] bg-black/[0.12] px-4 py-2">
+      <div className="mx-auto flex max-w-3xl items-start gap-3">
+        <div className="shrink-0 pt-1 text-[11px] font-medium uppercase tracking-wide text-ink-500">
+          Files in context
+        </div>
+        {paths.length === 0 ? (
+          <div className="min-w-0 flex-1 rounded-md border border-dashed border-white/[0.08] px-2.5 py-1 text-[11.5px] text-ink-500">
+            No files read yet.
+          </div>
+        ) : (
+          <div className="flex max-h-24 min-w-0 flex-1 flex-wrap gap-1.5 overflow-y-auto">
+            {paths.map((path) => (
+              <span
+                key={path}
+                title={path}
+                className="max-w-full truncate rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 font-mono text-[11px] text-ink-200"
+              >
+                {path}
+              </span>
+            ))}
+          </div>
+        )}
+        {paths.length > 0 && (
+          <div className="shrink-0 rounded-md border border-white/[0.08] px-2 py-1 text-[11px] tabular-nums text-ink-400">
+            {paths.length}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
