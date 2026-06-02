@@ -230,6 +230,9 @@ export function buildPlanAssemblyInitialPrompt(
     ? [
         "Emit the complete executable YAML plan in one response.",
         "End the response with exactly plan: done on a separate final line after the YAML plan.",
+        "Do not return XML, HTML, JSON, Markdown lists, or a fenced code block.",
+        "Do not collapse the work into one omnibus prompt; return separate plan.steps entries for distinct implementation and verification actions.",
+        "The YAML must use top-level plan.steps, and each step must have name, prompt, and verify fields.",
       ]
     : [
         "Emit executable plan steps one at a time. When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",

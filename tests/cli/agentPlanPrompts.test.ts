@@ -251,6 +251,18 @@ describe("shouldHandlePlanAssemblyBuffer", () => {
       }),
     ).toBe(false);
   });
+
+  it("routes invalid first responses in complete-plan mode to assembly rejection", () => {
+    expect(
+      shouldHandlePlanAssemblyBuffer({
+        planStateActive: false,
+        planAssemblyState: createPlanAssemblyState(),
+        planFound: null,
+        buffer: "<plan><steps /></plan>\nplan: done",
+        acceptInitialInvalidResponse: true,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("buildEditFailureRecoveryPrompt", () => {

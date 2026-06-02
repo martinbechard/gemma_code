@@ -924,7 +924,6 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       };
       emitSystemPrompt("code execute", planExecutionSystemPrompt);
     };
-
     const drainPlanEvents = (): void => {
       if (!planState) return;
       for (const ev of planState.drainEvents()) {
@@ -956,6 +955,20 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           });
         }
       }
+    };
+    const startValidatedPlanExecution = (plan: ParsedPlan): boolean => {
+      planState = new PlanExecutionState(plan);
+      usePlanExecutionPrompt();
+      drainPlanEvents();
+      const next = planState.nextPrompt();
+      if (!next) return false;
+      prepareStepEvidence(next);
+      pushHarnessPrompt(
+        next.kind === "verify" ? "plan verify" : "plan step",
+        next.text,
+      );
+      awaitingVerify = next.kind === "verify";
+      return true;
     };
 
     // executePlan path: a previously-proposed plan was approved by the user.
@@ -1921,6 +1934,19 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         emit({ type: "set_assistant_content", text: "" });
         emit({ type: "plan_reviewed", review: review.review });
         savePlan(req.conversationId, review.plan.raw);
+        if (codeSubmode === "auto") {
+          const started = startValidatedPlanExecution(review.plan);
+          if (!started) {
+            emit({ type: "activity", activity: { kind: "idle" } });
+            emit({ type: "done" });
+            return;
+          }
+          emit({
+            type: "activity",
+            activity: { kind: "thinking", chars: 0 },
+          });
+          continue;
+        }
         emit({
           type: "plan_proposed",
           steps: review.plan.steps.map((s) => ({
@@ -1980,10 +2006,17 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         planAssemblyState.steps.length > 0 &&
         planFound === null &&
         buffer.trim().length > 0;
+      const invalidCompletePlanResponse =
+        !planState &&
+        !!planAssemblyState &&
+        completePlanInOneResponse &&
+        planFound === null &&
+        buffer.trim().length > 0;
       if (
         (planFound && planFound !== "incomplete") ||
         planAssemblyDone ||
-        planAssemblyStopped
+        planAssemblyStopped ||
+        invalidCompletePlanResponse
       ) {
         flushBufferToUI();
         if (planState) {

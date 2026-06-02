@@ -172,6 +172,8 @@ describe("iterative plan assembly", () => {
 
     expect(prompt).toContain("Emit the complete executable YAML plan in one response.");
     expect(prompt).toContain("End the response with exactly plan: done");
+    expect(prompt).toContain("Do not return XML");
+    expect(prompt).toContain("Do not collapse the work into one omnibus prompt");
     expect(prompt).not.toContain("Emit executable plan steps one at a time.");
   });
 

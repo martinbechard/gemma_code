@@ -454,6 +454,8 @@ describe("prompt display helpers", () => {
     expect(chatSource).toContain("!== \"false\"");
     expect(mainSource).toContain("completePlanInOneResponse");
     expect(mainSource).toContain("acceptCompletePlan");
+    expect(mainSource).toContain("startValidatedPlanExecution");
+    expect(mainSource).toContain('codeSubmode === "auto"');
   });
 
   it("wires last working directory reuse and clear command handling into Chat", () => {

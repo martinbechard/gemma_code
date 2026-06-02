@@ -127,6 +127,7 @@ interface PlanAssemblyBufferCheck {
   planAssemblyState: PlanAssemblyState | null;
   planFound: ParsedPlan | "incomplete" | null;
   buffer: string;
+  acceptInitialInvalidResponse?: boolean;
 }
 
 const TOOL_ERROR_RESULT_RE =
@@ -231,6 +232,13 @@ export function shouldHandlePlanAssemblyBuffer(
   if (check.planStateActive) return false;
   if (!check.planAssemblyState) return false;
   if (isPlanAssemblyDoneResponse(check.buffer)) return true;
+  if (
+    check.acceptInitialInvalidResponse &&
+    check.planFound === null &&
+    check.buffer.trim().length > 0
+  ) {
+    return true;
+  }
   return (
     check.planAssemblyState.steps.length > 0 &&
     check.planFound === null &&
