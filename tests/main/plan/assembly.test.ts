@@ -164,6 +164,67 @@ describe("iterative plan assembly", () => {
     expect(prompt).not.toContain("pnpm run build");
   });
 
+  it("can ask for the complete plan in one response", () => {
+    const prompt = buildPlanAssemblyInitialPrompt(
+      "add keyboard shortcuts to the composer",
+      { completePlanInOneResponse: true },
+    );
+
+    expect(prompt).toContain("Emit the complete executable YAML plan in one response.");
+    expect(prompt).toContain("End the response with exactly plan: done");
+    expect(prompt).not.toContain("Emit executable plan steps one at a time.");
+  });
+
+  it("finishes from a complete multi-step plan in one response", () => {
+    const response = [
+      "plan:",
+      "  steps:",
+      "    - name: inspect",
+      "      prompt: Read src/renderer/src/components/Composer.tsx.",
+      "      verify: src/renderer/src/components/Composer.tsx has been read.",
+      "    - name: implement",
+      "      prompt: Update src/renderer/src/components/Composer.tsx.",
+      "      verify: src/renderer/src/components/Composer.tsx has been updated.",
+      "plan: done",
+    ].join("\n");
+
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      response,
+      "add keyboard shortcuts to the composer",
+      { acceptCompletePlan: true },
+    );
+
+    expect(result.kind).toBe("finished");
+    if (result.kind !== "finished") return;
+    expect(result.plan.steps.map((step) => step.name)).toEqual([
+      "inspect",
+      "implement",
+    ]);
+  });
+
+  it("finishes from a one-step complete plan when the done sentinel is present", () => {
+    const response = [
+      "plan:",
+      "  steps:",
+      "    - name: implement",
+      "      prompt: Update src/main/tools/uuid.ts.",
+      "      verify: src/main/tools/uuid.ts has been updated.",
+      "plan: done",
+    ].join("\n");
+
+    const result = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      response,
+      "add a uuid tool",
+      { acceptCompletePlan: true },
+    );
+
+    expect(result.kind).toBe("finished");
+    if (result.kind !== "finished") return;
+    expect(result.plan.steps.map((step) => step.name)).toEqual(["implement"]);
+  });
+
   it("accepts one step and asks for the next prompt", () => {
     const state = createPlanAssemblyState();
     const result = applyPlanAssemblyResponse(

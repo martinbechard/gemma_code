@@ -135,6 +135,7 @@ export interface ChatRequest {
   // When true, request Gemma thinking tokens from MLX-LM and render them in
   // the assistant thinking block instead of discarding delta.reasoning chunks.
   enableThinking?: boolean;
+  generatePlanInOneStepWhenThinking?: boolean;
 }
 
 export interface ExecutionLogEntry {

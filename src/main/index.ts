@@ -693,6 +693,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     workingDir: req.workingDir,
     codeSubmode: req.codeSubmode,
     executePlan: req.executePlan,
+    generatePlanInOneStepWhenThinking:
+      req.generatePlanInOneStepWhenThinking,
   });
 
   const emit = (chunk: StreamChunk): void => {
@@ -749,6 +751,10 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       !!req.workingDir &&
       !req.executePlan &&
       (codeSubmode === "plan" || codeSubmode === "auto");
+    const completePlanInOneResponse =
+      topLevelPlanHarnessEnabled &&
+      req.enableThinking === true &&
+      req.generatePlanInOneStepWhenThinking !== false;
     const planningTaskMessageIndex =
       topLevelPlanHarnessEnabled && !req.executePlan
         ? req.messages.map((message) => message.role).lastIndexOf("user")
@@ -778,7 +784,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
     if (planningTask) {
       pushPlanningHarnessPrompt(
         "planning prompt",
-        buildPlanAssemblyInitialPrompt(planningTask),
+        buildPlanAssemblyInitialPrompt(planningTask, {
+          completePlanInOneResponse,
+        }),
       );
     }
 
@@ -2031,6 +2039,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             planAssemblyState,
             buffer,
             planningTask,
+            { acceptCompletePlan: completePlanInOneResponse },
           );
           planAssemblyState = assembled.state;
           if (assembled.kind === "accepted") {

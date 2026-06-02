@@ -434,6 +434,28 @@ describe("prompt display helpers", () => {
     expect(mainSource).toContain('status: hadError ? "error" : "ok"');
   });
 
+  it("wires one-shot thinking plan generation into chat requests by default", () => {
+    const chatSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+      "utf8",
+    );
+    const typeSource = readFileSync(
+      join(process.cwd(), "src/shared/types.ts"),
+      "utf8",
+    );
+    const mainSource = readFileSync(
+      join(process.cwd(), "src/main/index.ts"),
+      "utf8",
+    );
+
+    expect(typeSource).toContain("generatePlanInOneStepWhenThinking?: boolean");
+    expect(chatSource).toContain("PLAN_ONE_SHOT_WHEN_THINKING_STORAGE_KEY");
+    expect(chatSource).toContain("generatePlanInOneStepWhenThinking");
+    expect(chatSource).toContain("!== \"false\"");
+    expect(mainSource).toContain("completePlanInOneResponse");
+    expect(mainSource).toContain("acceptCompletePlan");
+  });
+
   it("wires last working directory reuse and clear command handling into Chat", () => {
     const chatSource = readFileSync(
       join(process.cwd(), "src/renderer/src/components/Chat.tsx"),

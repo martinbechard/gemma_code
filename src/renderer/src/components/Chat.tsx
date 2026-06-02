@@ -58,6 +58,8 @@ interface Conversation {
 // is the UI-level discriminant the renderer carries around.
 type PillKey = "chat" | "build" | "code";
 const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
+const PLAN_ONE_SHOT_WHEN_THINKING_STORAGE_KEY =
+  "gemma-code:plan-one-shot-when-thinking";
 const EXECUTION_LOGGING_STORAGE_KEY = "gemma-code:execution-logging";
 const THINKING_ENABLED_STORAGE_KEY = "gemma-code:thinking-enabled";
 const LOG_VIEWER_REFRESH_MS = 2_000;
@@ -238,6 +240,18 @@ export default function Chat({ model, onSwitchModel }: Props) {
       return false;
     }
   });
+  const [
+    planOneShotWhenThinkingEnabled,
+    setPlanOneShotWhenThinkingEnabled,
+  ] = useState<boolean>(() => {
+    try {
+      return (
+        localStorage.getItem(PLAN_ONE_SHOT_WHEN_THINKING_STORAGE_KEY) !== "false"
+      );
+    } catch {
+      return true;
+    }
+  });
   const [executionLogPath, setExecutionLogPath] = useState("");
   const [executionLogViewerError, setExecutionLogViewerError] = useState("");
   const [logViewerOpen, setLogViewerOpen] = useState(false);
@@ -283,6 +297,17 @@ export default function Chat({ model, onSwitchModel }: Props) {
       // ignore
     }
   }, [thinkingEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        PLAN_ONE_SHOT_WHEN_THINKING_STORAGE_KEY,
+        planOneShotWhenThinkingEnabled ? "true" : "false",
+      );
+    } catch {
+      // ignore
+    }
+  }, [planOneShotWhenThinkingEnabled]);
 
   useEffect(() => {
     window.api
@@ -534,6 +559,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           codeSubmode: conv.workingDir ? codeSubmode : undefined,
           debugLogging: executionLogging,
           enableThinking: thinkingEnabled,
+          generatePlanInOneStepWhenThinking: planOneShotWhenThinkingEnabled,
         },
         (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
       );
@@ -786,10 +812,14 @@ export default function Chat({ model, onSwitchModel }: Props) {
             executionLogPath={executionLogPath}
             executionLogOpenError={executionLogViewerError}
             thinkingEnabled={thinkingEnabled}
+            planOneShotWhenThinkingEnabled={planOneShotWhenThinkingEnabled}
             onToggleExecutionLogging={() =>
               setExecutionLogging((current) => !current)
             }
             onToggleThinking={() => setThinkingEnabled((current) => !current)}
+            onTogglePlanOneShotWhenThinking={() =>
+              setPlanOneShotWhenThinkingEnabled((current) => !current)
+            }
             onOpenExecutionLog={handleOpenExecutionLog}
           />
           {(activeConversation.mode === "code" || filesInContext.length > 0) && (
@@ -1530,8 +1560,10 @@ function Header({
   executionLogPath,
   executionLogOpenError,
   thinkingEnabled,
+  planOneShotWhenThinkingEnabled,
   onToggleExecutionLogging,
   onToggleThinking,
+  onTogglePlanOneShotWhenThinking,
   onOpenExecutionLog,
 }: {
   model: string;
@@ -1550,8 +1582,10 @@ function Header({
   executionLogPath: string;
   executionLogOpenError: string;
   thinkingEnabled: boolean;
+  planOneShotWhenThinkingEnabled: boolean;
   onToggleExecutionLogging: () => void;
   onToggleThinking: () => void;
+  onTogglePlanOneShotWhenThinking: () => void;
   onOpenExecutionLog: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1666,6 +1700,27 @@ function Header({
             }`}
           />
           Think
+        </button>
+        <button
+          type="button"
+          onClick={onTogglePlanOneShotWhenThinking}
+          title={
+            planOneShotWhenThinkingEnabled
+              ? "One-shot planning on: when thinking is enabled, plan mode asks for the complete plan in one response."
+              : "One-shot planning off: plan mode asks for one plan step at a time."
+          }
+          className={`flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11.5px] transition ${
+            planOneShotWhenThinkingEnabled
+              ? "border-violet-300/30 bg-violet-300/10 text-violet-100"
+              : "border-white/[0.08] bg-white/[0.03] text-ink-400 hover:bg-white/[0.05] hover:text-ink-100"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              planOneShotWhenThinkingEnabled ? "bg-violet-200" : "bg-ink-500"
+            }`}
+          />
+          Plan 1x
         </button>
         <button
           type="button"

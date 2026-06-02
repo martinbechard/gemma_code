@@ -18,6 +18,7 @@ const WHOLE_RESPONSE_YAML_FENCE_RE =
 const THINKING_BLOCK_RE = /<think\b[^>]*>[\s\S]*?<\/think\s*>/gi;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
+const PLAN_ASSEMBLY_DONE_LINE_RE = /^\s*plan\s*:\s*done\s*$/im;
 const PLAN_QUESTION_RE =
   /^\s*<Question\b[^>]*>([\s\S]*?)<\/Question\s*>\s*$/i;
 const STEP_TAG_RE = /<\/?Step\b/i;
@@ -94,6 +95,8 @@ const PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX =
   "Our task is to create clear, executable instructions for an AI coding agent.";
 const PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX =
   "Research and emit the first step now. Respond with exactly one of: one read-only inspection action, one YAML plan step wrapped in <Step>...</Step>, or one focused question wrapped in <Question>...</Question>.";
+const PLAN_ASSEMBLY_ONE_RESPONSE_PROMPT_SUFFIX =
+  "Research and emit the complete plan now. Respond with exactly one of: one read-only inspection action, one complete YAML plan, or one focused question wrapped in <Question>...</Question>.";
 const PLAN_ASSEMBLY_RELEVANT_TERM_MIN_LENGTH = 4;
 const PLAN_ASSEMBLY_RELEVANT_TERM_MIN_COUNT = 2;
 const PLAN_ASSEMBLY_RELEVANT_TERM_RE = /[a-z0-9_]+/gi;
@@ -143,6 +146,14 @@ export const PLAN_ASSEMBLY_NEXT_PROMPT = [
 
 export interface PlanAssemblyState {
   steps: ParsedStep[];
+}
+
+export interface PlanAssemblyPromptOptions {
+  completePlanInOneResponse?: boolean;
+}
+
+export interface PlanAssemblyResponseOptions {
+  acceptCompletePlan?: boolean;
 }
 
 export type PlanAssemblyResult =
@@ -200,7 +211,10 @@ export function createPlanAssemblyState(): PlanAssemblyState {
   return { steps: [] };
 }
 
-export function buildPlanAssemblyInitialPrompt(task: string): string {
+export function buildPlanAssemblyInitialPrompt(
+  task: string,
+  options: PlanAssemblyPromptOptions = {},
+): string {
   const trimmedTask = task.trim();
   const existingUserRequest = extractPlanAssemblyUserRequest(trimmedTask);
   if (existingUserRequest && isStructuredPlanAssemblyPrompt(trimmedTask)) {
@@ -212,6 +226,14 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
   const taskSentence = /[.!?]$/.test(trimmedUserRequest)
     ? trimmedUserRequest
     : trimmedUserRequest + ".";
+  const assemblyInstructions = options.completePlanInOneResponse
+    ? [
+        "Emit the complete executable YAML plan in one response.",
+        "End the response with exactly plan: done on a separate final line after the YAML plan.",
+      ]
+    : [
+        "Emit executable plan steps one at a time. When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
+      ];
   return [
     PLAN_ASSEMBLY_INITIAL_PROMPT_PREFIX,
     "",
@@ -223,10 +245,12 @@ export function buildPlanAssemblyInitialPrompt(task: string): string {
     "Prepare a plan for another AI coding agent; include all information that agent needs.",
     "Use one read-only inspection action first if project evidence is missing.",
     "Read-only inspection actions are planning work, not plan steps; do not create steps that read, search, inspect, locate, identify, confirm, or trace targets.",
-    "Emit executable plan steps one at a time. When enough evidence is visible, emit exactly one YAML plan step wrapped in <Step>...</Step>.",
+    ...assemblyInstructions,
     "Mutation steps must name exact files or artifacts; do not pass target discovery to the coding agent.",
     "",
-    PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
+    options.completePlanInOneResponse
+      ? PLAN_ASSEMBLY_ONE_RESPONSE_PROMPT_SUFFIX
+      : PLAN_ASSEMBLY_INITIAL_PROMPT_SUFFIX,
   ].join("\n");
 }
 
@@ -234,6 +258,7 @@ export function applyPlanAssemblyResponse(
   state: PlanAssemblyState,
   response: string,
   task = "",
+  options: PlanAssemblyResponseOptions = {},
 ): PlanAssemblyResult {
   const protocolResponse = stripThinkingBlocks(response);
   if (isPlanAssemblyDoneResponse(protocolResponse)) {
@@ -246,6 +271,17 @@ export function applyPlanAssemblyResponse(
       );
     }
     return { kind: "finished", state, plan };
+  }
+
+  if (options.acceptCompletePlan) {
+    const completePlan = findCompletePlanAssemblyResponse(protocolResponse);
+    if (completePlan) {
+      return {
+        kind: "finished",
+        state: { steps: completePlan.steps },
+        plan: completePlan,
+      };
+    }
   }
 
   const parsed = findPlanAssemblyStep(protocolResponse);
@@ -448,6 +484,20 @@ function findPlanAssemblyStep(
   const isWholeResponse =
     text.slice(parsed.start, parsed.end).trim() === text.trim();
   return isWholeResponse ? parsed : null;
+}
+
+function findCompletePlanAssemblyResponse(response: string): ParsedPlan | null {
+  const parsed = findNextPlan(normalizeWholeResponseYaml(response));
+  if (!parsed || parsed === "incomplete" || parsed.steps.length === 0) {
+    return null;
+  }
+  for (const step of parsed.steps) {
+    const stepValidation = validatePlanStepText(step);
+    if (!stepValidation.valid) return null;
+  }
+  return parsed.steps.length > 1 || PLAN_ASSEMBLY_DONE_LINE_RE.test(response)
+    ? parsed
+    : null;
 }
 
 type StructuredPlanSemanticReviewResult =
