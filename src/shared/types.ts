@@ -52,6 +52,19 @@ export interface SystemPromptSnapshot {
   content: string;
 }
 
+export interface ThinkingTimelineItem {
+  kind: "thinking";
+  id: string;
+  content: string;
+}
+
+export interface ToolCallTimelineItem {
+  kind: "tool_call";
+  toolCallId: string;
+}
+
+export type MessageTimelineItem = ThinkingTimelineItem | ToolCallTimelineItem;
+
 export type Role = "user" | "assistant" | "system" | "tool" | "harness";
 
 export type CodeSubmode = "discuss" | "plan" | "execute" | "auto";
@@ -77,6 +90,7 @@ export interface ChatMessage {
   content: string;
   thinking?: string;
   thinkingInProgress?: boolean;
+  timeline?: MessageTimelineItem[];
   phase?: ConversationPhase;
   harnessLabel?: string;
   toolCalls?: ToolCall[];

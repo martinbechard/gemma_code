@@ -27,6 +27,10 @@ import {
   rewindToUserRequest,
   shouldSendConversationMessage,
 } from "../lib/conversationStore";
+import {
+  appendReasoningToMessage,
+  appendToolCallToMessage,
+} from "../lib/messageTimeline";
 
 interface Props {
   model: string;
@@ -552,11 +556,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
             content: last.content + chunk.text,
           };
         } else if (chunk.type === "reasoning") {
-          msgs[msgs.length - 1] = {
-            ...last,
-            thinking: (last.thinking ?? "") + chunk.text,
-            thinkingInProgress: true,
-          };
+          msgs[msgs.length - 1] = appendReasoningToMessage(last, chunk.text);
         } else if (chunk.type === "system_prompt") {
           const snapshot = { label: chunk.label, content: chunk.content };
           if (hasSystemPromptSnapshot(msgs, snapshot)) return c;
@@ -566,10 +566,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           };
         } else if (chunk.type === "tool_call") {
           const tc: ToolCall = { ...chunk.call, running: true };
-          msgs[msgs.length - 1] = {
-            ...last,
-            toolCalls: [...(last.toolCalls ?? []), tc],
-          };
+          msgs[msgs.length - 1] = appendToolCallToMessage(last, tc);
         } else if (chunk.type === "tool_result") {
           const tcs = (last.toolCalls ?? []).map((t) =>
             t.id === chunk.id

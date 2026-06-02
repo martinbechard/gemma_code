@@ -7,6 +7,7 @@ import type {
   PlanReview,
   PlanReviewChecklistItem,
   ProposedStep,
+  ToolCallTimelineItem,
   ToolCall,
 } from "@shared/types";
 import gemmaLogoUrl from "../assets/gemma-logo.png";
@@ -78,6 +79,21 @@ function stripActionMarkup(content: string): string {
   return withoutCompleteActions.slice(0, incompleteAction).trim();
 }
 
+function visibleTimelineToolCall(
+  item: ToolCallTimelineItem,
+  toolCallsById: Map<string, ToolCall>,
+  localPlanNodeIds: Set<string>,
+): ToolCall | null {
+  const toolCall = toolCallsById.get(item.toolCallId);
+  if (
+    !toolCall ||
+    (toolCall.parentStepId && localPlanNodeIds.has(toolCall.parentStepId))
+  ) {
+    return null;
+  }
+  return toolCall;
+}
+
 function parseMessageContent(message: ChatMessage): Parsed {
   const parsed = parseThinking(message.content);
   const explicitThinking = message.thinking?.trim();
@@ -125,6 +141,11 @@ export default function Message({
       ),
     [message.toolCalls, localPlanNodeIds],
   );
+  const toolCallsById = React.useMemo(
+    () => new Map((message.toolCalls ?? []).map((tc) => [tc.id, tc])),
+    [message.toolCalls],
+  );
+  const hasTimeline = (message.timeline?.length ?? 0) > 0;
 
   if (message.role === "system") return null;
 
@@ -197,7 +218,7 @@ export default function Message({
         className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover"
       />
       <div className="selectable min-w-0 flex-1">
-        {parsed.thinking && (
+        {!hasTimeline && parsed.thinking && (
           <ThinkingBlock
             content={parsed.thinking}
             inProgress={parsed.thinkingInProgress}
@@ -229,9 +250,31 @@ export default function Message({
           />
         )}
 
-        {visibleStandaloneToolCalls.map((tc) => (
-          <ToolCallView key={tc.id} call={tc} />
-        ))}
+        {hasTimeline
+          ? message.timeline?.map((item, index) => {
+              if (item.kind === "thinking") {
+                return (
+                  <ThinkingBlock
+                    key={item.id}
+                    content={item.content.trim()}
+                    inProgress={
+                      parsed.thinkingInProgress &&
+                      index === (message.timeline?.length ?? 0) - 1
+                    }
+                  />
+                );
+              }
+
+              const tc = visibleTimelineToolCall(
+                item,
+                toolCallsById,
+                localPlanNodeIds,
+              );
+              return tc ? <ToolCallView key={tc.id} call={tc} /> : null;
+            })
+          : visibleStandaloneToolCalls.map((tc) => (
+              <ToolCallView key={tc.id} call={tc} />
+            ))}
 
         {parsed.visible && (
           <div
