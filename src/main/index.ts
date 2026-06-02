@@ -20,6 +20,7 @@ import {
   buildChatRequestBody,
   listLocalModels,
   inspectModelCache,
+  inspectModelProvenance,
   isModelCacheReadyForInference,
   warmupInference,
   linkGlobalCacheModel,
@@ -1724,7 +1725,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
             break streamLoop;
           }
         }
-        if (chunk.done) {
+        if ("done" in chunk && chunk.done) {
           break streamLoop;
         }
         }
@@ -2534,6 +2535,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("models:list-local", async () => {
     return listLocalModels();
+  });
+
+  ipcMain.handle("models:provenance", async (_e, model: string) => {
+    return inspectModelProvenance(model);
   });
 
   ipcMain.handle("chat:send", async (_e, req: ChatRequest) => {

@@ -1,4 +1,10 @@
-import { AVAILABLE_MODELS, type SetupStatus } from "@shared/types";
+import { useEffect, useState } from "react";
+import {
+  AVAILABLE_MODELS,
+  formatModelProvenanceSummary,
+  type ModelProvenance,
+  type SetupStatus,
+} from "@shared/types";
 import gemmaLogoUrl from "../assets/gemma-logo.png";
 
 interface Props {
@@ -142,6 +148,31 @@ function WelcomeScreen({
   // Use the first registry entry so the welcome screen follows the validated default model order.
   const selected =
     AVAILABLE_MODELS.find((m) => m.name === model) ?? AVAILABLE_MODELS[0];
+  const [modelProvenance, setModelProvenance] = useState<
+    Record<string, ModelProvenance>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const availableModel of AVAILABLE_MODELS) {
+      window.api
+        .getModelProvenance(availableModel.name)
+        .then((provenance) => {
+          if (cancelled) return;
+          setModelProvenance((current) => ({
+            ...current,
+            [availableModel.name]: provenance,
+          }));
+        })
+        .catch(() => {
+          /* model provenance is optional UI detail */
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="drag flex h-full w-full flex-col">
       <div className="h-9" />
@@ -188,6 +219,10 @@ function WelcomeScreen({
                 </div>
                 <div className="mt-1 text-[12.5px] leading-snug text-ink-400">
                   {m.description}
+                </div>
+                <div className="mt-1 text-[11px] leading-snug text-ink-500">
+                  {formatModelProvenanceSummary(modelProvenance[m.name]) ||
+                    m.size}
                 </div>
               </button>
             ))}

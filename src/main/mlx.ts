@@ -14,6 +14,7 @@ import {
   symlinkSync,
 } from "fs";
 import { userDataDir, appRootDir, isPackaged } from "./runtimePaths";
+import type { ModelProvenance } from "../shared/types";
 
 const MLX_PORT = 11435;
 export const MLX_SERVER_PORT = MLX_PORT;
@@ -40,6 +41,7 @@ const MLX_GLOBAL_HF_CACHE_DIR = join(homedir(), ".cache", "huggingface");
 const MLX_GLOBAL_HF_HUB_DIR = join(MLX_GLOBAL_HF_CACHE_DIR, "hub");
 const MLX_HF_CACHE_SYMLINK_TYPE = "dir";
 const MLX_SERVER_LOG_FILE_NAME = "mlx-server.log";
+const MODEL_PROVENANCE_FETCH_TIMEOUT_MS = 8_000;
 
 let serverProc: ChildProcess | null = null;
 let currentModel: string | null = null;
@@ -101,6 +103,11 @@ interface MLXChatRequestFailureOptions {
   statusText?: string;
   cause?: string;
   responseText?: string;
+}
+
+interface HuggingFaceModelInfo {
+  sha?: unknown;
+  lastModified?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1017,72 @@ export function inspectModelCache(model: string): MLXModelCacheInspection {
     modelWeightsBytes,
     hasModelSafetensors,
   };
+}
+
+export async function inspectModelProvenance(
+  model: string,
+): Promise<ModelProvenance> {
+  const inspection = inspectModelCache(model);
+  const revision = readModelRevision(inspection.modelCachePath);
+  const localCachedAt = latestModelSnapshotMtime(inspection);
+  const upstreamLastModified = revision
+    ? await fetchHuggingFaceLastModified(model, revision)
+    : null;
+  return {
+    model,
+    revision,
+    upstreamLastModified,
+    localCachedAt,
+    weightsBytes: inspection.hasModelSafetensors
+      ? inspection.modelWeightsBytes
+      : null,
+  };
+}
+
+function readModelRevision(modelCachePath: string): string | null {
+  const refPath = join(modelCachePath, "refs", "main");
+  if (!existsSync(refPath)) return null;
+  const revision = readFileSync(refPath, "utf8").trim();
+  return revision.length > 0 ? revision : null;
+}
+
+function latestModelSnapshotMtime(
+  inspection: MLXModelCacheInspection,
+): string | null {
+  let latest = 0;
+  for (const snapshot of inspection.snapshots) {
+    if (!existsSync(snapshot.path)) continue;
+    latest = Math.max(latest, statSync(snapshot.path).mtimeMs);
+    const weightPath = join(snapshot.path, "model.safetensors");
+    if (existsSync(weightPath)) {
+      latest = Math.max(latest, statSync(weightPath).mtimeMs);
+    }
+  }
+  return latest > 0 ? new Date(latest).toISOString() : null;
+}
+
+async function fetchHuggingFaceLastModified(
+  model: string,
+  revision: string,
+): Promise<string | null> {
+  const abort = new AbortController();
+  const timeout = setTimeout(
+    () => abort.abort("model provenance timeout"),
+    MODEL_PROVENANCE_FETCH_TIMEOUT_MS,
+  );
+  try {
+    const response = await fetch(
+      `https://huggingface.co/api/models/${model}/revision/${revision}`,
+      { signal: abort.signal },
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as HuggingFaceModelInfo;
+    return typeof data.lastModified === "string" ? data.lastModified : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function repairModelCache(model: string): void {

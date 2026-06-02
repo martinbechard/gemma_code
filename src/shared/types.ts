@@ -242,6 +242,41 @@ export interface ModelInfo {
   recommended?: boolean;
 }
 
+export interface ModelProvenance {
+  model: string;
+  revision: string | null;
+  upstreamLastModified: string | null;
+  localCachedAt: string | null;
+  weightsBytes: number | null;
+}
+
+const MODEL_PROVENANCE_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+export function formatModelProvenanceSummary(
+  provenance: ModelProvenance | null | undefined,
+): string {
+  if (!provenance) return "";
+  const revision = provenance.revision?.slice(0, 7) ?? "";
+  const updated = formatModelProvenanceDate(
+    "updated",
+    provenance.upstreamLastModified,
+  );
+  const cached = formatModelProvenanceDate("cached", provenance.localCachedAt);
+  const label = updated || cached;
+  return [label, revision].filter((part) => part.length > 0).join(" · ");
+}
+
+function formatModelProvenanceDate(prefix: string, value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${prefix} ${MODEL_PROVENANCE_DATE_FORMATTER.format(date)}`;
+}
+
 const MLX_GEMMA_4_E2B_REPO = "mlx-community/gemma-4-e2b-it-4bit";
 const GEMMA_4_E2B_BYTES = 3_580_765_126;
 const MLX_GEMMA_4_E4B_REPO = "mlx-community/gemma-4-e4b-it-4bit";

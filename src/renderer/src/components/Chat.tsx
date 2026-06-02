@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AVAILABLE_MODELS,
+  formatModelProvenanceSummary,
   type AgentMode,
   type ChatMessage,
   type CodeSubmode,
   type ExecutionLogEntry,
   type ExecutionLogSnapshot,
+  type ModelProvenance,
   type ToolCall,
   type StreamChunk,
 } from "@shared/types";
@@ -241,6 +243,9 @@ export default function Chat({ model, onSwitchModel }: Props) {
   const [lastWorkingDir, setLastWorkingDir] = useState<string | null>(
     () => loadLastWorkingDir() ?? pickLastWorkingDir(conversations),
   );
+  const [modelProvenance, setModelProvenance] = useState<
+    Record<string, ModelProvenance>
+  >({});
   const logViewerEndRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<{ abort: boolean }>({ abort: false });
 
@@ -435,6 +440,27 @@ export default function Chat({ model, onSwitchModel }: Props) {
       });
     }
   }, [activeId, activeConversation.workingDir]);
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const availableModel of AVAILABLE_MODELS) {
+      window.api
+        .getModelProvenance(availableModel.name)
+        .then((provenance) => {
+          if (cancelled) return;
+          setModelProvenance((current) => ({
+            ...current,
+            [availableModel.name]: provenance,
+          }));
+        })
+        .catch(() => {
+          /* model provenance is optional UI detail */
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSend(
     input: string,
@@ -746,6 +772,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
         <div className="flex min-w-0 flex-1 flex-col">
           <Header
             model={model}
+            modelProvenance={modelProvenance}
             pillKey={pillKeyOf(activeConversation)}
             workingDir={activeConversation.workingDir}
             codeSubmode={codeSubmodeOf(activeConversation)}
@@ -1491,6 +1518,7 @@ function executionLogEventClass(entry: ExecutionLogEntry): string {
 
 function Header({
   model,
+  modelProvenance,
   pillKey,
   workingDir,
   codeSubmode,
@@ -1510,6 +1538,7 @@ function Header({
   onOpenExecutionLog,
 }: {
   model: string;
+  modelProvenance: Record<string, ModelProvenance>;
   pillKey: PillKey;
   workingDir?: string;
   codeSubmode: CodeSubmode;
@@ -1738,7 +1767,8 @@ function Header({
                       )}
                     </div>
                     <div className="mt-0.5 text-[11px] text-ink-400">
-                      {m.size}
+                      {formatModelProvenanceSummary(modelProvenance[m.name]) ||
+                        m.size}
                     </div>
                   </div>
                   {m.name === model && (

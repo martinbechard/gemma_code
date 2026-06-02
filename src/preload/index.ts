@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
 import type {
   ChatRequest,
   ExecutionLogSnapshot,
+  ModelProvenance,
   SetupStatus,
   StreamChunk,
   WorkspaceInfo,
@@ -29,6 +30,9 @@ const api = {
 
   listLocalModels: (): Promise<string[]> =>
     ipcRenderer.invoke("models:list-local"),
+
+  getModelProvenance: (model: string): Promise<ModelProvenance> =>
+    ipcRenderer.invoke("models:provenance", model),
 
   sendChat: async (
     req: ChatRequest,

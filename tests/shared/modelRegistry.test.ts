@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AVAILABLE_MODELS, DEFAULT_MODEL } from "../../src/shared/types";
+import {
+  AVAILABLE_MODELS,
+  DEFAULT_MODEL,
+  formatModelProvenanceSummary,
+} from "../../src/shared/types";
 
 const GEMMA_4_E2B_REPO = "mlx-community/gemma-4-e2b-it-4bit";
 const GEMMA_4_E2B_SIZE = "3.6 GB";
@@ -31,5 +35,31 @@ describe("AVAILABLE_MODELS", () => {
       sizeBytes: GEMMA_4_E4B_BYTES,
       recommended: true,
     });
+  });
+});
+
+describe("formatModelProvenanceSummary", () => {
+  it("prefers upstream last modified date with a short revision", () => {
+    expect(
+      formatModelProvenanceSummary({
+        model: GEMMA_4_E4B_REPO,
+        revision: "deb1db712068b1c9f83fb1c97f08c1204b9459a1",
+        upstreamLastModified: "2026-05-19T13:18:45.000Z",
+        localCachedAt: "2026-06-01T23:20:13.000-04:00",
+        weightsBytes: 5_217_361_182,
+      }),
+    ).toBe("updated May 19, 2026 · deb1db7");
+  });
+
+  it("falls back to local cache time when upstream metadata is missing", () => {
+    expect(
+      formatModelProvenanceSummary({
+        model: GEMMA_4_E4B_REPO,
+        revision: "deb1db712068b1c9f83fb1c97f08c1204b9459a1",
+        upstreamLastModified: null,
+        localCachedAt: "2026-06-01T23:20:13.000-04:00",
+        weightsBytes: 5_217_361_182,
+      }),
+    ).toBe("cached Jun 1, 2026 · deb1db7");
   });
 });
