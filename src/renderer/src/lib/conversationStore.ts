@@ -6,6 +6,8 @@ import type { AgentMode } from "@shared/types";
 import type { ChatMessage, SystemPromptSnapshot } from "@shared/types";
 
 export const STORAGE_KEY = "gemma-code:conversations:v2";
+export const LAST_WORKING_DIR_STORAGE_KEY = "gemma-code:last-working-dir";
+export const CLEAR_COMMAND = "/clear";
 export const AUTO_PLANNING_SUMMARY_ID = "auto-planning-summary";
 const AUTO_EXECUTION_SEPARATOR_ID = "auto-execution-separator";
 const NO_EXPANDED_PLANNING_SUMMARIES: ReadonlySet<string> = new Set();
@@ -75,6 +77,21 @@ export function pickStartupModel(
     if (typeof c.model === "string" && c.model.length > 0) return c.model;
   }
   return null;
+}
+
+export function pickLastWorkingDir(
+  convs: PersistedConversationLite[],
+): string | null {
+  for (const c of convs) {
+    if (typeof c.workingDir === "string" && c.workingDir.trim().length > 0) {
+      return c.workingDir;
+    }
+  }
+  return null;
+}
+
+export function isClearCommand(input: string): boolean {
+  return input.trim() === CLEAR_COMMAND;
 }
 
 // True once a conversation is "started" in Code mode: mode==='code', a

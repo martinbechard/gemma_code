@@ -4,7 +4,9 @@ import { join } from "node:path";
 import {
   AUTO_PLANNING_SUMMARY_ID,
   buildMessageRenderItems,
+  isClearCommand,
   pickStartupModel,
+  pickLastWorkingDir,
   isModeLocked,
   hasSystemPromptSnapshot,
   rewindToUserRequest,
@@ -60,6 +62,33 @@ describe("pickStartupModel", () => {
         conv({ id: "c2", model: "model-B" }),
       ]),
     ).toBe("model-B");
+  });
+});
+
+describe("pickLastWorkingDir", () => {
+  it("returns null for an empty array", () => {
+    expect(pickLastWorkingDir([])).toBeNull();
+  });
+
+  it("returns the first non-empty working directory", () => {
+    expect(
+      pickLastWorkingDir([
+        conv({ id: "c1", workingDir: "" }),
+        conv({ id: "c2", workingDir: "/tmp/project-a" }),
+        conv({ id: "c3", workingDir: "/tmp/project-b" }),
+      ]),
+    ).toBe("/tmp/project-a");
+  });
+});
+
+describe("isClearCommand", () => {
+  it("matches /clear with surrounding whitespace", () => {
+    expect(isClearCommand(" /clear\n")).toBe(true);
+  });
+
+  it("does not match other slash commands or text", () => {
+    expect(isClearCommand("/clear now")).toBe(false);
+    expect(isClearCommand("/reset")).toBe(false);
   });
 });
 
@@ -403,6 +432,21 @@ describe("prompt display helpers", () => {
     expect(mainSource).toContain("args: found.args");
     expect(mainSource).toContain("output: result");
     expect(mainSource).toContain('status: hadError ? "error" : "ok"');
+  });
+
+  it("wires last working directory reuse and clear command handling into Chat", () => {
+    const chatSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+      "utf8",
+    );
+
+    expect(chatSource).toContain("LAST_WORKING_DIR_STORAGE_KEY");
+    expect(chatSource).toContain("pickLastWorkingDir(conversations)");
+    expect(chatSource).toContain("rememberWorkingDir(path)");
+    expect(chatSource).toContain("isClearCommand(input)");
+    expect(chatSource).toContain("clearActiveConversation");
+    expect(chatSource).toContain("Change");
+    expect(chatSource).toContain("chooseFolder: true");
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

@@ -15,10 +15,13 @@ import Message from "./Message";
 import Sidebar from "./Sidebar";
 import Canvas from "./Canvas";
 import {
+  LAST_WORKING_DIR_STORAGE_KEY,
   STORAGE_KEY,
   buildMessageRenderItems,
   hasSystemPromptSnapshot,
+  isClearCommand,
   isModeLocked,
+  pickLastWorkingDir,
   rewindToUserRequest,
   shouldSendConversationMessage,
 } from "../lib/conversationStore";
@@ -82,6 +85,23 @@ function loadConversations(): Conversation[] {
 function saveConversations(cs: Conversation[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cs));
+  } catch {
+    // ignore
+  }
+}
+
+function loadLastWorkingDir(): string | null {
+  try {
+    const path = localStorage.getItem(LAST_WORKING_DIR_STORAGE_KEY);
+    return path && path.trim().length > 0 ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastWorkingDir(path: string): void {
+  try {
+    localStorage.setItem(LAST_WORKING_DIR_STORAGE_KEY, path);
   } catch {
     // ignore
   }
@@ -218,6 +238,9 @@ export default function Chat({ model, onSwitchModel }: Props) {
   const [logViewerAutoScroll, setLogViewerAutoScroll] = useState(true);
   const [executionLogSnapshot, setExecutionLogSnapshot] =
     useState<ExecutionLogSnapshot | null>(null);
+  const [lastWorkingDir, setLastWorkingDir] = useState<string | null>(
+    () => loadLastWorkingDir() ?? pickLastWorkingDir(conversations),
+  );
   const logViewerEndRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<{ abort: boolean }>({ abort: false });
 
@@ -309,6 +332,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
     setActiveId(c.id);
   }
 
+  function rememberWorkingDir(path: string): void {
+    setLastWorkingDir(path);
+    saveLastWorkingDir(path);
+  }
+
   function deleteConversation(id: string): void {
     setConversations((cs) => {
       const filtered = cs.filter((c) => c.id !== id);
@@ -322,12 +350,15 @@ export default function Chat({ model, onSwitchModel }: Props) {
     });
   }
 
-  // Three-way pill selector. "code" prompts the user for a working directory
-  // via the native dialog; cancelling leaves the current pill active.
+  // Three-way pill selector. "code" reuses the conversation or remembered
+  // working directory. The folder picker only opens from Change folder.
   // Once a Code conversation has at least one message (isModeLocked), the
   // chat / build branches no-op so the agent can't be swapped onto a
   // different sandbox underneath an in-flight Code session.
-  async function selectMode(next: PillKey): Promise<void> {
+  async function selectMode(
+    next: PillKey,
+    options: { chooseFolder?: boolean } = {},
+  ): Promise<void> {
     const locked = isModeLocked(activeConversation);
     if (next === "chat") {
       if (locked) return;
@@ -344,10 +375,22 @@ export default function Chat({ model, onSwitchModel }: Props) {
       }));
       return;
     }
-    const path = await window.api.chooseDirectory(
-      activeConversation.workingDir,
-    );
+    const reusablePath = activeConversation.workingDir ?? lastWorkingDir;
+    if (reusablePath && !options.chooseFolder) {
+      updateActive((c) => ({
+        ...c,
+        mode: "code",
+        workingDir: reusablePath,
+        canvasOpen: true,
+        codeSubmode: c.codeSubmode ?? DEFAULT_CODE_SUBMODE,
+      }));
+      rememberWorkingDir(reusablePath);
+      return;
+    }
+
+    const path = await window.api.chooseDirectory(reusablePath ?? undefined);
     if (!path) return;
+    rememberWorkingDir(path);
     updateActive((c) => ({
       ...c,
       mode: "code",
@@ -365,6 +408,15 @@ export default function Chat({ model, onSwitchModel }: Props) {
 
   function toggleCanvas(): void {
     updateActive((c) => ({ ...c, canvasOpen: !c.canvasOpen }));
+  }
+
+  function clearActiveConversation(): void {
+    updateActive((c) => ({
+      ...c,
+      title: "New chat",
+      messages: [],
+      model,
+    }));
   }
 
   // Keep the main-process workspace override in sync with the active
@@ -389,6 +441,10 @@ export default function Chat({ model, onSwitchModel }: Props) {
     priorMessagesOverride?: ChatMessage[],
   ): Promise<void> {
     if (!input.trim() || streaming) return;
+    if (!priorMessagesOverride && isClearCommand(input)) {
+      clearActiveConversation();
+      return;
+    }
 
     const conv = conversations.find((c) => c.id === activeId)!;
     const priorMessages = priorMessagesOverride ?? conv.messages;
@@ -689,6 +745,9 @@ export default function Chat({ model, onSwitchModel }: Props) {
             canvasOpen={!!activeConversation.canvasOpen}
             modeLocked={modeLocked}
             onSelectMode={selectMode}
+            onChangeWorkingDir={() =>
+              selectMode("code", { chooseFolder: true })
+            }
             onSelectCodeSubmode={selectCodeSubmode}
             onToggleCanvas={toggleCanvas}
             onSwitchModel={onSwitchModel}
@@ -1431,6 +1490,7 @@ function Header({
   canvasOpen,
   modeLocked,
   onSelectMode,
+  onChangeWorkingDir,
   onSelectCodeSubmode,
   onToggleCanvas,
   onSwitchModel,
@@ -1449,6 +1509,7 @@ function Header({
   canvasOpen: boolean;
   modeLocked: boolean;
   onSelectMode: (next: PillKey) => void;
+  onChangeWorkingDir: () => void;
   onSelectCodeSubmode: (next: CodeSubmode) => void;
   onToggleCanvas: () => void;
   onSwitchModel: (model: string) => void;
@@ -1482,7 +1543,16 @@ function Header({
     <div className="drag flex h-11 shrink-0 items-center justify-between border-b border-white/[0.06] px-4">
       <div className="no-drag min-w-[8rem] truncate text-[11px] text-ink-400">
         {pillKey === "code" && workingDir ? (
-          <span title={workingDir}>📁 {dirBasename(workingDir)}</span>
+          <span className="flex min-w-0 items-center gap-2" title={workingDir}>
+            <span className="min-w-0 truncate">📁 {dirBasename(workingDir)}</span>
+            <button
+              type="button"
+              onClick={onChangeWorkingDir}
+              className="shrink-0 rounded border border-white/[0.08] px-1.5 py-0.5 text-[10.5px] text-ink-300 transition hover:bg-white/[0.05] hover:text-ink-100"
+            >
+              Change
+            </button>
+          </span>
         ) : null}
       </div>
       <div className="no-drag flex items-center gap-1 rounded-lg bg-white/[0.04] p-0.5 text-[12px]">
@@ -1512,7 +1582,7 @@ function Header({
         </ModePill>
         <ModePill
           active={pillKey === "code"}
-          onClick={() => onSelectMode("code")}
+          onClick={() => pillKey !== "code" && onSelectMode("code")}
         >
           Code
         </ModePill>
