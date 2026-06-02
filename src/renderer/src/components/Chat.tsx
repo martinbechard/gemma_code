@@ -525,6 +525,12 @@ export default function Chat({ model, onSwitchModel }: Props) {
             ...last,
             content: last.content + chunk.text,
           };
+        } else if (chunk.type === "reasoning") {
+          msgs[msgs.length - 1] = {
+            ...last,
+            thinking: (last.thinking ?? "") + chunk.text,
+            thinkingInProgress: true,
+          };
         } else if (chunk.type === "system_prompt") {
           const snapshot = { label: chunk.label, content: chunk.content };
           if (hasSystemPromptSnapshot(msgs, snapshot)) return c;
@@ -612,6 +618,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
           msgs[msgs.length - 1] = {
             ...last,
             done: true,
+            thinkingInProgress: false,
             activity: { kind: "idle" },
           };
         } else if (chunk.type === "error") {

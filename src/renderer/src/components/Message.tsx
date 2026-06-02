@@ -64,6 +64,21 @@ function parseThinking(content: string): Parsed {
   };
 }
 
+function parseMessageContent(message: ChatMessage): Parsed {
+  const parsed = parseThinking(message.content);
+  const explicitThinking = message.thinking?.trim();
+  if (!explicitThinking) return parsed;
+  return {
+    thinking: [explicitThinking, parsed.thinking]
+      .filter((part) => part.trim().length > 0)
+      .join("\n")
+      .trim(),
+    thinkingInProgress:
+      message.thinkingInProgress === true || parsed.thinkingInProgress,
+    visible: parsed.visible,
+  };
+}
+
 export default function Message({
   message,
   streaming,
@@ -72,10 +87,7 @@ export default function Message({
 }: Props) {
   const isUser = message.role === "user";
   const isHarness = message.role === "harness";
-  const parsed = React.useMemo(
-    () => parseThinking(message.content),
-    [message.content],
-  );
+  const parsed = React.useMemo(() => parseMessageContent(message), [message]);
   const html = React.useMemo(() => {
     if (!parsed.visible) return "";
     try {

@@ -75,6 +75,8 @@ export interface ChatMessage {
   id: string;
   role: Role;
   content: string;
+  thinking?: string;
+  thinkingInProgress?: boolean;
   phase?: ConversationPhase;
   harnessLabel?: string;
   toolCalls?: ToolCall[];
@@ -189,6 +191,7 @@ export type PlanNodeStatus = "ok" | "failed";
 
 export type StreamChunk =
   | { type: "token"; text: string }
+  | { type: "reasoning"; text: string }
   | { type: "system_prompt"; label: string; content: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; id: string; result?: string; error?: string }

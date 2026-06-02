@@ -662,7 +662,9 @@ async function runAgentLoop(
       model: opts.model,
       messages: requestMessages,
     })) {
-      if (chunk.content) {
+      if ("reasoning" in chunk && chunk.reasoning) {
+        out(chunk.reasoning);
+      } else if ("content" in chunk && chunk.content) {
         buffer += chunk.content;
         out(chunk.content);
       }

@@ -1092,6 +1092,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       );
       const modelCallId = `model_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       let modelResponseLogged = false;
+      let reasoningBuffer = "";
       const logModelResponse = (outcome: string): void => {
         if (modelResponseLogged) return;
         modelResponseLogged = true;
@@ -1101,6 +1102,8 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           outcome,
           chars: buffer.length,
           content: buffer,
+          reasoningChars: reasoningBuffer.length,
+          reasoning: reasoningBuffer,
         });
       };
       // Persist the assembled conversation to <userData>/debug/last-system-prompt.txt
@@ -1139,7 +1142,12 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           enableThinking: req.enableThinking,
         })) {
           logExecution("model_chunk", { callId: modelCallId, ...chunk });
-        if (chunk.content) {
+        if ("reasoning" in chunk && chunk.reasoning) {
+          reasoningBuffer += chunk.reasoning;
+          emit({ type: "reasoning", text: chunk.reasoning });
+          continue;
+        }
+        if ("content" in chunk && chunk.content) {
           if (firstToken) {
             firstToken = false;
             emitRuntimeActivity("streaming response");

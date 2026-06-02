@@ -121,6 +121,24 @@ describe("Message", () => {
     expect(html).not.toContain("markdown-body");
   });
 
+  it("renders separate thinking content without mixing it into markdown", () => {
+    const html = renderMessage({
+      id: "assistant-thinking-field",
+      role: "assistant",
+      content: '<action name="read_file"><path>src/main/tools/index.ts</path></action>',
+      thinking: [
+        "I should inspect the tool registry first.",
+        "Then I can call the read_file tool.",
+      ].join("\n"),
+      createdAt: 1,
+    });
+
+    expect(html).toContain("Thought process");
+    expect(html).toContain('<action name="read_file">');
+    expect(html).not.toContain("I should inspect the tool registry first.");
+    expect(html).not.toContain("&lt;think&gt;");
+  });
+
   it("renders an expandable structured plan review bubble", () => {
     const html = renderMessage({
       id: "assistant-review",

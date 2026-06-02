@@ -1071,9 +1071,14 @@ export function buildChatRequestBody(opts: MLXChatOptions): MLXChatRequestBody {
   };
 }
 
+export type MLXChatStreamChunk =
+  | { content: string }
+  | { reasoning: string }
+  | { done: true };
+
 export async function* chatStream(
   opts: MLXChatOptions,
-): AsyncGenerator<{ content?: string; done?: boolean }> {
+): AsyncGenerator<MLXChatStreamChunk> {
   const start = Date.now();
   const endpoint = `${MLX_URL}/v1/chat/completions`;
   const abortController = new AbortController();
@@ -1121,13 +1126,6 @@ export async function* chatStream(
     }
 
     let didReceiveFirstEvent = false;
-    let reasoningOpen = false;
-
-    const closeReasoning = function* (): Generator<{ content: string }> {
-      if (!reasoningOpen) return;
-      reasoningOpen = false;
-      yield { content: "</think>" };
-    };
 
     const stream = res.body as unknown as ReadableStream<Uint8Array>;
     for await (const event of readSSE(stream)) {
@@ -1136,7 +1134,6 @@ export async function* chatStream(
           didReceiveFirstEvent = true;
           if (timeoutHandle) clearTimeout(timeoutHandle);
         }
-        yield* closeReasoning();
         yield { done: true };
         return;
       }
@@ -1153,18 +1150,13 @@ export async function* chatStream(
             didReceiveFirstEvent = true;
             if (timeoutHandle) clearTimeout(timeoutHandle);
           }
-          if (!reasoningOpen) {
-            reasoningOpen = true;
-            yield { content: "<think>" };
-          }
-          yield { content: choice.delta.reasoning };
+          yield { reasoning: choice.delta.reasoning };
         }
         if (choice?.delta?.content) {
           if (!didReceiveFirstEvent) {
             didReceiveFirstEvent = true;
             if (timeoutHandle) clearTimeout(timeoutHandle);
           }
-          yield* closeReasoning();
           yield { content: choice.delta.content };
         }
         if (
@@ -1175,7 +1167,6 @@ export async function* chatStream(
             didReceiveFirstEvent = true;
             if (timeoutHandle) clearTimeout(timeoutHandle);
           }
-          yield* closeReasoning();
           yield { done: true };
           return;
         }
