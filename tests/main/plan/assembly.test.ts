@@ -12,6 +12,7 @@ import {
   createPlanAssemblyState,
   finalizeExecutablePlanAssembly,
   finalizePlanAssembly,
+  isPlanAssemblyNoProgressResponse,
   parsePlanQuestion,
 } from "../../../src/main/plan/assembly";
 import { validatePlanForExecution } from "../../../src/main/plan/validation";
@@ -249,6 +250,25 @@ describe("iterative plan assembly", () => {
     );
     expect(parsePlanQuestion("Which file should own this?")).toBeNull();
     expect(parsePlanQuestion("<Question> </Question>")).toBeNull();
+  });
+
+  it("detects empty visible output as plan assembly no-progress", () => {
+    expect(isPlanAssemblyNoProgressResponse("")).toBe(true);
+    expect(
+      isPlanAssemblyNoProgressResponse(
+        [
+          "<think>",
+          "I should read src/main/tools/index.ts next.",
+          "</think>",
+        ].join("\n"),
+      ),
+    ).toBe(true);
+    expect(
+      isPlanAssemblyNoProgressResponse(
+        '<action name="read_file"><path>src/main/tools/index.ts</path></action>',
+      ),
+    ).toBe(false);
+    expect(isPlanAssemblyNoProgressResponse(exploreStep)).toBe(false);
   });
 
   it("accepts a complete corrected plan after validation failure", () => {

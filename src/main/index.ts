@@ -81,6 +81,7 @@ import {
   buildPlanSemanticReviewMessages,
   createPlanAssemblyState,
   isPlanAssemblyDoneResponse,
+  isPlanAssemblyNoProgressResponse,
   parsePlanQuestion,
   type PlanAssemblyState,
 } from "./plan/assembly";
@@ -1933,6 +1934,30 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         emit({ type: "activity", activity: { kind: "idle" } });
         emit({ type: "done" });
         return;
+      }
+
+      if (
+        !planState &&
+        planAssemblyState &&
+        isPlanAssemblyNoProgressResponse(buffer)
+      ) {
+        logExecution("plan_assembly_no_progress", {
+          responseChars: buffer.length,
+          reasoningChars: reasoningBuffer.length,
+        });
+        baseMessages.push({
+          role: "assistant",
+          content:
+            buffer.trim().length > 0
+              ? buffer
+              : "No visible planning response was produced.",
+        });
+        pushPlanningHarnessPrompt(
+          "plan assembly retry",
+          PLAN_ASSEMBLY_NO_PROGRESS_PROMPT,
+        );
+        emit({ type: "activity", activity: { kind: "thinking", chars: 0 } });
+        continue;
       }
 
       const planFound =

@@ -698,6 +698,10 @@ export function isPlanAssemblyDoneResponse(response: string): boolean {
   return keys.length === 1 && doc.plan === "done";
 }
 
+export function isPlanAssemblyNoProgressResponse(response: string): boolean {
+  return response.replace(THINKING_BLOCK_RE, "").trim().length === 0;
+}
+
 export function parsePlanQuestion(response: string): string | null {
   const match = PLAN_QUESTION_RE.exec(response.trim());
   if (!match) return null;
