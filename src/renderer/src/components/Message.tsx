@@ -28,6 +28,11 @@ interface Parsed {
 const PLAN_HARNESS_LABEL_PATTERN = /\b(?:plan|planning)\b/i;
 const THINKING_OPEN_RE = /<think(?:ing)?>/i;
 const THINKING_CLOSE_RE = /<\/think(?:ing)?>/i;
+const ACTION_OPEN_RE = /<action\s+name\s*=\s*["']?[a-zA-Z_][\w]*["']?\s*\/?>/i;
+const ACTION_BLOCK_RE =
+  /<action\s+name\s*=\s*["']?[a-zA-Z_][\w]*["']?[\s\S]*?<\/action\s*>/gi;
+const SELF_CLOSING_ACTION_RE =
+  /<action\s+name\s*=\s*["']?[a-zA-Z_][\w]*["']?\s*\/>/gi;
 
 function parseThinking(content: string): Parsed {
   const thinkingParts: string[] = [];
@@ -64,10 +69,20 @@ function parseThinking(content: string): Parsed {
   };
 }
 
+function stripActionMarkup(content: string): string {
+  const withoutCompleteActions = content
+    .replace(ACTION_BLOCK_RE, "")
+    .replace(SELF_CLOSING_ACTION_RE, "");
+  const incompleteAction = withoutCompleteActions.search(ACTION_OPEN_RE);
+  if (incompleteAction < 0) return withoutCompleteActions.trim();
+  return withoutCompleteActions.slice(0, incompleteAction).trim();
+}
+
 function parseMessageContent(message: ChatMessage): Parsed {
   const parsed = parseThinking(message.content);
   const explicitThinking = message.thinking?.trim();
-  if (!explicitThinking) return parsed;
+  const visible = stripActionMarkup(parsed.visible);
+  if (!explicitThinking) return { ...parsed, visible };
   return {
     thinking: [explicitThinking, parsed.thinking]
       .filter((part) => part.trim().length > 0)
@@ -75,7 +90,7 @@ function parseMessageContent(message: ChatMessage): Parsed {
       .trim(),
     thinkingInProgress:
       message.thinkingInProgress === true || parsed.thinkingInProgress,
-    visible: parsed.visible,
+    visible,
   };
 }
 

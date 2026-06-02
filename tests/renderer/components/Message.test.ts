@@ -134,9 +134,28 @@ describe("Message", () => {
     });
 
     expect(html).toContain("Thought process");
-    expect(html).toContain('<action name="read_file">');
+    expect(html).not.toContain('<action name="read_file">');
+    expect(html).not.toContain("&lt;action");
     expect(html).not.toContain("I should inspect the tool registry first.");
     expect(html).not.toContain("&lt;think&gt;");
+  });
+
+  it("hides incomplete action markup from visible markdown while streaming", () => {
+    const html = renderMessage({
+      id: "assistant-incomplete-action",
+      role: "assistant",
+      content: [
+        "I will read the tool file now.",
+        '<action name="read_file">',
+        "<path>src/main/tools/uuid.ts</path>",
+      ].join("\n"),
+      createdAt: 1,
+    });
+
+    expect(html).toContain("I will read the tool file now.");
+    expect(html).not.toContain('<action name="read_file">');
+    expect(html).not.toContain("&lt;action");
+    expect(html).not.toContain("src/main/tools/uuid.ts");
   });
 
   it("renders an expandable structured plan review bubble", () => {
