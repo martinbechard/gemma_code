@@ -26,25 +26,41 @@ interface Parsed {
 }
 
 const PLAN_HARNESS_LABEL_PATTERN = /\b(?:plan|planning)\b/i;
+const THINKING_OPEN_RE = /<think(?:ing)?>/i;
+const THINKING_CLOSE_RE = /<\/think(?:ing)?>/i;
 
 function parseThinking(content: string): Parsed {
-  const openRe = /<think(?:ing)?>/;
-  const closeRe = /<\/think(?:ing)?>/;
-  const openMatch = content.match(openRe);
-  if (!openMatch)
-    return { thinking: "", thinkingInProgress: false, visible: content };
-  const before = content.slice(0, openMatch.index!);
-  const after = content.slice(openMatch.index! + openMatch[0].length);
-  const closeMatch = after.match(closeRe);
-  if (!closeMatch) {
-    return { thinking: after, thinkingInProgress: true, visible: before };
+  const thinkingParts: string[] = [];
+  const visibleParts: string[] = [];
+  let offset = 0;
+  let thinkingInProgress = false;
+
+  while (offset < content.length) {
+    const openMatch = content.slice(offset).match(THINKING_OPEN_RE);
+    if (!openMatch) {
+      visibleParts.push(content.slice(offset));
+      break;
+    }
+
+    const openStart = offset + openMatch.index!;
+    visibleParts.push(content.slice(offset, openStart));
+    const thinkingStart = openStart + openMatch[0].length;
+    const afterOpen = content.slice(thinkingStart);
+    const closeMatch = afterOpen.match(THINKING_CLOSE_RE);
+    if (!closeMatch) {
+      thinkingParts.push(afterOpen);
+      thinkingInProgress = true;
+      break;
+    }
+
+    thinkingParts.push(afterOpen.slice(0, closeMatch.index!));
+    offset = thinkingStart + closeMatch.index! + closeMatch[0].length;
   }
-  const thinking = after.slice(0, closeMatch.index!);
-  const rest = after.slice(closeMatch.index! + closeMatch[0].length);
+
   return {
-    thinking,
-    thinkingInProgress: false,
-    visible: (before + rest).trim(),
+    thinking: thinkingParts.join("\n").trim(),
+    thinkingInProgress,
+    visible: visibleParts.join("").trim(),
   };
 }
 
@@ -190,7 +206,7 @@ export default function Message({
           <ToolCallView key={tc.id} call={tc} />
         ))}
 
-        {!isEmpty && (
+        {parsed.visible && (
           <div
             className="markdown-body text-[14.5px] text-ink-100"
             dangerouslySetInnerHTML={{

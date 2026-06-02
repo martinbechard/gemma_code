@@ -89,6 +89,38 @@ describe("Message", () => {
     expect(html).toContain("src/main/tools.ts");
   });
 
+  it("keeps thinking after a tool call out of visible markdown", () => {
+    const html = renderMessage({
+      id: "assistant-thinking-tool",
+      role: "assistant",
+      content: [
+        "<think>",
+        "First private note before the tool.",
+        "</think>",
+        "<think>",
+        "Second private note after the tool.",
+        "</think>",
+      ].join("\n"),
+      createdAt: 1,
+      toolCalls: [
+        {
+          id: "call-1",
+          name: "read_file",
+          args: { path: "src/main/tools/index.ts" },
+          result: "File contents",
+          running: false,
+        },
+      ],
+    });
+
+    expect(html).toContain("Thought process");
+    expect(html).toContain("Reading");
+    expect(html).toContain("src/main/tools/index.ts");
+    expect(html).not.toContain("<think>");
+    expect(html).not.toContain("&lt;think&gt;");
+    expect(html).not.toContain("markdown-body");
+  });
+
   it("renders an expandable structured plan review bubble", () => {
     const html = renderMessage({
       id: "assistant-review",
