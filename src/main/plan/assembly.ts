@@ -15,6 +15,7 @@ import { validatePlanForExecution, validatePlanStepText } from "./validation";
 const MAX_PLAN_ASSEMBLY_STEPS = 16;
 const WHOLE_RESPONSE_YAML_FENCE_RE =
   /^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i;
+const THINKING_BLOCK_RE = /<think\b[^>]*>[\s\S]*?<\/think\s*>/gi;
 
 export const PLAN_ASSEMBLY_DONE_TEXT = "plan: done";
 const PLAN_QUESTION_RE =
@@ -234,7 +235,8 @@ export function applyPlanAssemblyResponse(
   response: string,
   task = "",
 ): PlanAssemblyResult {
-  if (isPlanAssemblyDoneResponse(response)) {
+  const protocolResponse = stripThinkingBlocks(response);
+  if (isPlanAssemblyDoneResponse(protocolResponse)) {
     const plan = finalizePlanAssembly(state);
     if (!plan) {
       return rejected(
@@ -246,7 +248,7 @@ export function applyPlanAssemblyResponse(
     return { kind: "finished", state, plan };
   }
 
-  const parsed = findPlanAssemblyStep(response);
+  const parsed = findPlanAssemblyStep(protocolResponse);
   if (parsed === "incomplete") {
     return rejected(state, "The response contains incomplete YAML.", task);
   }
@@ -416,7 +418,8 @@ export function applyPlanSemanticReviewResponse(
 export function applyPlanCorrectionResponse(
   response: string,
 ): PlanCorrectionResult {
-  const parsed = findNextPlan(response);
+  const protocolResponse = stripThinkingBlocks(response);
+  const parsed = findNextPlan(protocolResponse);
   if (parsed === "incomplete") {
     return planCorrectionRejected("The corrected plan contains incomplete YAML.");
   }
@@ -465,7 +468,7 @@ type StructuredPlanSemanticReviewResult =
 function parseStructuredPlanSemanticReviewResponse(
   response: string,
 ): StructuredPlanSemanticReviewResult {
-  const text = normalizeWholeResponseYaml(response);
+  const text = normalizeWholeResponseYaml(stripThinkingBlocks(response));
   let doc: unknown;
   try {
     doc = parseSemanticReviewYaml(text);
@@ -965,6 +968,10 @@ function normalizeWholeResponseYaml(response: string): string {
   const raw = response.trim();
   const fenced = WHOLE_RESPONSE_YAML_FENCE_RE.exec(raw);
   return (fenced?.[1] ?? raw).trim();
+}
+
+function stripThinkingBlocks(response: string): string {
+  return response.replace(THINKING_BLOCK_RE, "").trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -307,6 +307,28 @@ describe("iterative plan assembly", () => {
     expect(done.plan.end).toBe(done.plan.raw.length);
   });
 
+  it("assembles accepted steps when thinking surrounds plan done", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const done = applyPlanAssemblyResponse(
+      first.state,
+      [
+        "<think>",
+        "The accepted step already covers the request.",
+        "</think>",
+        PLAN_ASSEMBLY_DONE_TEXT,
+      ].join("\n"),
+    );
+
+    expect(done.kind).toBe("finished");
+    if (done.kind !== "finished") return;
+    expect(done.plan.steps.map((step) => step.name)).toEqual(["explore"]);
+  });
+
   it("accepts prose around a Step-wrapped plan step", () => {
     const result = applyPlanAssemblyResponse(
       createPlanAssemblyState(),
@@ -580,6 +602,31 @@ describe("semantic plan review", () => {
       "residual_risk",
     ]);
     expect(result.review.checklist[3].answer).toBe("false");
+  });
+
+  it("accepts a semantic review pass response surrounded by thinking", () => {
+    const first = applyPlanAssemblyResponse(
+      createPlanAssemblyState(),
+      exploreStep,
+    );
+    if (first.kind !== "accepted") throw new Error("expected first step");
+
+    const plan = finalizePlanAssembly(first.state);
+    if (!plan) throw new Error("expected plan");
+
+    const result = applyPlanSemanticReviewResponse(
+      plan,
+      [
+        "<think>",
+        "The plan appears concrete and complete.",
+        "</think>",
+        compactPassingReview,
+      ].join("\n"),
+    );
+
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.review.verdict).toBe("pass");
   });
 
   it("accepts compact semantic review checklist items without question fields", () => {
