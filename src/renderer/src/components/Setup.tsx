@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   AVAILABLE_MODELS,
   formatModelProvenanceSummary,
@@ -6,6 +6,8 @@ import {
   type SetupStatus,
 } from "@shared/types";
 import gemmaLogoUrl from "../assets/gemma-logo.png";
+
+const ERROR_COPY_CONFIRM_MS = 1500;
 
 interface Props {
   status: SetupStatus;
@@ -27,6 +29,17 @@ function formatBytes(n?: number): string {
   return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
 }
 
+export function setupErrorClipboardText(status: SetupStatus): string {
+  return [
+    status.error ? `Error: ${status.error}` : "",
+    status.repair?.reason ? `Cause: ${status.repair.reason}` : "",
+    status.command ? `Command: ${status.command}` : "",
+    status.logFile ? `Log file: ${status.logFile}` : "",
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
 export default function Setup({
   status,
   model,
@@ -43,6 +56,7 @@ export default function Setup({
     status.stage === "downloading-model" ||
     status.stage === "warming-model";
   const isRepairable = !!status.repair?.model && onRepairModel != null;
+  const [copiedError, setCopiedError] = useState(false);
 
   if (status.stage === "checking" && status.message === "Welcome") {
     return (
@@ -95,39 +109,48 @@ export default function Setup({
 
           {status.stage === "error" && (
             <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              <div className="font-medium">Something went wrong</div>
-              <div className="mt-1 text-red-300/80">{status.error}</div>
-              {status.repair?.reason && (
-                <div className="mt-1 text-red-300/80">
-                  Cause: {status.repair.reason}
-                </div>
-              )}
-              {status.command && (
-                <div className="mt-1 whitespace-pre-wrap break-all text-red-300/80">
-                  Command: {status.command}
-                </div>
-              )}
-              {status.logFile && (
-                <div className="mt-1 text-red-300/80">
-                  Log file: <span className="break-all">{status.logFile}</span>
-                </div>
-              )}
-              {!isRepairable && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-medium">Something went wrong</div>
                 <button
-                  onClick={() => onStart(model)}
-                  className="mt-3 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+                  type="button"
+                  onClick={() => {
+                    const text = setupErrorClipboardText(status);
+                    void navigator.clipboard?.writeText(text).then(() => {
+                      setCopiedError(true);
+                      window.setTimeout(
+                        () => setCopiedError(false),
+                        ERROR_COPY_CONFIRM_MS,
+                      );
+                    });
+                  }}
+                  className="shrink-0 rounded-md border border-red-300/30 bg-red-300/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-300/20"
                 >
-                  Try again
+                  {copiedError ? "Copied" : "Copy error"}
                 </button>
-              )}
-              {isRepairable && (
-                <button
-                  onClick={() => onRepairModel(status.repair!.model)}
-                  className="mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-400/20"
-                >
-                  Resume download
-                </button>
-              )}
+              </div>
+              <pre className="selectable mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-red-300/20 bg-black/25 p-2 text-[11px] leading-5 text-red-100">
+                {setupErrorClipboardText(status)}
+              </pre>
+              <div className="mt-3 flex gap-2">
+                {!isRepairable && (
+                  <button
+                    type="button"
+                    onClick={() => onStart(model)}
+                    className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+                  >
+                    Try again
+                  </button>
+                )}
+                {isRepairable && (
+                  <button
+                    type="button"
+                    onClick={() => onRepairModel(status.repair!.model)}
+                    className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-400/20"
+                  >
+                    Resume download
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
