@@ -21,6 +21,7 @@ const TOOL_MODULE_NAMES = [
   "runBash",
   "runProjectScript",
   "searchFiles",
+  "uuid",
   "webSearch",
   "writeFile",
 ] as const;
@@ -36,6 +37,7 @@ describe("tools module layout", () => {
       "delete_file",
       "edit_file",
       "fetch_url",
+      "generate_uuid",
       "get_current_datetime",
       "get_current_working_directory",
       "kill_background_task",

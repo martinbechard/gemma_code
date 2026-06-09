@@ -12,6 +12,7 @@ import { readFileTool } from "./readFile";
 import { runBashTool } from "./runBash";
 import { runProjectScriptTool } from "./runProjectScript";
 import { searchFilesTool } from "./searchFiles";
+import { generateUuidTool } from "./uuid";
 import { webSearchTool } from "./webSearch";
 import { writeFileTool } from "./writeFile";
 import { USE_WRITE_FILE_FOR_FILE_CHANGES } from "./constants";
@@ -50,8 +51,9 @@ export const TOOLS: Record<string, ToolSpec> = {
   run_bash: runBashTool,
   run_project_script: runProjectScriptTool,
   list_background_tasks: listBackgroundTasksTool,
-  kill_background_task: killBackgroundTaskTool,
-  open_preview: openPreviewTool,
+  "kill_background_task": killBackgroundTaskTool,
+  "open_preview": openPreviewTool,
+  "generate_uuid": generateUuidTool,
 };
 
 const PLAN_INSPECTION_TOOL_NAMES = new Set([
