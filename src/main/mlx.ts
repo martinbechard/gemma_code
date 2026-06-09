@@ -147,6 +147,10 @@ interface HuggingFaceModelInfo {
   lastModified?: unknown;
 }
 
+interface MLXServerErrorResponse {
+  error?: unknown;
+}
+
 // ---------------------------------------------------------------------------
 // Paths — everything lives under <appData>/mlx/
 // ---------------------------------------------------------------------------
@@ -307,6 +311,21 @@ function formatLogTail(lines?: MLXLogLine[]): string {
     .join("\n");
 }
 
+function extractServerError(responseText?: string): string | null {
+  if (!responseText) return null;
+  try {
+    const parsed = JSON.parse(responseText) as MLXServerErrorResponse;
+    if (typeof parsed.error === "string" && parsed.error.trim().length > 0) {
+      return parsed.error.trim();
+    }
+  } catch {
+    // Response bodies from upstream can be plain text. Fall through to text.
+  }
+
+  const text = responseText.trim();
+  return text.length > 0 ? text : null;
+}
+
 function summarizeChatFailure({
   endpoint,
   model,
@@ -316,11 +335,16 @@ function summarizeChatFailure({
   cause,
   responseText,
 }: MLXChatRequestFailureOptions): string {
-  const parts: string[] = [
+  const serverError = extractServerError(responseText);
+  const parts: string[] = [];
+  if (serverError) {
+    parts.push(`serverError=${serverError}`);
+  }
+  parts.push(
     `endpoint=${endpoint}`,
     `model=${model}`,
     `elapsedMs=${elapsedMs}`,
-  ];
+  );
   if (status !== undefined) {
     parts.push(`status=${status}`);
   } else {
@@ -335,7 +359,10 @@ function summarizeChatFailure({
   const statusTextTail = responseText
     ? responseText.slice(-MLX_ERROR_TEXT_TAIL_CHARS)
     : "N/A";
-  return `${parts.join(" ")} | response_tail=${statusTextTail} | logs=${formatLogTail()}`;
+  const responseDetail = serverError
+    ? ""
+    : ` | response_tail=${statusTextTail}`;
+  return `${parts.join(" ")}${responseDetail} | logs=${formatLogTail()}`;
 }
 
 function collectIncompleteBlobs(
