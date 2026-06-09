@@ -14,7 +14,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "fs";
-import { userDataDir, appRootDir, isPackaged } from "./runtimePaths";
+import { userDataDir } from "./runtimePaths";
 import type { ModelProvenance } from "../shared/types";
 
 const MLX_PORT = 11435;
@@ -78,6 +78,38 @@ const MLX_SERVER_PATCHED_GENERATE_QUEUE_BLOCK = `        if self._default_model_
 
         response_queue = Queue()
         self.requests.put((response_queue, request, generation_args))
+`;
+const MLX_GEMMA4_TEXT_SANITIZER_MARKER = "drop_shared_kv_weight =";
+const MLX_GEMMA4_TEXT_OPTIMIZED_ATTENTION_MARKER =
+  "self.has_kv = layer_idx <";
+const MLX_GEMMA4_TEXT_SANITIZE_BLOCK = `        sanitized = {}
+        for k, v in weights.items():
+`;
+const MLX_GEMMA4_TEXT_PATCHED_SANITIZE_BLOCK = `        sanitized = {}
+        first_kv_shared_layer = (
+            self.args.num_hidden_layers - self.args.num_kv_shared_layers
+        )
+        drop_shared_kv_weight = (
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.k_norm",
+            "self_attn.v_norm",
+        )
+
+        def is_dead_shared_kv_weight(key):
+            parts = key.split(".")
+            try:
+                layers_index = parts.index("layers")
+                layer_index = int(parts[layers_index + 1])
+            except (ValueError, IndexError):
+                return False
+            if first_kv_shared_layer <= 0 or layer_index < first_kv_shared_layer:
+                return False
+            return any(name in key for name in drop_shared_kv_weight)
+
+        for k, v in weights.items():
+            if is_dead_shared_kv_weight(k):
+                continue
 `;
 
 let serverProc: ChildProcess | null = null;
@@ -178,19 +210,6 @@ function venvPython(): string {
 
 function modelsDir(): string {
   return join(dataDir(), "models");
-}
-
-// Bundled mlx-lm hot-patches live under resources/mlx-patches/ and ship via
-// electron-builder's asarUnpack so the files are present on the filesystem.
-function mlxPatchSourceDir(): string {
-  return isPackaged()
-    ? join(
-        process.resourcesPath,
-        "app.asar.unpacked",
-        "resources",
-        "mlx-patches",
-      )
-    : join(appRootDir(), "resources", "mlx-patches");
 }
 
 function modelCacheFolder(model: string): string {
@@ -693,12 +712,7 @@ export async function installMLX(
 /**
  * Apply local hot-patches to the installed mlx-lm package.
  *
- * Currently patches mlx_lm/models/gemma4_text.py: between 0.31.2 and 0.31.3 the
- * KV-shared layers stopped allocating k_proj/v_proj/k_norm/v_norm modules,
- * which makes existing mlx-community gemma-4 4-bit checkpoints fail strict
- * weight loading with "140 parameters not in model". We overlay the 0.31.2
- * version of just that file. The patch is content-detected, so once an upstream
- * release ships the proper fix this function becomes a no-op automatically.
+ * Applies small, content-detected fixes to the managed mlx-lm install.
  */
 export function applyMlxPatches(vPy: string): void {
   applyMlxServerPatch(vPy);
@@ -779,35 +793,53 @@ function applyGemma4TextPatch(vPy: string): void {
     return;
   }
 
-  // Marker that identifies the broken 0.31.3 layout. If it's absent, the file
-  // is either already patched or comes from a release where upstream fixed the
-  // issue differently — leave it alone.
-  if (!installedSource.includes("self.has_kv = layer_idx <")) {
+  const backupPath = `${targetPath}.bak.upstream`;
+  if (
+    !installedSource.includes(MLX_GEMMA4_TEXT_OPTIMIZED_ATTENTION_MARKER) &&
+    existsSync(backupPath)
+  ) {
+    try {
+      installedSource = readFileSync(backupPath, "utf8");
+    } catch (e) {
+      console.warn("[mlx] patch: cannot read gemma4_text upstream backup:", e);
+      return;
+    }
+  }
+
+  const patchedSource = patchMlxGemma4TextSource(installedSource);
+  if (!patchedSource) {
     console.log("[mlx] patch: gemma4_text already compatible, skipping");
     return;
   }
 
-  const patchSource = join(mlxPatchSourceDir(), "gemma4_text.py");
-  if (!existsSync(patchSource)) {
-    console.warn(
-      "[mlx] patch: bundled gemma4_text.py not found at",
-      patchSource,
-    );
-    return;
-  }
-
-  const backupPath = `${targetPath}.bak.upstream`;
   try {
     if (!existsSync(backupPath)) {
       cpSync(targetPath, backupPath);
     }
-    cpSync(patchSource, targetPath);
+    writeFileSync(targetPath, patchedSource);
     console.log(
-      "[mlx] patch: applied gemma4_text.py overlay (KV-shared layers fix)",
+      "[mlx] patch: applied gemma4_text shared-KV sanitizer fix",
     );
   } catch (e) {
-    console.warn("[mlx] patch: failed to overlay gemma4_text.py:", e);
+    console.warn("[mlx] patch: failed to update gemma4_text.py:", e);
   }
+}
+
+export function patchMlxGemma4TextSource(source: string): string | null {
+  if (source.includes(MLX_GEMMA4_TEXT_SANITIZER_MARKER)) {
+    return null;
+  }
+  if (
+    !source.includes(MLX_GEMMA4_TEXT_OPTIMIZED_ATTENTION_MARKER) ||
+    !source.includes(MLX_GEMMA4_TEXT_SANITIZE_BLOCK)
+  ) {
+    return null;
+  }
+
+  return source.replace(
+    MLX_GEMMA4_TEXT_SANITIZE_BLOCK,
+    MLX_GEMMA4_TEXT_PATCHED_SANITIZE_BLOCK,
+  );
 }
 
 function resolvePythonModulePath(vPy: string, moduleName: string): string | null {

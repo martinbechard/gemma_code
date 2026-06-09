@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { patchMlxServerSource } from "../../src/main/mlx";
+import {
+  patchMlxGemma4TextSource,
+  patchMlxServerSource,
+} from "../../src/main/mlx";
 
 const BROKEN_SERVER_SOURCE = `
 class ResponseGenerator:
@@ -38,6 +41,32 @@ class ResponseGenerator:
         return ctx, _process_control_tokens(ctx, _inner())
 `;
 
+const OPTIMIZED_GEMMA4_TEXT_SOURCE = `
+class Attention(nn.Module):
+    def __init__(self, config: ModelArgs, layer_idx: int):
+        self.has_kv = layer_idx < config.num_hidden_layers - config.num_kv_shared_layers
+
+class Model(nn.Module):
+    def sanitize(self, weights):
+        sanitized = {}
+        for k, v in weights.items():
+            if any(
+                s in k
+                for s in (
+                    "self_attn.rotary_emb",
+                    "input_max",
+                    "input_min",
+                    "output_max",
+                    "output_min",
+                )
+            ):
+                continue
+
+            sanitized[k] = v
+
+        return sanitized
+`;
+
 describe("patchMlxServerSource", () => {
   it("turns eager default model load failures into request errors", () => {
     const patched = patchMlxServerSource(BROKEN_SERVER_SOURCE);
@@ -56,6 +85,27 @@ describe("patchMlxServerSource", () => {
     expect(patched).not.toBeNull();
 
     const repeated = patchMlxServerSource(patched ?? "");
+
+    expect(repeated).toBeNull();
+  });
+});
+
+describe("patchMlxGemma4TextSource", () => {
+  it("adds shared-KV dead weight sanitization to the optimized model shape", () => {
+    const patched = patchMlxGemma4TextSource(OPTIMIZED_GEMMA4_TEXT_SOURCE);
+
+    expect(patched).not.toBeNull();
+    expect(patched).toContain("first_kv_shared_layer =");
+    expect(patched).toContain("drop_shared_kv_weight =");
+    expect(patched).toContain("if is_dead_shared_kv_weight(k):");
+    expect(patched).toContain("self.has_kv = layer_idx <");
+  });
+
+  it("leaves already patched Gemma 4 text source unchanged", () => {
+    const patched = patchMlxGemma4TextSource(OPTIMIZED_GEMMA4_TEXT_SOURCE);
+    expect(patched).not.toBeNull();
+
+    const repeated = patchMlxGemma4TextSource(patched ?? "");
 
     expect(repeated).toBeNull();
   });
