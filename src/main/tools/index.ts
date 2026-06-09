@@ -325,6 +325,7 @@ function findActionClose(
     const body = text.slice(bodyStart, closeIdx);
     if (hasUnclosedBlockingArgument(body)) continue;
     if (hasUnclosedRecoverableArgument(body)) {
+      if (hasUnclosedEmbeddedAction(body)) continue;
       recoverableClose = { index: closeIdx, length: closeMatch[0].length };
       continue;
     }
@@ -348,6 +349,20 @@ function hasUnclosedRecoverableArgument(body: string): boolean {
     const closeTag = `</${tag}>`;
     const openIndex = body.indexOf(openTag);
     return openIndex >= 0 && body.indexOf(closeTag, openIndex + openTag.length) < 0;
+  });
+}
+
+function hasUnclosedEmbeddedAction(body: string): boolean {
+  return ["content", "command"].some((tag) => {
+    const openTag = `<${tag}>`;
+    const closeTag = `</${tag}>`;
+    const openIndex = body.indexOf(openTag);
+    if (openIndex < 0) return false;
+    if (body.indexOf(closeTag, openIndex + openTag.length) >= 0) return false;
+    const recoverableBody = body.slice(openIndex + openTag.length);
+    const openCount = [...recoverableBody.matchAll(/<action(?:\s|>)/gi)].length;
+    const closeCount = [...recoverableBody.matchAll(/<\/action\s*>/gi)].length;
+    return openCount > closeCount;
   });
 }
 

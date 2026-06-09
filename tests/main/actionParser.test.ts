@@ -131,6 +131,17 @@ describe("findNextAction", () => {
     });
   });
 
+  it("does not recover write_file content at an embedded action example", () => {
+    const action = [
+      '<action name="write_file">',
+      "<path>src/main/tools/git.ts</path>",
+      "<content>",
+      'export const example = \'<action name="git_command">\\n<command>status</command>\\n</action>\',',
+    ].join("\n");
+
+    expect(findNextAction(action)).toBe("incomplete");
+  });
+
   it("recovers run_bash command when the action closes before command", () => {
     const action = [
       '<action name="run_bash">',
