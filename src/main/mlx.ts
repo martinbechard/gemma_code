@@ -12,6 +12,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "fs";
 import { userDataDir, appRootDir, isPackaged } from "./runtimePaths";
 import type { ModelProvenance } from "../shared/types";
@@ -42,6 +43,42 @@ const MLX_GLOBAL_HF_HUB_DIR = join(MLX_GLOBAL_HF_CACHE_DIR, "hub");
 const MLX_HF_CACHE_SYMLINK_TYPE = "dir";
 const MLX_SERVER_LOG_FILE_NAME = "mlx-server.log";
 const MODEL_PROVENANCE_FETCH_TIMEOUT_MS = 8_000;
+const MLX_SERVER_LOAD_ERROR_INIT_MARKER = "self._default_model_load_error = None";
+const MLX_SERVER_BROKEN_LOAD_BLOCK = `        # Load the default model if it is given
+        self.model_provider.load_default()
+`;
+const MLX_SERVER_PATCHED_LOAD_BLOCK = `        # Load the default model if it is given
+        try:
+            self.model_provider.load_default()
+        except Exception as e:
+            self._default_model_load_error = e
+            logging.exception("Failed to load default model")
+            while True:
+                try:
+                    rqueue, _, _ = self.requests.get_nowait()
+                except QueueEmpty:
+                    break
+                rqueue.put(e)
+            return
+`;
+const MLX_SERVER_THREAD_START_BLOCK = `        self._stop = False
+        self._generation_thread = Thread(target=self._generate)
+`;
+const MLX_SERVER_PATCHED_THREAD_START_BLOCK = `        self._stop = False
+        self._default_model_load_error = None
+        self._generation_thread = Thread(target=self._generate)
+`;
+const MLX_SERVER_GENERATE_QUEUE_BLOCK = `        response_queue = Queue()
+        self.requests.put((response_queue, request, generation_args))
+`;
+const MLX_SERVER_PATCHED_GENERATE_QUEUE_BLOCK = `        if self._default_model_load_error is not None:
+            raise self._default_model_load_error
+        if not self._generation_thread.is_alive():
+            raise RuntimeError("MLX generation thread is not running")
+
+        response_queue = Queue()
+        self.requests.put((response_queue, request, generation_args))
+`;
 
 let serverProc: ChildProcess | null = null;
 let currentModel: string | null = null;
@@ -637,25 +674,73 @@ export async function installMLX(
  * release ships the proper fix this function becomes a no-op automatically.
  */
 export function applyMlxPatches(vPy: string): void {
-  // Resolve the canonical path of the installed file via the venv python so
-  // we don't have to hardcode the python minor version in the site-packages path.
-  const resolve = spawnSync(
-    vPy,
-    [
-      "-c",
-      "import mlx_lm.models.gemma4_text as m; import sys; sys.stdout.write(m.__file__)",
-    ],
-    { timeout: MLX_VERIFICATION_TIMEOUT_MS, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  if (resolve.status !== 0) {
+  applyMlxServerPatch(vPy);
+  applyGemma4TextPatch(vPy);
+}
+
+function applyMlxServerPatch(vPy: string): void {
+  const targetPath = resolvePythonModulePath(vPy, "mlx_lm.server");
+  if (!targetPath) {
     console.log(
-      "[mlx] patch: gemma4_text not importable, skipping (mlx-lm may be too old)",
+      "[mlx] patch: mlx_lm.server not importable, skipping (mlx-lm may be too old)",
     );
     return;
   }
-  const targetPath = resolve.stdout?.toString().trim();
-  if (!targetPath || !existsSync(targetPath)) {
-    console.log("[mlx] patch: gemma4_text path not resolved, skipping");
+
+  let installedSource = "";
+  try {
+    installedSource = readFileSync(targetPath, "utf8");
+  } catch (e) {
+    console.log("[mlx] patch: cannot read", targetPath, e);
+    return;
+  }
+
+  const patchedSource = patchMlxServerSource(installedSource);
+  if (!patchedSource) {
+    console.log("[mlx] patch: mlx_lm.server already compatible, skipping");
+    return;
+  }
+
+  const backupPath = `${targetPath}.bak.upstream`;
+  try {
+    if (!existsSync(backupPath)) {
+      cpSync(targetPath, backupPath);
+    }
+    writeFileSync(targetPath, patchedSource);
+    console.log(
+      "[mlx] patch: applied server default-load error propagation fix",
+    );
+  } catch (e) {
+    console.warn("[mlx] patch: failed to update mlx_lm.server:", e);
+  }
+}
+
+export function patchMlxServerSource(source: string): string | null {
+  if (source.includes(MLX_SERVER_LOAD_ERROR_INIT_MARKER)) {
+    return null;
+  }
+  if (
+    !source.includes(MLX_SERVER_BROKEN_LOAD_BLOCK) ||
+    !source.includes(MLX_SERVER_THREAD_START_BLOCK) ||
+    !source.includes(MLX_SERVER_GENERATE_QUEUE_BLOCK)
+  ) {
+    return null;
+  }
+
+  return source
+    .replace(MLX_SERVER_THREAD_START_BLOCK, MLX_SERVER_PATCHED_THREAD_START_BLOCK)
+    .replace(MLX_SERVER_BROKEN_LOAD_BLOCK, MLX_SERVER_PATCHED_LOAD_BLOCK)
+    .replace(MLX_SERVER_GENERATE_QUEUE_BLOCK, MLX_SERVER_PATCHED_GENERATE_QUEUE_BLOCK);
+}
+
+function applyGemma4TextPatch(vPy: string): void {
+  // Resolve the canonical path of the installed file via the venv python so
+  // we don't have to hardcode the python minor version in the site-packages path.
+  const targetPath = resolvePythonModulePath(vPy, "mlx_lm.models.gemma4_text");
+  if (!targetPath) {
+    console.log(
+      "[mlx] patch: gemma4_text not importable, skipping (mlx-lm may be too old)",
+    );
     return;
   }
 
@@ -696,6 +781,25 @@ export function applyMlxPatches(vPy: string): void {
   } catch (e) {
     console.warn("[mlx] patch: failed to overlay gemma4_text.py:", e);
   }
+}
+
+function resolvePythonModulePath(vPy: string, moduleName: string): string | null {
+  const resolve = spawnSync(
+    vPy,
+    [
+      "-c",
+      `import ${moduleName} as m; import sys; sys.stdout.write(m.__file__)`,
+    ],
+    { timeout: MLX_VERIFICATION_TIMEOUT_MS, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  if (resolve.status !== 0) {
+    return null;
+  }
+  const targetPath = resolve.stdout?.toString().trim();
+  if (!targetPath || !existsSync(targetPath)) {
+    return null;
+  }
+  return targetPath;
 }
 
 /** Run a subprocess and stream output to onProgress */
