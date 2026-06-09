@@ -11,6 +11,12 @@ const GEMMA_4_E2B_BYTES = 3_580_765_126;
 const GEMMA_4_E4B_REPO = "mlx-community/gemma-4-e4b-it-4bit";
 const GEMMA_4_E4B_SIZE = "5.2 GB";
 const GEMMA_4_E4B_BYTES = 5_216_992_212;
+const GEMMA_4_E4B_QAT_REPO = "mlx-community/gemma-4-E4B-it-qat-4bit";
+const GEMMA_4_E4B_QAT_SIZE = "6.8 GB";
+const GEMMA_4_E4B_QAT_BYTES = 6_800_000_000;
+const GEMMA_4_12B_QAT_REPO = "mlx-community/gemma-4-12B-it-qat-4bit";
+const GEMMA_4_12B_QAT_SIZE = "11 GB";
+const GEMMA_4_12B_QAT_BYTES = 11_000_000_000;
 
 function modelByName(name: string) {
   return AVAILABLE_MODELS.find((model) => model.name === name);
@@ -34,6 +40,20 @@ describe("AVAILABLE_MODELS", () => {
       size: GEMMA_4_E4B_SIZE,
       sizeBytes: GEMMA_4_E4B_BYTES,
       recommended: true,
+    });
+  });
+
+  it("includes Gemma 4 QAT comparison models without changing the default", () => {
+    expect(DEFAULT_MODEL).toBe(GEMMA_4_E4B_REPO);
+    expect(modelByName(GEMMA_4_E4B_QAT_REPO)).toMatchObject({
+      label: "Gemma 4 E4B QAT",
+      size: GEMMA_4_E4B_QAT_SIZE,
+      sizeBytes: GEMMA_4_E4B_QAT_BYTES,
+    });
+    expect(modelByName(GEMMA_4_12B_QAT_REPO)).toMatchObject({
+      label: "Gemma 4 12B QAT",
+      size: GEMMA_4_12B_QAT_SIZE,
+      sizeBytes: GEMMA_4_12B_QAT_BYTES,
     });
   });
 });

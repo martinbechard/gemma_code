@@ -296,6 +296,10 @@ const MLX_GEMMA_4_E2B_REPO = "mlx-community/gemma-4-e2b-it-4bit";
 const GEMMA_4_E2B_BYTES = 3_580_765_126;
 const MLX_GEMMA_4_E4B_REPO = "mlx-community/gemma-4-e4b-it-4bit";
 const GEMMA_4_E4B_BYTES = 5_216_992_212;
+const MLX_GEMMA_4_E4B_QAT_REPO = "mlx-community/gemma-4-E4B-it-qat-4bit";
+const GEMMA_4_E4B_QAT_BYTES = 6_800_000_000;
+const MLX_GEMMA_4_12B_QAT_REPO = "mlx-community/gemma-4-12B-it-qat-4bit";
+const GEMMA_4_12B_QAT_BYTES = 11_000_000_000;
 const MLX_GEMMA_3_TEXT_4B_REPO = "mlx-community/gemma-3-text-4b-it-4bit";
 const GEMMA_3_TEXT_4B_BYTES = 3_200_000_000;
 
@@ -310,6 +314,20 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     sizeBytes: GEMMA_4_E4B_BYTES,
     description: "Larger local model. Runs best on 16GB+ Macs.",
     recommended: true,
+  },
+  {
+    name: MLX_GEMMA_4_12B_QAT_REPO,
+    label: "Gemma 4 12B QAT",
+    size: "11 GB",
+    sizeBytes: GEMMA_4_12B_QAT_BYTES,
+    description: "Experimental larger QAT model. Tight fit on 16GB Macs.",
+  },
+  {
+    name: MLX_GEMMA_4_E4B_QAT_REPO,
+    label: "Gemma 4 E4B QAT",
+    size: "6.8 GB",
+    sizeBytes: GEMMA_4_E4B_QAT_BYTES,
+    description: "QAT comparison model with stronger memory efficiency tradeoffs.",
   },
   {
     name: MLX_GEMMA_4_E2B_REPO,
