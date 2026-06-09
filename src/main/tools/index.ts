@@ -319,17 +319,31 @@ function findActionClose(
   const closeRe = /<\/action\s*>/gi;
   closeRe.lastIndex = bodyStart;
   let closeMatch: RegExpExecArray | null;
+  let recoverableClose: { index: number; length: number } | null = null;
   while ((closeMatch = closeRe.exec(text)) !== null) {
     const closeIdx = closeMatch.index;
     const body = text.slice(bodyStart, closeIdx);
-    if (hasUnclosedMultilineArgument(body)) continue;
+    if (hasUnclosedBlockingArgument(body)) continue;
+    if (hasUnclosedRecoverableArgument(body)) {
+      recoverableClose = { index: closeIdx, length: closeMatch[0].length };
+      continue;
+    }
     return { index: closeIdx, length: closeMatch[0].length };
   }
-  return null;
+  return recoverableClose;
 }
 
-function hasUnclosedMultilineArgument(body: string): boolean {
-  return ["content", "old_string", "new_string"].some((tag) => {
+function hasUnclosedBlockingArgument(body: string): boolean {
+  return ["old_string", "new_string"].some((tag) => {
+    const openTag = `<${tag}>`;
+    const closeTag = `</${tag}>`;
+    const openIndex = body.indexOf(openTag);
+    return openIndex >= 0 && body.indexOf(closeTag, openIndex + openTag.length) < 0;
+  });
+}
+
+function hasUnclosedRecoverableArgument(body: string): boolean {
+  return ["content", "command"].some((tag) => {
     const openTag = `<${tag}>`;
     const closeTag = `</${tag}>`;
     const openIndex = body.indexOf(openTag);
@@ -366,17 +380,32 @@ function parseActionBody(body: string): Record<string, unknown> {
   let outside = body;
   if (contentOpen >= 0) {
     const contentCloseRel = body.lastIndexOf("</content>");
-    if (contentCloseRel > contentOpen) {
-      let content = body.slice(
-        contentOpen + "<content>".length,
-        contentCloseRel,
-      );
+    const contentEnd =
+      contentCloseRel > contentOpen ? contentCloseRel : body.length;
+    if (contentEnd > contentOpen) {
+      let content = body.slice(contentOpen + "<content>".length, contentEnd);
       content = content.replace(/^\n/, "");
       content = content.replace(/\n[ \t]*$/, "");
       args.content = content;
       outside =
         body.slice(0, contentOpen) +
-        body.slice(contentCloseRel + "</content>".length);
+        (contentCloseRel > contentOpen
+          ? body.slice(contentCloseRel + "</content>".length)
+          : "");
+    }
+  }
+
+  const commandOpen = outside.indexOf("<command>");
+  if (commandOpen >= 0) {
+    const commandCloseRel = outside.indexOf(
+      "</command>",
+      commandOpen + "<command>".length,
+    );
+    if (commandCloseRel < 0) {
+      let command = outside.slice(commandOpen + "<command>".length);
+      command = command.replace(/^\n/, "").replace(/\n[ \t]*$/, "");
+      args.command = command;
+      outside = outside.slice(0, commandOpen);
     }
   }
 

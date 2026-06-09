@@ -108,4 +108,41 @@ describe("findNextAction", () => {
       },
     });
   });
+
+  it("recovers write_file content when the action closes before content", () => {
+    const action = [
+      '<action name="write_file">',
+      "<path>src/main/tools/git.ts</path>",
+      "<content>",
+      'const example = \'<action name="git_command">\\n<command>status</command>\\n</action>\';',
+      "export const value = 1;",
+      "</action>",
+    ].join("\n");
+
+    expect(findNextAction(action)).toMatchObject({
+      name: "write_file",
+      args: {
+        path: "src/main/tools/git.ts",
+        content: [
+          'const example = \'<action name="git_command">\\n<command>status</command>\\n</action>\';',
+          "export const value = 1;",
+        ].join("\n"),
+      },
+    });
+  });
+
+  it("recovers run_bash command when the action closes before command", () => {
+    const action = [
+      '<action name="run_bash">',
+      "<command>npm test -- tests/main/actionParser.test.ts",
+      "</action>",
+    ].join("\n");
+
+    expect(findNextAction(action)).toMatchObject({
+      name: "run_bash",
+      args: {
+        command: "npm test -- tests/main/actionParser.test.ts",
+      },
+    });
+  });
 });
