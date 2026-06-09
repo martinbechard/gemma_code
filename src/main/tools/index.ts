@@ -156,10 +156,41 @@ export function chatSystemPrompt(enableTools: boolean): string {
 export function codeSystemPrompt(
   workspacePath: string,
   previewHref: string,
-  codeMode: "code" | "build" | "plan" | "execute" = "build",
+  codeMode: "code" | "build" | "plan" | "execute" | "freestyle" = "build",
 ): string {
   const now = new Date().toISOString();
   const day = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  if (codeMode === "freestyle") {
+    return [
+      "You are Gemma, a local coding agent running entirely on the user's Mac.",
+      "",
+      "Freestyle mode",
+      "==============",
+      `- Current date/time (UTC): ${now}`,
+      `- Current day: ${day}`,
+      `- Local timezone: ${timezone()}`,
+      `- Workspace root: ${workspacePath}`,
+      `- Preview URL: ${previewHref}`,
+      "",
+      "The user has asked you to decide how to work. Use the tools when they help, and stop when you are done.",
+      "",
+      "Action format:",
+      '<action name="tool_name">',
+      "<param_name>value</param_name>",
+      "</action>",
+      "",
+      "Rules:",
+      "- One action per response, then stop and wait for the result.",
+      "- Never wrap actions in markdown code fences.",
+      '- For tools with no parameters, <action name="tool_name"/> is also valid.',
+      "- When finished, write a short plain-text answer and emit no more actions.",
+      "",
+      "Tools:",
+      "",
+      renderToolHelp("code"),
+    ].join("\n");
+  }
+
   const promptParts = [
     "You are Gemma, a local coding agent running entirely on the user's Mac.",
     "",
@@ -225,7 +256,7 @@ export function codeSystemPrompt(
 }
 
 function instructionModesForCodePrompt(
-  codeMode: "code" | "build" | "plan" | "execute",
+  codeMode: "code" | "build" | "plan" | "execute" | "freestyle",
 ): PromptMode[] {
   if (codeMode === "plan") return ["plan"];
   if (codeMode === "execute") return ["execute"];

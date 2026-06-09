@@ -1,7 +1,7 @@
 // CLI entrypoint that reuses the runtime modules behind the Electron app.
 // Usage:
 //   npm run cli -- chat "your prompt"
-//   npm run cli -- code [--auto|--approve] "build a landing page for ..."
+//   npm run cli -- code [--auto|--approve|--freestyle] "build a landing page for ..."
 //   npm run cli -- plan "add a tool"
 //   npm run cli -- plan-ask-done "add a tool"
 //   npm run cli -- execute-plan --plan plan.yaml "your original prompt"
@@ -38,7 +38,7 @@ function printUsage(): void {
       "  cli setup [--model <hf-id>]",
       "  cli status [--model <hf-id>]",
       "  cli chat [--model <hf-id>] [--worktree] <prompt>",
-      "  cli code [--model <hf-id>] [--worktree] [--auto|--approve] <prompt>",
+      "  cli code [--model <hf-id>] [--worktree] [--auto|--approve|--freestyle] <prompt>",
       "  cli plan [--model <hf-id>] [--worktree] <prompt>",
       "  cli plan-ask-done [--model <hf-id>] [--worktree] <prompt>",
       "  cli execute-plan [--model <hf-id>] [--worktree] --plan <file> <prompt>",
@@ -86,6 +86,7 @@ async function main(): Promise<void> {
         enableBash: args.enableBash,
         worktree: args.worktree,
         approveBeforeExecute: args.approve,
+        freestyle: args.freestyle,
       });
       return;
     case "plan":

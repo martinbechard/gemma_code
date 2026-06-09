@@ -16,6 +16,7 @@ export interface ParsedArgs {
   worktree: boolean;
   auto: boolean;
   approve: boolean;
+  freestyle: boolean;
   planPath?: string;
   conversationPath?: string;
 }
@@ -30,6 +31,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   let worktree = false;
   let auto = false;
   let approve = false;
+  let freestyle = false;
   let planPath: string | undefined;
   let conversationPath: string | undefined;
   const remaining: string[] = [];
@@ -44,6 +46,8 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
       auto = true;
     } else if (a === "--approve") {
       approve = true;
+    } else if (a === "--freestyle") {
+      freestyle = true;
     } else if (a === "--plan") {
       planPath = args[++i];
     } else if (a === "--conversation") {
@@ -90,8 +94,14 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   if (approve && command !== "code") {
     throw new Error("--approve only applies to the code command");
   }
+  if (freestyle && command !== "code") {
+    throw new Error("--freestyle only applies to the code command");
+  }
   if (auto && approve) {
     throw new Error("--auto and --approve cannot be used together");
+  }
+  if (freestyle && (auto || approve)) {
+    throw new Error("--freestyle cannot be combined with --auto or --approve");
   }
 
   return {
@@ -102,6 +112,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
     worktree,
     auto,
     approve,
+    freestyle,
     ...(planPath ? { planPath } : {}),
     ...(conversationPath ? { conversationPath } : {}),
   };

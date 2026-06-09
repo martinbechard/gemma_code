@@ -68,6 +68,22 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses code freestyle mode", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "code",
+      "--freestyle",
+      "build the tool",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "code",
+      freestyle: true,
+      prompt: "build the tool",
+    });
+  });
+
   it("parses execute-plan with a plan file and prompt", () => {
     const parsed = parseCliArgs([
       "node",
@@ -133,5 +149,18 @@ describe("parseCliArgs", () => {
         "build the tool",
       ]),
     ).toThrow("--auto and --approve");
+  });
+
+  it("rejects freestyle with other code workflow modes", () => {
+    expect(() =>
+      parseCliArgs([
+        "node",
+        "cli",
+        "code",
+        "--freestyle",
+        "--approve",
+        "build the tool",
+      ]),
+    ).toThrow("--freestyle cannot be combined");
   });
 });

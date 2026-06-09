@@ -1677,6 +1677,9 @@ function Header({
               <option className="bg-[#1a1a1a]" value="auto">
                 auto
               </option>
+              <option className="bg-[#1a1a1a]" value="freestyle">
+                freestyle
+              </option>
             </select>
           </label>
         )}

@@ -1,4 +1,10 @@
-export type PromptMode = "chat" | "code" | "build" | "plan" | "execute";
+export type PromptMode =
+  | "chat"
+  | "code"
+  | "build"
+  | "plan"
+  | "execute"
+  | "freestyle";
 
 export interface ProjectInstructionOptions {
   includeCommon?: boolean;

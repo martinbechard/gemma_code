@@ -67,7 +67,7 @@ export type MessageTimelineItem = ThinkingTimelineItem | ToolCallTimelineItem;
 
 export type Role = "user" | "assistant" | "system" | "tool" | "harness";
 
-export type CodeSubmode = "discuss" | "plan" | "execute" | "auto";
+export type CodeSubmode = "discuss" | "plan" | "execute" | "auto" | "freestyle";
 export type ConversationPhase = "planning" | "execution";
 
 export interface PlanNode {

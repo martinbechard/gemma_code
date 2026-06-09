@@ -107,6 +107,7 @@ export interface AgentRunOptions {
   planOnly?: boolean;
   planCompletionMode?: PlanCompletionMode;
   approveBeforeExecute?: boolean;
+  freestyle?: boolean;
 }
 
 export interface ContinueRunOptions {
@@ -369,15 +370,18 @@ export async function runChat(opts: AgentRunOptions): Promise<void> {
     if (opts.mode === "code") {
       const wsPath = await ensureWorkspace(conversationId);
       const href = previewUrl(conversationId);
-      const systemPrompt = codeSystemPrompt(wsPath, href, "plan");
+      const promptMode = opts.freestyle ? "freestyle" : "plan";
+      const systemPrompt = codeSystemPrompt(wsPath, href, promptMode);
       messages.push({
         role: "system",
         // CLI always runs against the user's current directory, so it is
         // always Code mode (never the per-conversation sandbox).
         content: systemPrompt,
       });
-      displaySystemPrompt("code plan", systemPrompt);
-      planExecutionSystemPrompt = codeSystemPrompt(wsPath, href, "execute");
+      displaySystemPrompt(`code ${promptMode}`, systemPrompt);
+      planExecutionSystemPrompt = opts.freestyle
+        ? null
+        : codeSystemPrompt(wsPath, href, "execute");
       meta(`workspace: ${wsPath} (cwd)`);
       meta(`preview:   ${href}`);
     } else {
@@ -392,7 +396,7 @@ export async function runChat(opts: AgentRunOptions): Promise<void> {
     messages.push({
       role: "user",
       content:
-        opts.mode === "code" && !opts.initialPlanYaml
+        opts.mode === "code" && !opts.initialPlanYaml && !opts.freestyle
           ? buildPlanAssemblyInitialPrompt(opts.prompt)
           : opts.prompt,
     });
@@ -520,7 +524,9 @@ async function runAgentLoop(
   let awaitingVerify = false;
   let nestedPlanRejections = 0;
   let planAssemblyState: PlanAssemblyState | null =
-    opts.mode === "code" && !initialPlan ? createPlanAssemblyState() : null;
+    opts.mode === "code" && !initialPlan && !opts.freestyle
+      ? createPlanAssemblyState()
+      : null;
   let planSemanticReviewPlan: ParsedPlan | null = null;
   let planSemanticReviewMessages: MLXChatMessage[] | null = null;
   let planSemanticReviewRetries = 0;
@@ -1487,7 +1493,12 @@ async function runAgentLoop(
       continue;
     }
 
-    if (opts.mode === "code" && round === 0 && buffer.trim().length > 0) {
+    if (
+      opts.mode === "code" &&
+      !opts.freestyle &&
+      round === 0 &&
+      buffer.trim().length > 0
+    ) {
       meta("no action in first code response; requesting an action");
       messages.push({ role: "assistant", content: buffer });
       pushHarnessPrompt(messages, "code plan nudge", CODE_PLAN_NUDGE);
@@ -1505,7 +1516,7 @@ async function runAgentLoop(
       continue;
     }
 
-    if (opts.mode === "code") {
+    if (opts.mode === "code" && !opts.freestyle) {
       messages.push({ role: "assistant", content: buffer });
       if (codeNoProgressNudges >= MAX_CODE_NO_PROGRESS_NUDGES) {
         meta("done — code mode did not produce an action or plan");
@@ -1520,6 +1531,9 @@ async function runAgentLoop(
       continue;
     }
 
+    if (opts.mode === "code" && opts.freestyle) {
+      messages.push({ role: "assistant", content: buffer });
+    }
     meta("done — no more actions");
     return;
   }

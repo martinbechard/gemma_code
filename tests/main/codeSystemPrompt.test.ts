@@ -204,6 +204,29 @@ describe("codeSystemPrompt", () => {
     expect(prompt).not.toContain("PLAN_MARKER");
   });
 
+  it("builds a minimal freestyle prompt with code tools and no planning harness instructions", () => {
+    writeGemma("Gemma.md", "COMMON_MARKER");
+    writeGemma("Gemma.code.md", "CODE_MARKER");
+    writeGemma("Gemma.plan.md", "PLAN_MARKER");
+    writeGemma("Gemma.execute.md", "EXECUTE_MARKER");
+
+    const prompt = codeSystemPrompt("/workspace", "http://preview", "freestyle");
+
+    expect(prompt).toContain("Freestyle mode");
+    expect(prompt).toContain("- Workspace root: /workspace");
+    expect(prompt).toContain("- Preview URL: http://preview");
+    expect(prompt).toContain("### read_file");
+    expect(prompt).toContain("### write_file");
+    expect(prompt).toContain("### edit_file");
+    expect(prompt).not.toContain("MODE AND PROJECT INSTRUCTIONS");
+    expect(prompt).not.toContain("READ-ONLY INSPECTION ACTION FORMAT");
+    expect(prompt).not.toContain("WRITE_FILE <content> RULES");
+    expect(prompt).not.toContain("PLAN_MARKER");
+    expect(prompt).not.toContain("EXECUTE_MARKER");
+    expect(prompt).not.toContain("COMMON_MARKER");
+    expect(prompt).not.toContain("CODE_MARKER");
+  });
+
   it("starts code prompts with structured session context", () => {
     writeGemma("Gemma.code.md", "CODE_MARKER");
 

@@ -608,7 +608,7 @@ function actionTarget(
   return undefined;
 }
 
-type CodePromptMode = "code" | "build" | "plan" | "execute";
+type CodePromptMode = "code" | "build" | "plan" | "execute" | "freestyle";
 
 interface ResolvedSystemPrompt {
   label: string;
@@ -631,6 +631,8 @@ function promptModeForCodeSubmode(
       return "plan";
     case "execute":
       return "execute";
+    case "freestyle":
+      return "freestyle";
     case "auto":
       return "plan";
   }
@@ -739,11 +741,13 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
       resolvedSystemPrompt.previewHref
         ? resolvedSystemPrompt.label === "code execute"
           ? resolvedSystemPrompt.content
-          : codeSystemPrompt(
-              resolvedSystemPrompt.workspacePath,
-              resolvedSystemPrompt.previewHref,
-              "execute",
-            )
+          : resolvedSystemPrompt.label === "code freestyle"
+            ? null
+            : codeSystemPrompt(
+                resolvedSystemPrompt.workspacePath,
+                resolvedSystemPrompt.previewHref,
+                "execute",
+              )
         : null;
     const codeSubmode = req.workingDir ? (req.codeSubmode ?? "auto") : null;
     const topLevelPlanHarnessEnabled =
