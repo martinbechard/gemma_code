@@ -92,6 +92,76 @@ describe("executionLog", () => {
     expect(readFileSync(secondPath, "utf8")).toContain('"id":2');
   });
 
+  it("consolidates consecutive text and reasoning stream chunks", () => {
+    const log = createExecutionLogger(true, {
+      conversationId: "c1",
+      mode: "code",
+      model: "gemma-test",
+    });
+
+    log("stream_chunk", { type: "token", text: "Hello" });
+    log("stream_chunk", { type: "token", text: " there" });
+    log("stream_chunk", { type: "reasoning", text: "I should" });
+    log("stream_chunk", { type: "reasoning", text: " inspect first." });
+    log("stream_chunk", { type: "done" });
+
+    const lines = readFileSync(executionLogPath(), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatchObject({
+      event: "stream_chunk",
+      data: { type: "token", text: "Hello there", chunks: 2 },
+    });
+    expect(lines[1]).toMatchObject({
+      event: "stream_chunk",
+      data: {
+        type: "reasoning",
+        text: "I should inspect first.",
+        chunks: 2,
+      },
+    });
+    expect(lines[2]).toMatchObject({
+      event: "stream_chunk",
+      data: { type: "done" },
+    });
+  });
+
+  it("consolidates consecutive model content and reasoning chunks", () => {
+    const log = createExecutionLogger(true, {
+      conversationId: "c1",
+      mode: "code",
+      model: "gemma-test",
+    });
+
+    log("model_chunk", { callId: "model-1", content: "One" });
+    log("model_chunk", { callId: "model-1", content: " response" });
+    log("model_chunk", { callId: "model-1", reasoning: "One" });
+    log("model_chunk", { callId: "model-1", reasoning: " thought" });
+    log("model_response", { callId: "model-1", content: "One response" });
+
+    const lines = readFileSync(executionLogPath(), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatchObject({
+      event: "model_chunk",
+      data: { callId: "model-1", content: "One response", chunks: 2 },
+    });
+    expect(lines[1]).toMatchObject({
+      event: "model_chunk",
+      data: { callId: "model-1", reasoning: "One thought", chunks: 2 },
+    });
+    expect(lines[2]).toMatchObject({
+      event: "model_response",
+      data: { callId: "model-1", content: "One response" },
+    });
+  });
+
   it("creates an empty execution log file for opening", () => {
     const path = ensureExecutionLogFile();
 

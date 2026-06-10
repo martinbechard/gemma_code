@@ -15,7 +15,10 @@ import {
   writeFileSync,
 } from "fs";
 import { userDataDir } from "./runtimePaths";
-import type { ModelProvenance } from "../shared/types";
+import {
+  modelRuntimeForName,
+  type ModelProvenance,
+} from "../shared/types";
 
 const MLX_PORT = 11435;
 export const MLX_SERVER_PORT = MLX_PORT;
@@ -36,7 +39,13 @@ const MLX_CHAT_MAX_TOKENS = 8192;
 const MLX_CHAT_TEMPERATURE = 0.7;
 const MLX_ERROR_TEXT_TAIL_CHARS = 500;
 const MLX_LOG_TEXT_LENGTH_LIMIT = 180;
-const MLX_PYTHON_PACKAGES = ["mlx", "mlx-lm>=0.24.0", "mlx-vlm"] as const;
+const MLX_PYTHON_PACKAGES = [
+  "mlx",
+  "mlx-lm>=0.31.3",
+  "mlx-vlm>=0.6.2",
+] as const;
+const MLX_RUNTIME_IMPORT_CHECK =
+  "import mlx_lm; import mlx_vlm.models.gemma4_unified; print('ok')";
 const MLX_MODEL_WEIGHT_FILE = /^model(?:-[0-9]+-of-[0-9]+)?\.safetensors$/;
 const MLX_GLOBAL_HF_CACHE_DIR = join(homedir(), ".cache", "huggingface");
 const MLX_GLOBAL_HF_HUB_DIR = join(MLX_GLOBAL_HF_CACHE_DIR, "hub");
@@ -549,18 +558,18 @@ function findSystemPython(): string | null {
 // ---------------------------------------------------------------------------
 
 export interface MLXStatus {
-  /** Python to use for running mlx_lm (venv python if installed, system python otherwise) */
+  /** Python to use for running the selected MLX runtime. */
   python: string;
-  /** Whether mlx-lm is installed and importable */
+  /** Whether required MLX runtime packages are installed and importable. */
   installed: boolean;
 }
 
 /**
- * Check if mlx-lm is ready to use.
- * Returns the python path to use and whether mlx_lm is installed.
+ * Check if the required MLX runtimes are ready to use.
+ * Returns the python path to use and whether the packages are installed.
  */
 export function locateMLX(): MLXStatus | null {
-  // 1. Check if we have a working venv with mlx_lm installed
+  // 1. Check if we have a working venv with MLX runtimes installed
   const vPy = venvPython();
   if (existsSync(vPy)) {
     // Verify the venv Python is 3.10+ — older versions can't run modern mlx-lm
@@ -585,22 +594,22 @@ export function locateMLX(): MLXStatus | null {
         }
         // Fall through to system python detection below
       } else {
-        // Venv Python is compatible — check if mlx_lm is installed
+        // Venv Python is compatible — check if required MLX runtimes are installed
         try {
-          const check = spawnSync(vPy, ["-c", 'import mlx_lm; print("ok")'], {
+          const check = spawnSync(vPy, ["-c", MLX_RUNTIME_IMPORT_CHECK], {
             timeout: MLX_VERIFICATION_TIMEOUT_MS,
             stdio: ["ignore", "pipe", "pipe"],
           });
           const stdout = check.stdout?.toString().trim() || "";
           if (check.status === 0 && stdout.includes("ok")) {
-            console.log("[mlx] Found mlx-lm in venv");
+            console.log("[mlx] Found MLX runtimes in venv");
             applyMlxPatches(vPy);
             return { python: vPy, installed: true };
           }
         } catch {
-          // venv exists but mlx_lm not importable
+          // venv exists but one of the required runtimes is not importable
         }
-        // Venv exists but mlx_lm is missing — can still pip install into it
+        // Venv exists but an MLX runtime is missing — can still pip install into it
         return { python: vPy, installed: false };
       }
     } catch {
@@ -920,6 +929,38 @@ export interface ServerProgress {
   progress?: number;
 }
 
+export function buildServerArgs(model: string): string[] {
+  const runtime = modelRuntimeForName(model);
+  if (runtime === "mlx-vlm") {
+    return [
+      "-m",
+      "mlx_vlm.server",
+      "--model",
+      model,
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(MLX_PORT),
+    ];
+  }
+
+  return [
+    "-m",
+    "mlx_lm",
+    "server",
+    "--model",
+    model,
+    "--port",
+    String(MLX_PORT),
+    // Gemma 4 chat template emits chain-of-thought into delta.reasoning before
+    // any delta.content. Disabling thinking keeps the SSE stream filled with
+    // user-visible content. The flag is a no-op on chat templates that don't
+    // reference `enable_thinking` (e.g. Gemma 3), so it's safe to pass always.
+    "--chat-template-args",
+    '{"enable_thinking": false}',
+  ];
+}
+
 export async function startServer(
   python: string,
   model: string,
@@ -941,21 +982,7 @@ export async function startServer(
   // Track early exit so waitForHealth can bail out immediately
   let earlyExit: { code: number | null; stderr: string } | null = null;
   let stderrBuf = "";
-  const args = [
-    "-m",
-    "mlx_lm",
-    "server",
-    "--model",
-    model,
-    "--port",
-    String(MLX_PORT),
-    // Gemma 4 chat template emits chain-of-thought into delta.reasoning before
-    // any delta.content. Disabling thinking keeps the SSE stream filled with
-    // user-visible content. The flag is a no-op on chat templates that don't
-    // reference `enable_thinking` (e.g. Gemma 3), so it's safe to pass always.
-    "--chat-template-args",
-    '{"enable_thinking": false}',
-  ];
+  const args = buildServerArgs(model);
   const commandText = `${python} ${args.join(" ")}`;
   lastServerCommand = commandText;
 

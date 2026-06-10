@@ -168,6 +168,36 @@ describe("execution log summaries", () => {
     ).toBe("activity runtime waiting for first token Gemma");
   });
 
+  it("summarizes consolidated token and reasoning chunks", () => {
+    expect(
+      executionLogSummary(
+        entry("stream_chunk", {
+          type: "token",
+          text: "Hello there",
+          chunks: 2,
+        }),
+      ),
+    ).toBe("2 chunks token Hello there");
+    expect(
+      executionLogSummary(
+        entry("stream_chunk", {
+          type: "reasoning",
+          text: "I should inspect first.",
+          chunks: 2,
+        }),
+      ),
+    ).toBe("2 chunks reasoning I should inspect first.");
+    expect(
+      executionLogSummary(
+        entry("model_chunk", {
+          callId: "model-1",
+          reasoning: "I should inspect first.",
+          chunks: 2,
+        }),
+      ),
+    ).toBe("2 chunks I should inspect first.");
+  });
+
   it("summarizes plan stream chunks with status and reason", () => {
     expect(
       executionLogSummary(

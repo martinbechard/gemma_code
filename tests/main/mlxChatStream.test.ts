@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chatStream, warmupInference } from "../../src/main/mlx";
+import { buildServerArgs, chatStream, warmupInference } from "../../src/main/mlx";
 
 const TEST_MODEL = "test-model";
 
@@ -56,6 +56,35 @@ describe("chatStream", () => {
           '<action name="read_file"><path>src/main/tools/index.ts</path></action>',
       },
       { done: true },
+    ]);
+  });
+});
+
+describe("buildServerArgs", () => {
+  it("uses mlx-lm server for standard Gemma text-compatible models", () => {
+    expect(buildServerArgs("mlx-community/gemma-4-E4B-it-qat-4bit")).toEqual([
+      "-m",
+      "mlx_lm",
+      "server",
+      "--model",
+      "mlx-community/gemma-4-E4B-it-qat-4bit",
+      "--port",
+      "11435",
+      "--chat-template-args",
+      "{\"enable_thinking\": false}",
+    ]);
+  });
+
+  it("uses mlx-vlm server for Gemma unified models", () => {
+    expect(buildServerArgs("mlx-community/gemma-4-12B-it-qat-4bit")).toEqual([
+      "-m",
+      "mlx_vlm.server",
+      "--model",
+      "mlx-community/gemma-4-12B-it-qat-4bit",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "11435",
     ]);
   });
 });

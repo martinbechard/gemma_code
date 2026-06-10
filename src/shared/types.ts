@@ -246,14 +246,17 @@ export type StreamChunk =
   | { type: "done" }
   | { type: "error"; error: string };
 
+export type ModelRuntime = "mlx-lm" | "mlx-vlm";
+
 export interface ModelInfo {
-  /** HuggingFace repo ID — used internally for mlx_lm */
+  /** HuggingFace repo ID used internally by the selected MLX runtime. */
   name: string;
   /** Short, user-friendly display name */
   label: string;
   size: string;
   sizeBytes: number;
   description: string;
+  runtime: ModelRuntime;
   recommended?: boolean;
 }
 
@@ -313,6 +316,7 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     size: "5.2 GB",
     sizeBytes: GEMMA_4_E4B_BYTES,
     description: "Larger local model. Runs best on 16GB+ Macs.",
+    runtime: "mlx-lm",
     recommended: true,
   },
   {
@@ -320,7 +324,8 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     label: "Gemma 4 12B QAT",
     size: "11 GB",
     sizeBytes: GEMMA_4_12B_QAT_BYTES,
-    description: "Experimental larger QAT model. Tight fit on 16GB Macs.",
+    description: "Unified architecture model served through MLX VLM.",
+    runtime: "mlx-vlm",
   },
   {
     name: MLX_GEMMA_4_E4B_QAT_REPO,
@@ -328,6 +333,7 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     size: "6.8 GB",
     sizeBytes: GEMMA_4_E4B_QAT_BYTES,
     description: "QAT comparison model with stronger memory efficiency tradeoffs.",
+    runtime: "mlx-lm",
   },
   {
     name: MLX_GEMMA_4_E2B_REPO,
@@ -335,6 +341,7 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     size: "3.6 GB",
     sizeBytes: GEMMA_4_E2B_BYTES,
     description: "Edge-sized. Fast & lightweight. Runs on 8GB+ Macs.",
+    runtime: "mlx-lm",
   },
   {
     name: MLX_GEMMA_3_TEXT_4B_REPO,
@@ -342,7 +349,15 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
     size: "3.2 GB",
     sizeBytes: GEMMA_3_TEXT_4B_BYTES,
     description: "Text-only fallback. Use if Gemma 4 doesn't load.",
+    runtime: "mlx-lm",
   },
 ];
 
 export const DEFAULT_MODEL = MLX_GEMMA_4_E4B_REPO;
+
+export function modelRuntimeForName(model: string): ModelRuntime {
+  return (
+    AVAILABLE_MODELS.find((candidate) => candidate.name === model)?.runtime ??
+    "mlx-lm"
+  );
+}

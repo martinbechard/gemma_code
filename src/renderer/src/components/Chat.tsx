@@ -1371,14 +1371,24 @@ function modelResponseSummary(data: Record<string, unknown>): string {
 
 function modelChunkSummary(data: Record<string, unknown>): string {
   if (data.done === true) return "done";
-  return compactLogText(logStringField(data, "content"));
+  const chunks = logNumberField(data, "chunks");
+  const prefix = chunks && chunks > 1 ? `${chunks} chunks ` : "";
+  return compactLogText(
+    `${prefix}${logStringField(data, "content") || logStringField(data, "reasoning")}`,
+  );
 }
 
 function streamChunkSummary(data: Record<string, unknown>): string {
   const type = logStringField(data, "type");
+  const chunks = logNumberField(data, "chunks");
+  const prefix = chunks && chunks > 1 ? `${chunks} chunks ` : "";
   switch (type) {
     case "token":
-      return compactLogText(`token ${logStringField(data, "text")}`);
+      return compactLogText(`${prefix}token ${logStringField(data, "text")}`);
+    case "reasoning":
+      return compactLogText(
+        `${prefix}reasoning ${logStringField(data, "text")}`,
+      );
     case "system_prompt":
       return compactLogText(
         `system prompt ${logStringField(data, "label")}: ${logStringField(data, "content")}`,

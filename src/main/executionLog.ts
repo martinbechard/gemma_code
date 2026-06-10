@@ -14,6 +14,13 @@ const EXECUTION_LOG_VIEW_MAX_LINES = 800;
 const EXECUTION_LOG_PREFIX = "execution-log";
 const EXECUTION_LOG_EXTENSION = ".jsonl";
 const LEGACY_EXECUTION_LOG_FILE = "execution-log.jsonl";
+const STREAM_CHUNK_EVENT = "stream_chunk";
+const MODEL_CHUNK_EVENT = "model_chunk";
+const TOKEN_STREAM_CHUNK_TYPE = "token";
+const REASONING_STREAM_CHUNK_TYPE = "reasoning";
+const MODEL_CONTENT_CHUNK_FIELD = "content";
+const MODEL_REASONING_CHUNK_FIELD = "reasoning";
+const CONSOLIDATED_CHUNK_INITIAL_COUNT = 1;
 
 export interface ExecutionLogMeta {
   conversationId: string;
@@ -22,6 +29,14 @@ export interface ExecutionLogMeta {
 }
 
 export type ExecutionLogger = (event: string, data: unknown) => void;
+
+interface ConsolidatedChunkLog {
+  event: string;
+  key: string;
+  data: Record<string, unknown>;
+  textField: string;
+  chunks: number;
+}
 
 let activeExecutionLogPath: string | null = null;
 let executionLogSequence = 0;
@@ -105,7 +120,9 @@ export function createExecutionLogger(
 ): ExecutionLogger {
   if (!enabled) return () => undefined;
   const path = createExecutionLogFile(meta);
-  return (event: string, data: unknown): void => {
+  let pendingChunk: ConsolidatedChunkLog | null = null;
+
+  const appendRecord = (event: string, data: unknown): void => {
     ensureExecutionLogDir();
     const record = {
       timestamp: new Date().toISOString(),
@@ -117,6 +134,97 @@ export function createExecutionLogger(
     };
     appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
   };
+
+  const flushPendingChunk = (): void => {
+    if (!pendingChunk) return;
+    appendRecord(pendingChunk.event, {
+      ...pendingChunk.data,
+      chunks: pendingChunk.chunks,
+    });
+    pendingChunk = null;
+  };
+
+  return (event: string, data: unknown): void => {
+    const chunk = consolidatableChunkLog(event, data);
+    if (!chunk) {
+      flushPendingChunk();
+      appendRecord(event, data);
+      return;
+    }
+
+    if (pendingChunk?.key !== chunk.key) {
+      flushPendingChunk();
+      pendingChunk = chunk;
+      return;
+    }
+
+    pendingChunk.data[pendingChunk.textField] =
+      String(pendingChunk.data[pendingChunk.textField] ?? "") +
+      String(chunk.data[chunk.textField] ?? "");
+    pendingChunk.chunks += CONSOLIDATED_CHUNK_INITIAL_COUNT;
+  };
+}
+
+function isLogRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function consolidatableChunkLog(
+  event: string,
+  data: unknown,
+): ConsolidatedChunkLog | null {
+  if (!isLogRecord(data)) return null;
+  if (event === STREAM_CHUNK_EVENT) {
+    return consolidatableStreamChunk(data);
+  }
+  if (event === MODEL_CHUNK_EVENT) {
+    return consolidatableModelChunk(data);
+  }
+  return null;
+}
+
+function consolidatableStreamChunk(
+  data: Record<string, unknown>,
+): ConsolidatedChunkLog | null {
+  const type = data.type;
+  if (
+    type !== TOKEN_STREAM_CHUNK_TYPE &&
+    type !== REASONING_STREAM_CHUNK_TYPE
+  ) {
+    return null;
+  }
+  if (typeof data.text !== "string" || data.text.length === 0) return null;
+  return {
+    event: STREAM_CHUNK_EVENT,
+    key: `${STREAM_CHUNK_EVENT}:${type}`,
+    data: { ...data },
+    textField: "text",
+    chunks: CONSOLIDATED_CHUNK_INITIAL_COUNT,
+  };
+}
+
+function consolidatableModelChunk(
+  data: Record<string, unknown>,
+): ConsolidatedChunkLog | null {
+  if (typeof data[MODEL_CONTENT_CHUNK_FIELD] === "string") {
+    return {
+      event: MODEL_CHUNK_EVENT,
+      key: `${MODEL_CHUNK_EVENT}:${String(data.callId ?? "")}:${MODEL_CONTENT_CHUNK_FIELD}`,
+      data: { ...data },
+      textField: MODEL_CONTENT_CHUNK_FIELD,
+      chunks: CONSOLIDATED_CHUNK_INITIAL_COUNT,
+    };
+  }
+  if (typeof data[MODEL_REASONING_CHUNK_FIELD] === "string") {
+    return {
+      event: MODEL_CHUNK_EVENT,
+      key: `${MODEL_CHUNK_EVENT}:${String(data.callId ?? "")}:${MODEL_REASONING_CHUNK_FIELD}`,
+      data: { ...data },
+      textField: MODEL_REASONING_CHUNK_FIELD,
+      chunks: CONSOLIDATED_CHUNK_INITIAL_COUNT,
+    };
+  }
+  return null;
 }
 
 export function readExecutionLogSnapshot(

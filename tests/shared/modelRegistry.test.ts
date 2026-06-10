@@ -43,17 +43,22 @@ describe("AVAILABLE_MODELS", () => {
     });
   });
 
-  it("includes Gemma 4 QAT comparison models without changing the default", () => {
+  it("includes supported Gemma 4 QAT comparison models without changing the default", () => {
     expect(DEFAULT_MODEL).toBe(GEMMA_4_E4B_REPO);
     expect(modelByName(GEMMA_4_E4B_QAT_REPO)).toMatchObject({
       label: "Gemma 4 E4B QAT",
       size: GEMMA_4_E4B_QAT_SIZE,
       sizeBytes: GEMMA_4_E4B_QAT_BYTES,
+      runtime: "mlx-lm",
     });
+  });
+
+  it("routes Gemma 4 12B QAT through the VLM runtime for gemma4_unified", () => {
     expect(modelByName(GEMMA_4_12B_QAT_REPO)).toMatchObject({
       label: "Gemma 4 12B QAT",
       size: GEMMA_4_12B_QAT_SIZE,
       sizeBytes: GEMMA_4_12B_QAT_BYTES,
+      runtime: "mlx-vlm",
     });
   });
 });
