@@ -68,9 +68,68 @@ Includes chat prompt assembly, code plan assembly, semantic review, execution pr
 - [Tool Runtime](../modules/tool-runtime.md) provides action protocol and tool dispatch.
 - [Plan Engine](../modules/plan-engine.md) provides plan, evidence, and verify behavior.
 
+## Constituent Module Association Diagram
+
+This diagram is included because the subsystem defines multiple modules whose responsibilities are associated through shared harness behavior.
+
+```mermaid
+flowchart LR
+  MainProcess["Main Process"] --> SharedHarness["Agent harness responsibility"]
+  CliRuntime["CLI Runtime"] --> SharedHarness
+  SharedHarness --> ToolRuntime["Tool Runtime"]
+  SharedHarness --> PlanEngine["Plan Engine"]
+  ToolRuntime --> Evidence["Tool evidence"]
+  PlanEngine --> Evidence
+  Evidence --> MainProcess
+  Evidence --> CliRuntime
+```
+
 ## Interaction Model
 
 The harness builds a system prompt, streams model output, parses actions, runs tools, records tool evidence, prompts for summaries and verification, and advances or retries based on evidence-backed results.
+
+## Interaction Diagram
+
+This diagram is included because the interaction model has ordered handoffs, branches, retries, and verification states.
+
+```mermaid
+flowchart TD
+  UserRequest["User request"] --> Surface["Electron or CLI adapter"]
+  Surface --> PromptContext["System prompt and replayed context"]
+  PromptContext --> PlanningDecision{"Code auto planning?"}
+
+  PlanningDecision -- "No" --> ModelStream["MLX chat stream"]
+  PlanningDecision -- "Yes" --> PlanAssembly["Plan assembly prompt"]
+  PlanAssembly --> InspectionAction["Read-only inspection action"]
+  InspectionAction --> ToolRuntime["Tool runtime"]
+  ToolRuntime --> ToolResult["Tool result message"]
+  ToolResult --> PlanAssembly
+  PlanAssembly --> PlanValidation["Deterministic plan validation"]
+  PlanValidation --> SemanticReview["Semantic review"]
+  SemanticReview --> ExecutionReset["Reset into execution prompt"]
+  ExecutionReset --> ModelStream
+
+  ModelStream --> OutputCheck{"Model output kind"}
+  OutputCheck -- "Tool action" --> ActionParser["Action parser"]
+  ActionParser --> ToolRuntime
+  ToolRuntime --> WorkspaceOrExternal["Workspace, shell, web, or runtime side effect"]
+  WorkspaceOrExternal --> ToolResult
+  ToolResult --> Evidence["Step evidence"]
+  Evidence --> ModelStream
+
+  OutputCheck -- "Step summary" --> StepState["Plan execution state"]
+  StepState --> VerifyPrompt["Verify prompt"]
+  VerifyPrompt --> ModelStream
+  OutputCheck -- "Verify result" --> VerifyDecision{"Evidence-backed pass?"}
+  VerifyDecision -- "Pass" --> NextStep["Advance to next step"]
+  VerifyDecision -- "Fail or weak evidence" --> RetryOrAbort["Retry step or abort plan"]
+  NextStep --> ModelStream
+  RetryOrAbort --> ModelStream
+
+  OutputCheck -- "Final response" --> Done["Done or error chunk"]
+```
+
+Keep the Mermaid block as the editable diagram source. A rendered SVG can be linked as an additional artifact for surfaces that cannot render Mermaid, but the SVG should not be the only maintained source.
 
 ## Lifecycle
 

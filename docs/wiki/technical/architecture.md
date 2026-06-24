@@ -61,9 +61,69 @@ The architecture defines how Gemma Code keeps model execution local while still 
 
 Included: local model runtime, Electron app, CLI, shared agent harness, tools, workspaces, execution logs, and tests. Not included: external cloud inference services or remote deployment architecture.
 
+## Scope Boundary Diagram
+
+This diagram is included because the scope defines included architecture items, local neighbors, and explicit exclusions as related boundary sets.
+
+```mermaid
+flowchart TB
+  subgraph LocalArchitecture["Gemma Code local architecture"]
+    ElectronApp["Electron app"]
+    CliSurface["CLI"]
+    AgentHarness["Shared agent harness"]
+    LocalModelRuntime["Local MLX model runtime"]
+    ToolWorkspaceRuntime["Tool and workspace runtime"]
+    ExecutionLogs["Execution logs"]
+    Tests["Regression tests"]
+  end
+
+  subgraph LocalNeighbors["Local neighbors"]
+    FileSystem["Filesystem"]
+    Shell["Shell"]
+    GitWorktrees["Git worktrees"]
+    PythonVenv["Python virtual environment"]
+    HuggingFaceCache["Hugging Face cache"]
+  end
+
+  subgraph OutOfScope["Outside this architecture"]
+    CloudInference["Cloud inference service"]
+    RemoteDeployment["Remote deployment architecture"]
+  end
+
+  ElectronApp --> AgentHarness
+  CliSurface --> AgentHarness
+  AgentHarness --> LocalModelRuntime
+  AgentHarness --> ToolWorkspaceRuntime
+  ToolWorkspaceRuntime --> FileSystem
+  ToolWorkspaceRuntime --> Shell
+  ToolWorkspaceRuntime --> GitWorktrees
+  LocalModelRuntime --> PythonVenv
+  LocalModelRuntime --> HuggingFaceCache
+  AgentHarness --> ExecutionLogs
+  Tests --> AgentHarness
+```
+
 ## System Context
 
 Users run Gemma Code locally. The Electron app provides setup, model selection, chat/code workflows, workspace preview, and logs. The CLI provides setup/status/chat/code/plan flows in the terminal. Both surfaces call the local MLX server and operate on local files.
+
+## System Context Diagram
+
+This diagram is included because the context defines multiple actors, surfaces, local systems, and runtime neighbors that interact from outside to inside.
+
+```mermaid
+flowchart LR
+  User["Local user"] --> Desktop["Electron desktop app"]
+  User --> Terminal["Terminal CLI"]
+  Desktop --> MainProcess["Electron main process"]
+  Terminal --> CliRuntime["CLI runtime"]
+  MainProcess --> SharedHarness["Shared harness and runtime services"]
+  CliRuntime --> SharedHarness
+  SharedHarness --> MlxServer["Local MLX server"]
+  SharedHarness --> Workspace["Local workspace files"]
+  SharedHarness --> ShellGit["Shell and git worktrees"]
+  MlxServer --> ModelCache["Local model cache"]
+```
 
 ## Technology Stack
 
@@ -85,6 +145,27 @@ Users run Gemma Code locally. The Electron app provides setup, model selection, 
 - [design](../../../design) contains implementation plans and analysis notes.
 - [docs/wiki](..) contains the maintained documentation surface.
 
+## Ownership Tree Diagram
+
+This diagram is included because file organization is an aggregation and ownership structure across source, tests, design, and wiki areas.
+
+```mermaid
+flowchart TB
+  Repo["Repository root"] --> Src["src"]
+  Src --> Main["main process, MLX, tools, workspaces, plans, logs"]
+  Src --> Cli["CLI adapters"]
+  Src --> Renderer["React renderer"]
+  Src --> Preload["Context-isolated preload API"]
+  Src --> Shared["Shared contracts and model registry"]
+  Repo --> Tests["tests"]
+  Tests --> MainTests["main tests"]
+  Tests --> CliTests["CLI tests"]
+  Tests --> RendererTests["renderer tests"]
+  Tests --> SharedTests["shared tests"]
+  Repo --> Design["design plans and analysis"]
+  Repo --> Wiki["docs/wiki maintained documentation"]
+```
+
 ## Architectural Layers
 
 1. User surfaces: Electron renderer and CLI terminal.
@@ -95,6 +176,21 @@ Users run Gemma Code locally. The Electron app provides setup, model selection, 
 
 Renderer code may depend on shared types and preload API, but not Node runtime APIs. CLI and Electron adapters may depend on shared runtime modules. Shared runtime modules should avoid depending on BrowserWindow.
 
+## Layered Dependency Diagram
+
+This diagram is included because the architecture defines ordered layers and dependency boundaries.
+
+```mermaid
+flowchart TB
+  UserSurfaces["User surfaces\nElectron renderer and CLI terminal"] --> Adapters["Adapters\npreload, main IPC, CLI entrypoint"]
+  Adapters --> HarnessCore["Harness core\nprompts, plan engine, parser, evidence, verification"]
+  HarnessCore --> RuntimeServices["Runtime services\nMLX, workspaces, logs, background tasks"]
+  RuntimeServices --> LocalSystems["External local systems\nPython venv, MLX server, cache, filesystem, shell, worktrees"]
+
+  RendererBoundary["Renderer boundary"] --> PreloadOnly["Preload API only"]
+  PreloadOnly --> Adapters
+```
+
 ## Key Components
 
 - [Local Model Runtime](../subsystems/local-model-runtime.md) owns MLX installation, cache validation, server lifecycle, warmup, and streaming.
@@ -104,13 +200,67 @@ Renderer code may depend on shared types and preload API, but not Node runtime A
 - [CLI Agent Runtime](../subsystems/cli-agent-runtime.md) owns terminal workflows and worktree isolation.
 - [Observability And Debugging](../subsystems/observability-and-debugging.md) owns logs, runtime status, and background process visibility.
 
+## Component Association Diagram
+
+This diagram is included because the key components are associated through shared harness, runtime, and observability responsibilities.
+
+```mermaid
+flowchart LR
+  ElectronRuntime["Electron App Runtime"] --> AgentHarness["Agent Harness"]
+  CliRuntime["CLI Agent Runtime"] --> AgentHarness
+  AgentHarness --> LocalModelRuntime["Local Model Runtime"]
+  AgentHarness --> ToolWorkspaceRuntime["Tool And Workspace Runtime"]
+  LocalModelRuntime --> Observability["Observability And Debugging"]
+  ToolWorkspaceRuntime --> Observability
+  AgentHarness --> Observability
+  ElectronRuntime --> Observability
+  CliRuntime --> Observability
+```
+
 ## Data Flow
 
 A user request starts in the renderer or CLI, becomes a ChatRequest or CLI run option, is converted into MLX chat messages, streams through the model, is parsed for actions or plan artifacts, runs tools against the active workspace, records evidence and logs, and emits stream chunks or terminal output back to the user surface.
 
+## Request Data Flow Diagram
+
+This diagram is included because requests, messages, tool actions, evidence, logs, and user-visible output move through several components.
+
+```mermaid
+flowchart LR
+  UserRequest["User request"] --> Surface["Renderer or CLI"]
+  Surface --> RequestShape["ChatRequest or CLI run option"]
+  RequestShape --> Messages["MLX chat messages"]
+  Messages --> ModelStream["Local model stream"]
+  ModelStream --> Parser["Action or plan parser"]
+  Parser --> ToolExecution["Tool execution in active workspace"]
+  ToolExecution --> Evidence["Evidence and execution logs"]
+  Evidence --> HarnessResult["Stream chunks or terminal events"]
+  HarnessResult --> Surface
+```
+
 ## Lifecycle Flow
 
 App startup sets runtime paths, creates the Electron window, starts workspace services, and initializes setup state. Setup locates or installs MLX, validates model cache, starts the model server, warms inference, and reports ready. Chat/code requests run bounded tool loops and stop on done, error, abort, or plan failure. Shutdown stops the server, workspace server, and background tasks.
+
+## Lifecycle Diagram
+
+This diagram is included because startup, setup, ready state, request handling, failure reporting, and shutdown are ordered runtime states.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Startup
+  Startup --> SetupState
+  SetupState --> CacheValidation
+  CacheValidation --> ServerStart
+  ServerStart --> Warmup
+  Warmup --> Ready
+  Ready --> ChatOrCodeLoop
+  ChatOrCodeLoop --> Ready: done
+  ChatOrCodeLoop --> Ready: abort
+  ChatOrCodeLoop --> Ready: plan failure reported
+  Ready --> Shutdown
+  Shutdown --> [*]
+```
 
 ## Cross-Cutting Concerns
 
@@ -120,6 +270,24 @@ App startup sets runtime paths, creates the Electron window, starts workspace se
 - Context isolation: renderer communicates through preload only.
 - Observability: execution logs, setup statuses, runtime activities, and MLX logs provide local debug evidence.
 - Shared contracts: stream, setup, model, workspace, and log types live in shared TypeScript.
+
+## Concern Ownership Map
+
+This diagram is included because cross-cutting concerns are owned or enforced by different components and shared contracts.
+
+```mermaid
+flowchart TB
+  Privacy["Local-first privacy"] --> LocalModelRuntime["Local Model Runtime"]
+  Privacy --> ToolWorkspaceRuntime["Tool And Workspace Runtime"]
+  Verification["Evidence-backed verification"] --> AgentHarness["Agent Harness"]
+  PathSafety["Source path safety"] --> ToolWorkspaceRuntime
+  ContextIsolation["Context isolation"] --> ElectronRuntime["Electron App Runtime"]
+  ObservabilityConcern["Observability"] --> Observability["Observability And Debugging"]
+  SharedContracts["Shared contracts"] --> SharedTypes["Shared TypeScript types"]
+  AgentHarness --> SharedTypes
+  ElectronRuntime --> SharedTypes
+  ToolWorkspaceRuntime --> SharedTypes
+```
 
 ## Design Principles
 
@@ -147,3 +315,22 @@ App startup sets runtime paths, creates the Electron window, starts workspace se
 ## Verification
 
 Architecture conformance is verified by [tests/main](../../../tests/main), [tests/cli](../../../tests/cli), [tests/renderer](../../../tests/renderer), [tests/shared](../../../tests/shared), plus package scripts for typecheck, build, and tests when source code changes.
+
+## Verification Coverage Map
+
+This diagram is included because architecture conformance is proven by several test roots and package checks that cover different layers and components.
+
+```mermaid
+flowchart LR
+  MainTests["tests/main"] --> HarnessCore["Harness core"]
+  MainTests --> RuntimeServices["Runtime services"]
+  CliTests["tests/cli"] --> CliRuntime["CLI Agent Runtime"]
+  RendererTests["tests/renderer"] --> ElectronRuntime["Electron App Runtime"]
+  SharedTests["tests/shared"] --> SharedContracts["Shared contracts"]
+  PackageChecks["typecheck, build, and tests"] --> ArchitectureConformance["Architecture conformance"]
+  HarnessCore --> ArchitectureConformance
+  RuntimeServices --> ArchitectureConformance
+  CliRuntime --> ArchitectureConformance
+  ElectronRuntime --> ArchitectureConformance
+  SharedContracts --> ArchitectureConformance
+```
