@@ -159,7 +159,49 @@ flowchart TD
   OutputCheck -- "Final response" --> Done["Done or error chunk"]
 ```
 
-Keep the Mermaid block as the editable diagram source. A rendered SVG can be linked as an additional artifact for surfaces that cannot render Mermaid, but the SVG should not be the only maintained source.
+The sequence view emphasizes timing and responsibility across the same interaction.
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Surface as Electron or CLI
+  participant Harness as Agent harness
+  participant Model as MLX model stream
+  participant Plan as Plan engine
+  participant Tools as Tool runtime
+  participant Workspace as Workspace or shell
+
+  User->>Surface: Submit request
+  Surface->>Harness: Build prompt context
+  alt Chat mode
+    Harness->>Model: Stream chat messages
+  else Code auto mode
+    Harness->>Plan: Assemble plan
+    Plan->>Tools: Run read-only inspection
+    Tools-->>Plan: Tool result
+    Plan-->>Harness: Validated and reviewed plan
+    Harness->>Model: Reset into execution prompt
+  end
+  loop Tool and verification rounds
+    Model-->>Harness: Token stream or action block
+    alt Tool action
+      Harness->>Tools: Dispatch action
+      Tools->>Workspace: Read or modify workspace
+      Workspace-->>Tools: Result
+      Tools-->>Harness: Tool result and evidence
+      Harness->>Model: Continue with evidence
+    else Step summary
+      Harness->>Plan: Record step state
+      Harness->>Model: Request verification
+    else Verify result
+      Harness->>Plan: Advance, retry, or abort
+    end
+  end
+  Harness-->>Surface: Stream chunks, done, or error
+  Surface-->>User: Display result
+```
+
+Keep the Mermaid blocks as the editable diagram source. Rendered SVG files can be linked as additional artifacts for surfaces that cannot render Mermaid, but SVG should not be the only maintained source.
 
 ## Lifecycle
 
@@ -236,16 +278,6 @@ flowchart LR
 - Execution should not rely on planning scratch work as current code evidence.
 - Verification must fail without visible proof.
 - Tool calls are associated with active plan steps when possible.
-
-This diagram is included because the subsystem invariants constrain different phases, evidence sources, and component associations.
-
-```mermaid
-flowchart TB
-  PlanningInspection["Planning inspection actions"] --> NotImplementation["Not implementation steps"]
-  ExecutionPhase["Execution phase"] --> CurrentCodeEvidence["Requires current code evidence"]
-  Verification["Verification"] --> VisibleProof["Requires visible proof"]
-  ToolCalls["Tool calls"] --> ActivePlanStep["Associated with active plan step"]
-```
 
 ## Non-Goals
 
