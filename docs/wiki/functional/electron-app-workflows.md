@@ -2,13 +2,15 @@
 
 ## Current Understanding
 
-The Electron app lets users set up a local model, chat, run code workflows in sandbox or working-directory mode, inspect generated plans, execute plans, view tool calls, inspect logs, and switch models.
+The Electron app lets users set up a local model, chat, use voice input, run code workflows in sandbox or working-directory mode, inspect generated plans, execute plans, view tool calls, inspect logs, and switch models.
 
 ## Authoritative Sources
 
 - [README app workflow](../../../README.md)
 - [Renderer app](../../../src/renderer/src/App.tsx)
 - [Chat component](../../../src/renderer/src/components/Chat.tsx)
+- [Composer component](../../../src/renderer/src/components/Composer.tsx)
+- [Whisper helper](../../../src/renderer/src/lib/whisper.ts)
 - [Main process](../../../src/main/index.ts)
 - [Preload bridge](../../../src/preload/index.ts)
 
@@ -16,8 +18,10 @@ The Electron app lets users set up a local model, chat, run code workflows in sa
 
 - [src/renderer/src/App.tsx](../../../src/renderer/src/App.tsx)
 - [src/renderer/src/components/Chat.tsx](../../../src/renderer/src/components/Chat.tsx)
+- [src/renderer/src/components/Composer.tsx](../../../src/renderer/src/components/Composer.tsx)
 - [src/renderer/src/components/Message.tsx](../../../src/renderer/src/components/Message.tsx)
 - [src/renderer/src/components/Sidebar.tsx](../../../src/renderer/src/components/Sidebar.tsx)
+- [src/renderer/src/lib/whisper.ts](../../../src/renderer/src/lib/whisper.ts)
 - [src/preload/index.ts](../../../src/preload/index.ts)
 - [src/main/index.ts](../../../src/main/index.ts)
 
@@ -53,7 +57,7 @@ This page belongs to [Functional Workflows](index.md).
 
 ## Actors
 
-- User chats, selects modes, chooses directories, starts code tasks, approves plans, switches models, and reads logs.
+- User chats, records voice input, selects modes, chooses directories, starts code tasks, approves plans, switches models, and reads logs.
 - Renderer persists UI state and conversations.
 - Main process executes runtime behavior and streams chunks.
 
@@ -62,6 +66,7 @@ This page belongs to [Functional Workflows](index.md).
 - App startup.
 - Setup completion.
 - Composer send action.
+- Composer voice input action.
 - Mode pills for chat, build, and code.
 - Directory chooser.
 - Execute Plan affordance.
@@ -70,7 +75,7 @@ This page belongs to [Functional Workflows](index.md).
 
 ## Scope
 
-Includes conversation management, chat, build/code workflows, plan display, tool display, model switching, workspace preview, file-context display, and execution log reading.
+Includes conversation management, chat, renderer-side voice input, build/code workflows, plan display, tool display, model switching, workspace preview, file-context display, and execution log reading.
 
 ## Concepts
 
@@ -85,10 +90,11 @@ Includes conversation management, chat, build/code workflows, plan display, tool
 1. User reaches ready app state after setup.
 2. User creates or selects a conversation.
 3. User chooses chat, build, or code mode.
-4. User sends a prompt.
-5. Renderer sends a ChatRequest through preload.
-6. Main process streams chunks.
-7. Renderer updates message content, tool cards, plan nodes, reviews, activity labels, and done/error state.
+4. User optionally records voice input, which is transcribed locally into the composer draft without submitting the message.
+5. User sends a prompt.
+6. Renderer sends a ChatRequest through preload.
+7. Main process streams chunks.
+8. Renderer updates message content, tool cards, plan nodes, reviews, activity labels, and done/error state.
 
 ## States And Rules
 
@@ -97,6 +103,7 @@ Includes conversation management, chat, build/code workflows, plan display, tool
 - System and harness messages are not resent as normal user-visible conversation history.
 - Model switching shows overlay while setup for the target model runs.
 - Execution log viewer polls while open.
+- Voice input transcribes in the renderer with Whisper and stays independent of the selected Gemma chat or code model.
 
 ## Edge Cases
 
@@ -104,6 +111,7 @@ Includes conversation management, chat, build/code workflows, plan display, tool
 - Log read failures display a log viewer error.
 - Chat abort marks active request as stopped through main process.
 - Setup repair returns the user to setup flow.
+- Microphone access, too-short recording, and transcription failures display composer-level errors.
 
 ## Verification
 

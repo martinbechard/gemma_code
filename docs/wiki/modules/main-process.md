@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The main process is the Electron adapter and runtime coordinator. It owns app window setup, IPC handlers, setup/model lifecycle orchestration, chat stream coordination, workspace server startup, tool execution loops, plan harness integration, abort handling, and debug log access.
+The main process is the Electron adapter and runtime coordinator. It owns app window setup, IPC handlers, setup/model lifecycle orchestration, chat stream coordination, workspace server startup, tool execution loops, plan harness integration, abort handling, debug log access, and the inactive app-level audio transcription IPC handler.
 
 ## Authoritative Sources
 
@@ -46,6 +46,7 @@ No open wiki questions are recorded for this topic.
 ## Maintenance Notes
 
 - Recheck this page when IPC handlers, setup flow, chat loop, or plan orchestration changes.
+- Recheck the audio transcription notes if app-level MLX transcription is implemented or the renderer stops using renderer-side Whisper transcription.
 
 ## Runtime Path
 
@@ -58,7 +59,7 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 ## Responsibilities
 
 - Configure Electron application identity, user-data path, native theme, app window, and renderer loading.
-- Expose IPC handlers for setup, model switching, repair, chat, abort, logs, tools, workspace operations, directory selection, and transcription.
+- Expose IPC handlers for setup, model switching, repair, chat, abort, logs, tools, workspace operations, directory selection, and the app-level audio transcription placeholder.
 - Build and emit mode-specific system prompts.
 - Run setup through MLX install, model validation, server start, download polling, cache repair detection, and warmup inference.
 - Drive chat, planning, semantic review, execution, verification, tool calls, step evidence, and stream chunks.
@@ -95,6 +96,7 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 - Code auto mode assembles a plan before execution unless freestyle or execute-plan mode is selected.
 - Tool actions are one-at-a-time and tool results are replayed into model context.
 - Verification cannot mutate files and must rely on visible evidence.
+- The audio:transcribe IPC handler currently returns empty text because app-level MLX transcription integration is not implemented. Working voice input is handled by the [Renderer UI](renderer-ui.md) through renderer-side Whisper transcription.
 
 ## Invariants
 

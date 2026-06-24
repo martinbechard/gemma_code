@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The preload bridge exposes a typed renderer API over Electron IPC while preserving context isolation. It is the only renderer-facing bridge to setup, model, chat, debug log, tools, workspace, directory picker, file streaming, raw chunk, and audio transcription operations.
+The preload bridge exposes a typed renderer API over Electron IPC while preserving context isolation. It is the renderer-facing bridge to setup, model, chat, debug log, tools, workspace, directory picker, file streaming, raw chunk, and an audio transcription IPC method.
 
 ## Authoritative Sources
 
@@ -40,6 +40,7 @@ No open wiki questions are recorded for this topic.
 ## Maintenance Notes
 
 - Add focused preload/API parity tests if IPC surface churn becomes risky.
+- The active voice input UI transcribes in the renderer; recheck this page if the composer starts using the audio transcription IPC method.
 
 ## Runtime Path
 
@@ -51,7 +52,7 @@ This module implements the bridge between the [Renderer UI](renderer-ui.md) and 
 
 ## Responsibilities
 
-- Expose setup, model, chat, log, tools, workspace, dialog, streaming, and transcription methods on window.api.
+- Expose setup, model, chat, log, tools, workspace, dialog, streaming, and audio transcription methods on window.api.
 - Register and unregister event listeners for setup status, workspace changes, raw chunks, and file streaming.
 - Convert chat:send into a per-request stream subscription.
 
@@ -68,6 +69,7 @@ This module implements the bridge between the [Renderer UI](renderer-ui.md) and 
 
 - The exposed Api type is exported from preload and declared for renderer use.
 - sendChat resolves when a done or error chunk arrives.
+- transcribeAudio invokes the audio:transcribe IPC channel with base64 audio and a model name, but the current composer voice-input path uses renderer-side Whisper transcription instead.
 
 ## Internal Data And State
 
