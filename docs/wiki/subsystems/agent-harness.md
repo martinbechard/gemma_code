@@ -55,8 +55,6 @@ No open wiki questions are recorded for this topic.
 
 Includes chat prompt assembly, code plan assembly, semantic review, execution prompts, tool loop, evidence checks, verification prompts, retries, and stream emission.
 
-This diagram is included because the scope defines included harness capabilities and separates them from tool implementation and product requirement ownership.
-
 ```mermaid
 flowchart TB
   subgraph AgentHarnessSubsystem["Agent harness subsystem"]
@@ -86,8 +84,6 @@ flowchart TB
 - Plan steps are YAML records with name, prompt, and verify fields.
 - StreamChunk records carry model tokens, tool calls, plan nodes, reviews, harness messages, done, and errors.
 
-This diagram is included because the subsystem has several data anchors that become derived prompts, execution state, and user-visible stream records.
-
 ```mermaid
 flowchart LR
   UserMessages["User messages"] --> MlxMessages["MLX chat messages"]
@@ -104,8 +100,6 @@ flowchart LR
 - [Tool Runtime](../modules/tool-runtime.md) provides action protocol and tool dispatch.
 - [Plan Engine](../modules/plan-engine.md) provides plan, evidence, and verify behavior.
 
-This diagram is included because the subsystem defines multiple components whose responsibilities are associated through shared harness behavior.
-
 ```mermaid
 flowchart LR
   MainProcess["Main Process"] --> PlanEngine["Plan Engine"]
@@ -119,47 +113,6 @@ flowchart LR
 ## Interaction Model
 
 The harness builds a system prompt, streams model output, parses actions, runs tools, records tool evidence, prompts for summaries and verification, and advances or retries based on evidence-backed results.
-
-This diagram is included because the interaction model has ordered handoffs, branches, retries, and verification states.
-
-```mermaid
-flowchart TD
-  UserRequest["User request"] --> Surface["Electron or CLI adapter"]
-  Surface --> PromptContext["System prompt and replayed context"]
-  PromptContext --> PlanningDecision{"Code auto planning?"}
-
-  PlanningDecision -- "No" --> ModelStream["MLX chat stream"]
-  PlanningDecision -- "Yes" --> PlanAssembly["Plan assembly prompt"]
-  PlanAssembly --> InspectionAction["Read-only inspection action"]
-  InspectionAction --> ToolRuntime["Tool runtime"]
-  ToolRuntime --> ToolResult["Tool result message"]
-  ToolResult --> PlanAssembly
-  PlanAssembly --> PlanValidation["Deterministic plan validation"]
-  PlanValidation --> SemanticReview["Semantic review"]
-  SemanticReview --> ExecutionReset["Reset into execution prompt"]
-  ExecutionReset --> ModelStream
-
-  ModelStream --> OutputCheck{"Model output kind"}
-  OutputCheck -- "Tool action" --> ActionParser["Action parser"]
-  ActionParser --> ToolRuntime
-  ToolRuntime --> WorkspaceOrExternal["Workspace, shell, web, or runtime side effect"]
-  WorkspaceOrExternal --> ToolResult
-  ToolResult --> Evidence["Step evidence"]
-  Evidence --> ModelStream
-
-  OutputCheck -- "Step summary" --> StepState["Plan execution state"]
-  StepState --> VerifyPrompt["Verify prompt"]
-  VerifyPrompt --> ModelStream
-  OutputCheck -- "Verify result" --> VerifyDecision{"Evidence-backed pass?"}
-  VerifyDecision -- "Pass" --> NextStep["Advance to next step"]
-  VerifyDecision -- "Fail or weak evidence" --> RetryOrAbort["Retry step or abort plan"]
-  NextStep --> ModelStream
-  RetryOrAbort --> ModelStream
-
-  OutputCheck -- "Final response" --> Done["Done or error chunk"]
-```
-
-The sequence view emphasizes timing and responsibility across the same interaction.
 
 ```mermaid
 sequenceDiagram
@@ -201,13 +154,9 @@ sequenceDiagram
   Surface-->>User: Display result
 ```
 
-Keep the Mermaid blocks as the editable diagram source. Rendered SVG files can be linked as additional artifacts for surfaces that cannot render Mermaid, but SVG should not be the only maintained source.
-
 ## Lifecycle
 
 Chat mode runs a bounded tool loop. Code auto mode assembles and reviews a plan, resets into execution context, executes each step, verifies, and emits terminal done or error chunks.
-
-This diagram is included because the subsystem has different chat and code-auto states, plus retry and terminal states.
 
 ```mermaid
 stateDiagram-v2
@@ -231,8 +180,6 @@ stateDiagram-v2
 
 PlanExecutionState owns plan node events. ToolCall records capture action name, args, result, errors, running state, and optional parent step id.
 
-This diagram is included because the subsystem shares plan, tool, evidence, and stream contracts across components.
-
 ```mermaid
 flowchart LR
   PlanYaml["Plan YAML records"] --> PlanExecutionState["PlanExecutionState"]
@@ -247,8 +194,6 @@ flowchart LR
 
 Maximum rounds, retry limits, repeated action thresholds, and incomplete step thresholds are constants in main and CLI harness files.
 
-This diagram is included because the subsystem has parallel main-process and CLI harness limits that shape the same runtime behavior.
-
 ```mermaid
 flowchart TB
   MainHarnessConstants["Main process harness constants"] --> HarnessLimits["Harness execution limits"]
@@ -262,8 +207,6 @@ flowchart TB
 ## Implementation Order
 
 Parser and evidence behavior should be updated before caller loops depend on new plan or verification semantics.
-
-This diagram is included because the implementation order has a dependency between parser behavior, evidence behavior, caller loops, and verification semantics.
 
 ```mermaid
 flowchart LR
@@ -291,8 +234,6 @@ The same request semantics are available through Electron and CLI, with visible 
 ## Verification
 
 Use [tests/main/plan](../../../tests/main/plan), [tests/main/actionParser.test.ts](../../../tests/main/actionParser.test.ts), [tests/cli/agentPlanPrompts.test.ts](../../../tests/cli/agentPlanPrompts.test.ts), and [tests/main/codeSystemPrompt.test.ts](../../../tests/main/codeSystemPrompt.test.ts).
-
-This diagram is included because verification comes from several test groups that cover different harness responsibilities.
 
 ```mermaid
 flowchart LR
