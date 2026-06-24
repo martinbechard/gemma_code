@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { setRuntimePaths } from "../../src/main/runtimePaths";
-import { codeSystemPrompt } from "../../src/main/tools";
+import { codeSystemPrompt, TOOLS } from "../../src/main/tools";
 
 let dir = "";
 
@@ -218,6 +218,9 @@ describe("codeSystemPrompt", () => {
     expect(prompt).toContain("### read_file");
     expect(prompt).toContain("### write_file");
     expect(prompt).toContain("### edit_file");
+    for (const toolName of Object.keys(TOOLS)) {
+      expect(prompt).toContain(`### ${toolName}`);
+    }
     expect(prompt).not.toContain("MODE AND PROJECT INSTRUCTIONS");
     expect(prompt).not.toContain("READ-ONLY INSPECTION ACTION FORMAT");
     expect(prompt).not.toContain("WRITE_FILE <content> RULES");

@@ -1,13 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildServerArgs, chatStream, warmupInference } from "../../src/main/mlx";
+import {
+  buildChatRequestBody,
+  buildServerArgs,
+  chatStream,
+  warmupInference,
+} from "../../src/main/mlx";
 
 const TEST_MODEL = "test-model";
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
 describe("chatStream", () => {
+  it("sends thinking in both OpenAI and chat-template request fields", () => {
+    expect(
+      buildChatRequestBody({
+        model: TEST_MODEL,
+        messages: [{ role: "user", content: "Think out loud." }],
+        enableThinking: true,
+      }),
+    ).toMatchObject({
+      enable_thinking: true,
+      chat_template_kwargs: {
+        enable_thinking: true,
+      },
+    });
+  });
+
   it("keeps reasoning separate from visible content", async () => {
     vi.stubGlobal(
       "fetch",
@@ -85,6 +106,46 @@ describe("buildServerArgs", () => {
       "127.0.0.1",
       "--port",
       "11435",
+    ]);
+  });
+
+  it("adds max KV size for Gemma unified models when configured", () => {
+    vi.stubEnv("GEMMA_MLX_VLM_MAX_KV_SIZE", "12288");
+
+    expect(buildServerArgs("mlx-community/gemma-4-12B-it-qat-4bit")).toEqual([
+      "-m",
+      "mlx_vlm.server",
+      "--model",
+      "mlx-community/gemma-4-12B-it-qat-4bit",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "11435",
+      "--max-kv-size",
+      "12288",
+    ]);
+  });
+
+  it("adds turboquant KV cache settings for Gemma unified models when configured", () => {
+    vi.stubEnv("GEMMA_MLX_VLM_MAX_KV_SIZE", "12288");
+    vi.stubEnv("GEMMA_MLX_VLM_KV_BITS", "8");
+    vi.stubEnv("GEMMA_MLX_VLM_KV_QUANT_SCHEME", "turboquant");
+
+    expect(buildServerArgs("mlx-community/gemma-4-12B-it-qat-4bit")).toEqual([
+      "-m",
+      "mlx_vlm.server",
+      "--model",
+      "mlx-community/gemma-4-12B-it-qat-4bit",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "11435",
+      "--max-kv-size",
+      "12288",
+      "--kv-bits",
+      "8",
+      "--kv-quant-scheme",
+      "turboquant",
     ]);
   });
 });

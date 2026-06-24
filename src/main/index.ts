@@ -2484,7 +2484,9 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         round === 0 &&
         buffer.trim().length > 0 &&
         (!req.workingDir ||
-          !["discuss", "execute"].includes(req.codeSubmode ?? "auto"));
+          !["discuss", "execute", "freestyle"].includes(
+            req.codeSubmode ?? "auto",
+          ));
       if (shouldNudgeCodeResponse) {
         flushBufferToUI();
         baseMessages.push({ role: "assistant", content: buffer });

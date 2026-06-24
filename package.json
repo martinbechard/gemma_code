@@ -8,6 +8,9 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev2": "GEMMA_MLX_VLM_MAX_KV_SIZE=12288 electron-vite dev",
+    "dev3": "GEMMA_MLX_VLM_MAX_KV_SIZE=12288 GEMMA_MLX_VLM_KV_BITS=8 GEMMA_MLX_VLM_KV_QUANT_SCHEME=turboquant electron-vite dev",
+    "dev4": "GEMMA_MLX_VLM_MAX_KV_SIZE=12288 GEMMA_MLX_VLM_KV_BITS=4 GEMMA_MLX_VLM_KV_QUANT_SCHEME=turboquant electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "pack": "electron-vite build && electron-builder --dir",

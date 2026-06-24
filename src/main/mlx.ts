@@ -51,6 +51,9 @@ const MLX_GLOBAL_HF_CACHE_DIR = join(homedir(), ".cache", "huggingface");
 const MLX_GLOBAL_HF_HUB_DIR = join(MLX_GLOBAL_HF_CACHE_DIR, "hub");
 const MLX_HF_CACHE_SYMLINK_TYPE = "dir";
 const MLX_SERVER_LOG_FILE_NAME = "mlx-server.log";
+const MLX_VLM_MAX_KV_SIZE_ENV = "GEMMA_MLX_VLM_MAX_KV_SIZE";
+const MLX_VLM_KV_BITS_ENV = "GEMMA_MLX_VLM_KV_BITS";
+const MLX_VLM_KV_QUANT_SCHEME_ENV = "GEMMA_MLX_VLM_KV_QUANT_SCHEME";
 const MODEL_PROVENANCE_FETCH_TIMEOUT_MS = 8_000;
 const MLX_SERVER_LOAD_ERROR_INIT_MARKER = "self._default_model_load_error = None";
 const MLX_SERVER_BROKEN_LOAD_BLOCK = `        # Load the default model if it is given
@@ -932,7 +935,7 @@ export interface ServerProgress {
 export function buildServerArgs(model: string): string[] {
   const runtime = modelRuntimeForName(model);
   if (runtime === "mlx-vlm") {
-    return [
+    const args = [
       "-m",
       "mlx_vlm.server",
       "--model",
@@ -942,6 +945,19 @@ export function buildServerArgs(model: string): string[] {
       "--port",
       String(MLX_PORT),
     ];
+    const maxKvSize = process.env[MLX_VLM_MAX_KV_SIZE_ENV];
+    if (maxKvSize) {
+      args.push("--max-kv-size", maxKvSize);
+    }
+    const kvBits = process.env[MLX_VLM_KV_BITS_ENV];
+    if (kvBits) {
+      args.push("--kv-bits", kvBits);
+    }
+    const kvQuantScheme = process.env[MLX_VLM_KV_QUANT_SCHEME_ENV];
+    if (kvQuantScheme) {
+      args.push("--kv-quant-scheme", kvQuantScheme);
+    }
+    return args;
   }
 
   return [
@@ -1313,12 +1329,14 @@ export interface MLXChatRequestBody {
   stream: boolean;
   temperature: number;
   max_tokens: number;
+  enable_thinking: boolean;
   chat_template_kwargs: {
     enable_thinking: boolean;
   };
 }
 
 export function buildChatRequestBody(opts: MLXChatOptions): MLXChatRequestBody {
+  const enableThinking = opts.enableThinking ?? false;
   return {
     model: opts.model,
     messages: opts.messages.map((m) => ({
@@ -1328,8 +1346,9 @@ export function buildChatRequestBody(opts: MLXChatOptions): MLXChatRequestBody {
     stream: true,
     temperature: opts.temperature ?? MLX_CHAT_TEMPERATURE,
     max_tokens: MLX_CHAT_MAX_TOKENS,
+    enable_thinking: enableThinking,
     chat_template_kwargs: {
-      enable_thinking: opts.enableThinking ?? false,
+      enable_thinking: enableThinking,
     },
   };
 }
