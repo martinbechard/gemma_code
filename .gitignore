@@ -40,6 +40,9 @@ workspaces/
 # CLI conversation snapshots
 .gemma-cli/
 
+# Local project wiki source navigation link
+docs/wiki/src
+
 # MLX venv (auto-provisioned at runtime in userData)
 mlx-venv/
 

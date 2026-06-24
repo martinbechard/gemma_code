@@ -31,6 +31,20 @@ The project is used to explore what a small local model can do when the surround
 - Tool implementations split into one file per tool under src/main/tools.
 - Local MLX setup, status checks, and server reuse.
 
+## Documentation
+
+The maintained project wiki lives at [docs/wiki/README.md](docs/wiki/README.md).
+
+Key entry pages:
+
+- [Architecture](docs/wiki/technical/architecture.md)
+- [Subsystem designs](docs/wiki/subsystems/index.md)
+- [Module designs](docs/wiki/modules/index.md)
+- [Functional workflows](docs/wiki/functional/index.md)
+- [Code map](docs/wiki/code/index.md)
+- [Open decisions](docs/wiki/open-decisions.md)
+- [Known defects](docs/wiki/known-defects.md)
+
 ## Requirements
 
 - macOS on Apple Silicon.
