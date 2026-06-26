@@ -8,6 +8,12 @@ import {
   warmupInference,
   MLX_SERVER_PORT,
 } from "../main/mlx";
+import {
+  endpointForModel,
+  isLocalModel,
+  modelInfoForName,
+  validateRemoteModelReady,
+} from "../main/modelConfig";
 
 function log(line: string): void {
   process.stdout.write(`[cli] ${line}\n`);
@@ -32,6 +38,15 @@ async function isServerRunning(model: string): Promise<boolean> {
 }
 
 export async function runSetup(model: string): Promise<void> {
+  if (!isLocalModel(model)) {
+    validateRemoteModelReady(model);
+    const endpoint = endpointForModel(model);
+    log(
+      `Remote model ready: ${modelInfoForName(model)?.label ?? model} via ${endpoint?.apiKeyEnv ?? "configured endpoint"}`,
+    );
+    return;
+  }
+
   let mlx = locateMLX();
   if (!mlx || !mlx.installed) {
     log("Installing mlx-lm into the app venv (one-time)...");
@@ -55,6 +70,21 @@ export async function runSetup(model: string): Promise<void> {
 }
 
 export async function runStatus(model: string): Promise<void> {
+  if (!isLocalModel(model)) {
+    try {
+      validateRemoteModelReady(model);
+      const endpoint = endpointForModel(model);
+      log(`Remote model: ${modelInfoForName(model)?.label ?? model}`);
+      log(`Endpoint kind: ${endpoint?.kind ?? "unknown"}`);
+      log(`Credential: ${endpoint?.apiKeyEnv ?? "unknown"} is set`);
+    } catch (error) {
+      log(`Remote model: ${modelInfoForName(model)?.label ?? model}`);
+      log((error as Error).message);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const mlx = locateMLX();
   if (!mlx || !mlx.installed) {
     log("MLX: NOT INSTALLED");

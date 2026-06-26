@@ -2,12 +2,13 @@
 
 ## Current Understanding
 
-The MLX runtime module supervises the app-managed Python environment, model cache inspection, MLX server process, runtime patching, chat-completion requests, warmup inference, model provenance, and local cache reuse.
+The MLX runtime module supervises the app-managed Python environment, model cache inspection, MLX server process, runtime patching, local chat-completion requests, warmup inference, model provenance, and local cache reuse.
 
 ## Authoritative Sources
 
 - [MLX runtime source](../../../src/main/mlx.ts)
-- [Shared model registry](../../../src/shared/types.ts)
+- [Model configuration source](../../../src/main/modelConfig.ts)
+- [Shared model contracts](../../../src/shared/types.ts)
 - [MLX runtime transparency implementation plan](../../../design/mlx-transparency-implementation-plan.md)
 - [README model runtime section](../../../README.md)
 - [MLX patch notes](../../../resources/mlx-patches/README.md)
@@ -15,6 +16,7 @@ The MLX runtime module supervises the app-managed Python environment, model cach
 ## Related Code
 
 - [src/main/mlx.ts](../../../src/main/mlx.ts)
+- [src/main/modelConfig.ts](../../../src/main/modelConfig.ts)
 - [src/main/runtimePaths.ts](../../../src/main/runtimePaths.ts)
 - [src/shared/types.ts](../../../src/shared/types.ts)
 - [resources/mlx-patches](../../../resources/mlx-patches)
@@ -59,7 +61,7 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 - Inspect Hugging Face model cache folders and validate inference readiness.
 - Reuse global Hugging Face cache entries by symlink or copy.
 - Start, stop, and monitor the MLX server process.
-- Send chat-completion requests and report useful failure context.
+- Send local chat-completion requests and report useful failure context.
 - Fetch model provenance for UI display.
 
 ## Callers
@@ -71,13 +73,13 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 
 - Node child process, filesystem, OS home directory, and fetch APIs.
 - [runtimePaths](../../../src/main/runtimePaths.ts) for app data paths.
-- [Shared Types And Model Registry](shared-types-and-model-registry.md) for model runtime lookup.
+- [Shared Types And Model Registry](shared-types-and-model-registry.md) for configured model metadata and local runtime lookup.
 
 ## Public Contracts
 
 - Setup functions return Python/runtime status or throw typed errors.
 - Cache inspection returns status, snapshots, weight bytes, incomplete blobs, and readiness inputs.
-- Chat streaming yields model content and reasoning chunks.
+- Local chat streaming yields model content and reasoning chunks.
 
 ## Internal Data And State
 
@@ -98,6 +100,7 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 
 ## Configuration
 
+- Model runtime mapping comes from the configured model catalog.
 - Environment variables can tune MLX VLM KV cache size, KV bits, and quantization scheme.
 - The canonical server port is exported as [MLX_SERVER_PORT](../../../src/main/mlx.ts).
 

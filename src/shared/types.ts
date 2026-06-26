@@ -246,10 +246,32 @@ export type StreamChunk =
   | { type: "done" }
   | { type: "error"; error: string };
 
-export type ModelRuntime = "mlx-lm" | "mlx-vlm";
+export type ModelRuntime =
+  | "mlx-lm"
+  | "mlx-vlm"
+  | "remote";
+
+export interface OpenAiCompatibleEndpointInfo {
+  kind: "openai-compatible";
+  baseUrl: string;
+  apiKeyEnv: string;
+  chatCompletionsPath?: string;
+  model?: string;
+}
+
+export interface GeminiGenerateContentEndpointInfo {
+  kind: "gemini-generate-content";
+  baseUrl: string;
+  apiKeyEnv: string;
+  model?: string;
+}
+
+export type ModelEndpointInfo =
+  | OpenAiCompatibleEndpointInfo
+  | GeminiGenerateContentEndpointInfo;
 
 export interface ModelInfo {
-  /** HuggingFace repo ID used internally by the selected MLX runtime. */
+  /** Model ID used internally by the selected runtime. */
   name: string;
   /** Short, user-friendly display name */
   label: string;
@@ -257,7 +279,13 @@ export interface ModelInfo {
   sizeBytes: number;
   description: string;
   runtime: ModelRuntime;
+  endpoint?: ModelEndpointInfo;
   recommended?: boolean;
+}
+
+export interface ModelListResult {
+  models: ModelInfo[];
+  defaultModel: string;
 }
 
 export interface ModelProvenance {
@@ -295,69 +323,6 @@ function formatModelProvenanceDate(prefix: string, value: string | null): string
   return `${prefix} ${MODEL_PROVENANCE_DATE_FORMATTER.format(date)}`;
 }
 
-const MLX_GEMMA_4_E2B_REPO = "mlx-community/gemma-4-e2b-it-4bit";
-const GEMMA_4_E2B_BYTES = 3_580_765_126;
-const MLX_GEMMA_4_E4B_REPO = "mlx-community/gemma-4-e4b-it-4bit";
-const GEMMA_4_E4B_BYTES = 5_216_992_212;
-const MLX_GEMMA_4_E4B_QAT_REPO = "mlx-community/gemma-4-E4B-it-qat-4bit";
-const GEMMA_4_E4B_QAT_BYTES = 6_800_000_000;
-const MLX_GEMMA_4_12B_QAT_REPO = "mlx-community/gemma-4-12B-it-qat-4bit";
-const GEMMA_4_12B_QAT_BYTES = 11_000_000_000;
-const MLX_GEMMA_3_TEXT_4B_REPO = "mlx-community/gemma-3-text-4b-it-4bit";
-const GEMMA_3_TEXT_4B_BYTES = 3_200_000_000;
-
-// Gemma 4 works once the bundled mlx-lm patch is applied (see
-// resources/mlx-patches/) and the server is launched with
-// enable_thinking=false (see startServer in main/mlx.ts).
-export const AVAILABLE_MODELS: ModelInfo[] = [
-  {
-    name: MLX_GEMMA_4_E4B_REPO,
-    label: "Gemma 4 E4B",
-    size: "5.2 GB",
-    sizeBytes: GEMMA_4_E4B_BYTES,
-    description: "Larger local model. Runs best on 16GB+ Macs.",
-    runtime: "mlx-lm",
-    recommended: true,
-  },
-  {
-    name: MLX_GEMMA_4_12B_QAT_REPO,
-    label: "Gemma 4 12B QAT",
-    size: "11 GB",
-    sizeBytes: GEMMA_4_12B_QAT_BYTES,
-    description: "Unified architecture model served through MLX VLM.",
-    runtime: "mlx-vlm",
-  },
-  {
-    name: MLX_GEMMA_4_E4B_QAT_REPO,
-    label: "Gemma 4 E4B QAT",
-    size: "6.8 GB",
-    sizeBytes: GEMMA_4_E4B_QAT_BYTES,
-    description: "QAT comparison model with stronger memory efficiency tradeoffs.",
-    runtime: "mlx-lm",
-  },
-  {
-    name: MLX_GEMMA_4_E2B_REPO,
-    label: "Gemma 4 E2B",
-    size: "3.6 GB",
-    sizeBytes: GEMMA_4_E2B_BYTES,
-    description: "Edge-sized. Fast & lightweight. Runs on 8GB+ Macs.",
-    runtime: "mlx-lm",
-  },
-  {
-    name: MLX_GEMMA_3_TEXT_4B_REPO,
-    label: "Gemma 3 Text 4B",
-    size: "3.2 GB",
-    sizeBytes: GEMMA_3_TEXT_4B_BYTES,
-    description: "Text-only fallback. Use if Gemma 4 doesn't load.",
-    runtime: "mlx-lm",
-  },
-];
-
-export const DEFAULT_MODEL = MLX_GEMMA_4_E4B_REPO;
-
-export function modelRuntimeForName(model: string): ModelRuntime {
-  return (
-    AVAILABLE_MODELS.find((candidate) => candidate.name === model)?.runtime ??
-    "mlx-lm"
-  );
+export function isLocalMlxRuntime(runtime: ModelRuntime): boolean {
+  return runtime === "mlx-lm" || runtime === "mlx-vlm";
 }

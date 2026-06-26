@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The main process is the Electron adapter and runtime coordinator. It owns app window setup, IPC handlers, setup/model lifecycle orchestration, chat stream coordination, workspace server startup, tool execution loops, plan harness integration, abort handling, debug log access, and the inactive app-level audio transcription IPC handler.
+The main process is the Electron adapter and runtime coordinator. It owns app window setup, IPC handlers, configured model list loading, local and remote setup orchestration, chat stream coordination, workspace server startup, tool execution loops, plan harness integration, abort handling, debug log access, and the inactive app-level audio transcription IPC handler.
 
 ## Authoritative Sources
 
@@ -15,6 +15,9 @@ The main process is the Electron adapter and runtime coordinator. It owns app wi
 ## Related Code
 
 - [src/main/index.ts](../../../src/main/index.ts)
+- [src/main/modelConfig.ts](../../../src/main/modelConfig.ts)
+- [src/main/modelChat.ts](../../../src/main/modelChat.ts)
+- [src/main/remoteChat.ts](../../../src/main/remoteChat.ts)
 - [src/main/mlx.ts](../../../src/main/mlx.ts)
 - [src/main/tools/index.ts](../../../src/main/tools/index.ts)
 - [src/main/plan](../../../src/main/plan)
@@ -24,7 +27,9 @@ The main process is the Electron adapter and runtime coordinator. It owns app wi
 ## Related Tests
 
 - [tests/main/codeSystemPrompt.test.ts](../../../tests/main/codeSystemPrompt.test.ts)
+- [tests/main/remoteChat.test.ts](../../../tests/main/remoteChat.test.ts)
 - [tests/main/mlxChatStream.test.ts](../../../tests/main/mlxChatStream.test.ts)
+- [tests/shared/modelRegistry.test.ts](../../../tests/shared/modelRegistry.test.ts)
 - [tests/main/actionParser.test.ts](../../../tests/main/actionParser.test.ts)
 - [tests/main/plan](../../../tests/main/plan)
 
@@ -59,9 +64,10 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 ## Responsibilities
 
 - Configure Electron application identity, user-data path, native theme, app window, and renderer loading.
-- Expose IPC handlers for setup, model switching, repair, chat, abort, logs, tools, workspace operations, directory selection, and the app-level audio transcription placeholder.
+- Expose IPC handlers for setup, model listing, model switching, repair, chat, abort, logs, tools, workspace operations, directory selection, and the app-level audio transcription placeholder.
 - Build and emit mode-specific system prompts.
-- Run setup through MLX install, model validation, server start, download polling, cache repair detection, and warmup inference.
+- Run local setup through MLX install, model validation, server start, download polling, cache repair detection, and warmup inference.
+- Run remote setup by validating configured endpoint credentials before chat starts.
 - Drive chat, planning, semantic review, execution, verification, tool calls, step evidence, and stream chunks.
 - Forward workspace changes, raw chunks, file streaming, and runtime activities to the renderer.
 
@@ -73,7 +79,9 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 
 ## Dependencies
 
-- [MLX Runtime](mlx-runtime.md) for model setup and chat completion streaming.
+- [Shared Types And Model Registry](shared-types-and-model-registry.md) for configured model metadata and endpoint validation.
+- [MLX Runtime](mlx-runtime.md) for local model setup and chat completion streaming.
+- [src/main/modelChat.ts](../../../src/main/modelChat.ts) and [src/main/remoteChat.ts](../../../src/main/remoteChat.ts) for model routing and remote endpoint streaming.
 - [Tool Runtime](tool-runtime.md) for prompt rendering, action parsing, and tool execution.
 - [Plan Engine](plan-engine.md) for plan parsing, assembly, execution state, request policy, validation, and evidence checks.
 - [Workspace Runtime](workspace-runtime.md) for sandbox and working-directory handling.
@@ -92,7 +100,8 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 
 ## Processing Rules
 
-- Setup must prove warmup inference before sending ready.
+- Local setup must prove warmup inference before sending ready.
+- Remote setup must validate configured endpoint credentials before sending ready.
 - Code auto mode assembles a plan before execution unless freestyle or execute-plan mode is selected.
 - Tool actions are one-at-a-time and tool results are replayed into model context.
 - Verification cannot mutate files and must rely on visible evidence.
@@ -108,10 +117,11 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 
 - Runtime paths are set from Electron app state.
 - Model choice arrives through IPC request payloads.
+- Model catalog data comes from the configured model JSON file.
 
 ## External Interfaces
 
-- Electron IPC, local MLX server, local filesystem, shell opening, directory dialogs, and the workspace HTTP preview server.
+- Electron IPC, local MLX server, configured remote model APIs, local filesystem, shell opening, directory dialogs, and the workspace HTTP preview server.
 
 ## UI And Notification Behavior
 
@@ -124,4 +134,4 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 
 ## Verification
 
-- Use [tests/main/codeSystemPrompt.test.ts](../../../tests/main/codeSystemPrompt.test.ts), [tests/main/mlxChatStream.test.ts](../../../tests/main/mlxChatStream.test.ts), [tests/main/actionParser.test.ts](../../../tests/main/actionParser.test.ts), and plan tests under [tests/main/plan](../../../tests/main/plan).
+- Use [tests/main/codeSystemPrompt.test.ts](../../../tests/main/codeSystemPrompt.test.ts), [tests/main/mlxChatStream.test.ts](../../../tests/main/mlxChatStream.test.ts), [tests/main/remoteChat.test.ts](../../../tests/main/remoteChat.test.ts), [tests/main/actionParser.test.ts](../../../tests/main/actionParser.test.ts), [tests/shared/modelRegistry.test.ts](../../../tests/shared/modelRegistry.test.ts), and plan tests under [tests/main/plan](../../../tests/main/plan).

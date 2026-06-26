@@ -1,4 +1,9 @@
-import { chatStream, type MLXChatMessage } from "../main/mlx";
+import { type MLXChatMessage } from "../main/mlx";
+import { chatStream } from "../main/modelChat";
+import {
+  isLocalModel,
+  validateRemoteModelReady,
+} from "../main/modelConfig";
 import { existsSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -140,6 +145,15 @@ function out(s: string): void {
 
 function meta(line: string): void {
   process.stdout.write(`\n[cli] ${line}\n`);
+}
+
+async function prepareModelRuntime(model: string): Promise<boolean> {
+  if (isLocalModel(model)) {
+    return ensureMlxRunning(model);
+  }
+  validateRemoteModelReady(model);
+  meta(`remote model: ${model}`);
+  return false;
 }
 
 async function askForPlanApproval(): Promise<boolean> {
@@ -364,7 +378,7 @@ export async function runChat(opts: AgentRunOptions): Promise<void> {
       meta(`worktree:  ${runRoot.createdWorktree.path}`);
       meta(`branch:    ${runRoot.createdWorktree.branch}`);
     }
-    startedMlxServer = await ensureMlxRunning(opts.model);
+    startedMlxServer = await prepareModelRuntime(opts.model);
     await startWorkspaceServer();
 
     if (opts.mode === "code") {
@@ -463,7 +477,7 @@ export async function runContinue(opts: ContinueRunOptions): Promise<void> {
     if (!existsSync(snapshot.projectRoot)) {
       throw new Error(`Conversation workspace is missing: ${snapshot.projectRoot}`);
     }
-    startedMlxServer = await ensureMlxRunning(model);
+    startedMlxServer = await prepareModelRuntime(model);
     await startWorkspaceServer();
     displaySystemPrompt("continued conversation", messages[0]?.content ?? "");
     meta(`conversation: ${opts.conversationPath}`);

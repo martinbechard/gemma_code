@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_MODEL, type SetupStatus } from "@shared/types";
+import {
+  isLocalMlxRuntime,
+  type ModelInfo,
+  type ModelListResult,
+  type SetupStatus,
+} from "@shared/types";
 import Setup from "./components/Setup";
 import Chat from "./components/Chat";
 import {
@@ -18,6 +23,7 @@ type RepairCapableApi = typeof window.api & {
 
 export default function App() {
   const [state, setState] = useState<AppState>({ phase: "boot" });
+  const [modelList, setModelList] = useState<ModelListResult | null>(null);
 
   function handleRepairModel(model: string): void {
     setState((prev) => {
@@ -68,6 +74,9 @@ export default function App() {
     });
     let unsub: (() => void) | undefined;
     (async () => {
+      const loadedModels = await window.api.listModels();
+      setModelList(loadedModels);
+      const defaultModel = loadedModels.defaultModel;
       unsub = window.api.onSetupStatus((status) => {
         setState((prev) => {
           if (status.stage === "ready") {
@@ -77,7 +86,7 @@ export default function App() {
             }
             return {
               phase: "ready",
-              model: prev.phase === "setup" ? prev.model : DEFAULT_MODEL,
+              model: prev.phase === "setup" ? prev.model : defaultModel,
             };
           }
           if (status.stage === "error") {
@@ -93,7 +102,7 @@ export default function App() {
           if (prev.phase === "switching") {
             return { ...prev, status };
           }
-          const model = prev.phase === "setup" ? prev.model : DEFAULT_MODEL;
+          const model = prev.phase === "setup" ? prev.model : defaultModel;
           return { phase: "setup", status, model };
         });
       });
@@ -101,18 +110,31 @@ export default function App() {
       const local = await window.api.listLocalModels();
       const isLocallyAvailable = (model: string): boolean =>
         local.some((m) => m === model || m.startsWith(model + ":"));
+      const modelInfoForName = (model: string): ModelInfo | undefined =>
+        loadedModels.models.find((candidate) => candidate.name === model);
+      const isVisibleStartupModel = (model: string): boolean => {
+        const info = modelInfoForName(model);
+        if (!info) return false;
+        if (!isLocalMlxRuntime(info.runtime)) return true;
+        return isLocallyAvailable(model);
+      };
 
       // Prefer the model the most-recently used conversation was sent with,
       // so reopening the app lands on the model the user was last working
-      // with. Fall back to DEFAULT_MODEL when no conversation has stamped a
+      // with. Fall back to the configured default when no conversation has stamped a
       // model yet (first launch). The Setup welcome screen and the in-chat
       // model picker remain reachable as a safe-mode fallback when the
       // chosen model isn't locally available.
       const stamped = pickStartupModel(readPersistedConversations());
       const startupModel =
-        stamped && isLocallyAvailable(stamped) ? stamped : DEFAULT_MODEL;
+        stamped && isVisibleStartupModel(stamped) ? stamped : defaultModel;
 
-      if (isLocallyAvailable(startupModel)) {
+      const startupModelInfo = modelInfoForName(startupModel);
+      if (
+        startupModelInfo &&
+        isLocalMlxRuntime(startupModelInfo.runtime) &&
+        isLocallyAvailable(startupModel)
+      ) {
         const { hasMLX } = await window.api.checkMLX();
         if (hasMLX) {
           setState({
@@ -157,10 +179,15 @@ export default function App() {
     return <BootSplash />;
   }
 
+  if (!modelList) {
+    return <BootSplash />;
+  }
+
   if (state.phase === "setup") {
     return (
       <div key="setup" className="anim-fade-in h-full w-full">
         <Setup
+          models={modelList.models}
           status={state.status}
           model={state.model}
           onModelChange={(m) =>
@@ -183,7 +210,11 @@ export default function App() {
   if (state.phase === "switching") {
     return (
       <div key="switching" className="anim-fade-in h-full w-full">
-        <Chat model={state.model} onSwitchModel={handleSwitchModel} />
+        <Chat
+          model={state.model}
+          models={modelList.models}
+          onSwitchModel={handleSwitchModel}
+        />
         <SwitchingOverlay status={state.status} />
       </div>
     );
@@ -191,7 +222,11 @@ export default function App() {
 
   return (
     <div key="chat" className="anim-fade-scale h-full w-full">
-      <Chat model={state.model} onSwitchModel={handleSwitchModel} />
+      <Chat
+        model={state.model}
+        models={modelList.models}
+        onSwitchModel={handleSwitchModel}
+      />
     </div>
   );
 }

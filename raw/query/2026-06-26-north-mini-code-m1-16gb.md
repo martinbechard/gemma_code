@@ -6,7 +6,7 @@ The user is considering adding support for Cohere North Mini Code using the MLX-
 
 ## Answer Summary
 
-The 16GB M1 Mac mini has enough disk space for the model files, but the MLX quantized North Mini Code artifacts are likely too large to run comfortably in this project. The mlx-community 4-bit repo reports an 18.5 GB model folder, while third-party MXFP4 MLX conversions report about 16.8 to 17.6 GB on disk and about 17.8 to 18.3 GB peak memory on 24GB or 32GB Apple Silicon machines. The upstream model card describes North Mini Code as a 30B total, 3B active sparse MoE model with 256K context and 64K maximum output. That footprint exceeds the current Gemma Code model registry assumptions, where the largest registered model is the 11 GB Gemma 4 12B QAT entry routed through MLX VLM.
+The 16GB M1 Mac mini has enough disk space for the model files, but the MLX quantized North Mini Code artifacts are likely too large to run comfortably in this project. The mlx-community 4-bit repo reports an 18.5 GB model folder, while third-party MXFP4 MLX conversions report about 16.8 to 17.6 GB on disk and about 17.8 to 18.3 GB peak memory on 24GB or 32GB Apple Silicon machines. The upstream model card describes North Mini Code as a 30B total, 3B active sparse MoE model with 256K context and 64K maximum output. That footprint exceeds the current Gemma Code local model catalog assumptions, where the largest configured local model is the 11 GB Gemma 4 12B QAT entry routed through MLX VLM.
 
 ## Wiki Pages Consulted
 
@@ -30,7 +30,7 @@ The 16GB M1 Mac mini has enough disk space for the model files, but the MLX quan
 - North Mini Code is a candidate local coding model, but its 4-bit MLX artifact is larger than the project’s current 16GB-friendly model entries.
 - The model likely needs a higher hardware tier gate, probably 24GB minimum and 32GB preferred, unless a smaller quantization or runtime-specific memory measurement proves otherwise.
 - Format is not the main blocker. The model can exist as MLX LM, MLX VLM, and GGUF variants, but the measured MLX memory footprint still exceeds the 16GB machine class.
-- The mlx-community repo was converted with mlx-vlm, while other MLX variants advertise mlx-lm support. Support should be treated as a runtime compatibility experiment, not only a model registry addition.
+- The mlx-community repo was converted with mlx-vlm, while other MLX variants advertise mlx-lm support. Support should be treated as a runtime compatibility experiment, not only a model catalog addition.
 - Long context settings matter because the model advertises very large context and output limits, and KV cache memory can dominate even when quantized weights load.
 
 ## Candidate Wiki Destinations
@@ -49,7 +49,7 @@ The 16GB M1 Mac mini has enough disk space for the model files, but the MLX quan
 ## Open Questions
 
 - Should Gemma Code expose hardware-gated model options above the 16GB class?
-- Should model registry metadata include minimum recommended unified memory instead of only model byte size?
+- Should model catalog metadata include minimum recommended unified memory instead of only model byte size?
 - Should North Mini Code use MLX VLM in this app, or should support wait for MLX LM compatibility with cohere2_moe?
 - What is the measured peak resident memory and warmup behavior on Apple Silicon with this specific MLX conversion?
 
@@ -59,4 +59,4 @@ Only public Hugging Face model metadata, local project files, and local hardware
 
 ## Ingest Rationale
 
-This query records a concrete model support decision point for the local model runtime and shared model registry. Future implementation work should load this fragment before adding North Mini Code to the picker or changing hardware recommendations.
+This query records a concrete model support decision point for the local model runtime and configured model catalog. Future implementation work should load this fragment before adding North Mini Code to the picker or changing hardware recommendations.

@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-Gemma Code is a local-first coding agent for macOS on Apple Silicon. It has an Electron desktop app and a TypeScript CLI that share a local MLX model runtime, tool protocol, workspace runtime, and structured planning harness.
+Gemma Code is a local-first coding agent for macOS on Apple Silicon. It has an Electron desktop app and a TypeScript CLI that share configurable model routing, a local MLX runtime, optional remote endpoint adapters, a tool protocol, a workspace runtime, and a structured planning harness.
 
 ## Authoritative Sources
 
@@ -55,11 +55,11 @@ No open wiki questions are recorded for this topic.
 
 ## Purpose
 
-The architecture defines how Gemma Code keeps model execution local while still providing a practical coding-agent harness through desktop and terminal surfaces.
+The architecture defines how Gemma Code keeps local model execution and workspace tools first-class while allowing explicitly configured remote model endpoints for experiments through desktop and terminal surfaces.
 
 ## Scope
 
-Included: local model runtime, Electron app, CLI, shared agent harness, tools, workspaces, execution logs, and tests. Not included: external cloud inference services or remote deployment architecture.
+Included: local model runtime, optional configured cloud inference adapters, Electron app, CLI, shared agent harness, tools, workspaces, execution logs, and tests. Not included: remote deployment architecture or provider account management.
 
 ## Scope Boundary Diagram
 
@@ -71,7 +71,9 @@ flowchart TB
     ElectronApp["Electron app"]
     CliSurface["CLI"]
     AgentHarness["Shared agent harness"]
+    ModelRouter["Model chat router"]
     LocalModelRuntime["Local MLX model runtime"]
+    RemoteEndpointAdapter["Remote endpoint adapter"]
     ToolWorkspaceRuntime["Tool and workspace runtime"]
     ExecutionLogs["Execution logs"]
     Tests["Regression tests"]
@@ -85,27 +87,34 @@ flowchart TB
     HuggingFaceCache["Hugging Face cache"]
   end
 
+  subgraph ConfiguredRemote["Configured remote inference"]
+    ProviderApis["Cohere and Gemini APIs"]
+  end
+
   subgraph OutOfScope["Outside this architecture"]
-    CloudInference["Cloud inference service"]
     RemoteDeployment["Remote deployment architecture"]
+    ProviderAccounts["Provider account management"]
   end
 
   ElectronApp --> AgentHarness
   CliSurface --> AgentHarness
-  AgentHarness --> LocalModelRuntime
+  AgentHarness --> ModelRouter
+  ModelRouter --> LocalModelRuntime
+  ModelRouter --> RemoteEndpointAdapter
   AgentHarness --> ToolWorkspaceRuntime
   ToolWorkspaceRuntime --> FileSystem
   ToolWorkspaceRuntime --> Shell
   ToolWorkspaceRuntime --> GitWorktrees
   LocalModelRuntime --> PythonVenv
   LocalModelRuntime --> HuggingFaceCache
+  RemoteEndpointAdapter --> ProviderApis
   AgentHarness --> ExecutionLogs
   Tests --> AgentHarness
 ```
 
 ## System Context
 
-Users run Gemma Code locally. The Electron app provides setup, model selection, chat/code workflows, workspace preview, and logs. The CLI provides setup/status/chat/code/plan flows in the terminal. Both surfaces call the local MLX server and operate on local files.
+Users run Gemma Code locally. The Electron app provides setup, model selection, chat/code workflows, workspace preview, and logs. The CLI provides setup/status/chat/code/plan flows in the terminal. Both surfaces route chat through the configured model router, which calls either the local MLX server or a configured remote endpoint. Tool execution and workspace file access remain local.
 
 ## System Context Diagram
 
@@ -119,7 +128,9 @@ flowchart LR
   Terminal --> CliRuntime["CLI runtime"]
   MainProcess --> SharedHarness["Shared harness and runtime services"]
   CliRuntime --> SharedHarness
-  SharedHarness --> MlxServer["Local MLX server"]
+  SharedHarness --> ModelRouter["Model chat router"]
+  ModelRouter --> MlxServer["Local MLX server"]
+  ModelRouter --> RemoteApis["Configured remote model APIs"]
   SharedHarness --> Workspace["Local workspace files"]
   SharedHarness --> ShellGit["Shell and git worktrees"]
   MlxServer --> ModelCache["Local model cache"]
@@ -131,16 +142,17 @@ flowchart LR
 - Electron, Vite, and React for the desktop app.
 - Node APIs for filesystem, child processes, HTTP preview, and CLI execution.
 - MLX LM and MLX VLM Python packages for local model serving.
+- Fetch-based remote endpoint adapters for configured cloud model experiments.
 - Vitest for regression coverage.
 - YAML parsing for plan documents and semantic review responses.
 
 ## File Organization
 
-- [src/main](../../../src/main) owns Electron main process, MLX, tools, workspaces, plan engine, logs, and background tasks.
+- [src/main](../../../src/main) owns Electron main process, model configuration, model chat routing, MLX, remote chat, tools, workspaces, plan engine, logs, and background tasks.
 - [src/cli](../../../src/cli) owns terminal adapters.
 - [src/renderer](../../../src/renderer) owns React UI.
 - [src/preload](../../../src/preload) owns context-isolated IPC API.
-- [src/shared](../../../src/shared) owns cross-process types and model registry.
+- [src/shared](../../../src/shared) owns cross-process types and model metadata contracts.
 - [tests](../../../tests) mirrors main, CLI, renderer, and shared behavior.
 - [design](../../../design) contains implementation plans and analysis notes.
 - [docs/wiki](..) contains the maintained documentation surface.
@@ -152,11 +164,11 @@ This diagram is included because file organization is an aggregation and ownersh
 ```mermaid
 flowchart TB
   Repo["Repository root"] --> Src["src"]
-  Src --> Main["main process, MLX, tools, workspaces, plans, logs"]
+  Src --> Main["main process, model routing, MLX, remote chat, tools, workspaces, plans, logs"]
   Src --> Cli["CLI adapters"]
   Src --> Renderer["React renderer"]
   Src --> Preload["Context-isolated preload API"]
-  Src --> Shared["Shared contracts and model registry"]
+  Src --> Shared["Shared contracts and model metadata"]
   Repo --> Tests["tests"]
   Tests --> MainTests["main tests"]
   Tests --> CliTests["CLI tests"]
@@ -171,8 +183,8 @@ flowchart TB
 1. User surfaces: Electron renderer and CLI terminal.
 2. Adapters: preload IPC bridge, Electron main IPC handlers, CLI entrypoint and agent adapter.
 3. Harness core: prompts, plan engine, tool action parser, evidence, verification, chat history.
-4. Runtime services: MLX runtime, workspace runtime, execution logs, background tasks.
-5. External local systems: Python venv, MLX server, Hugging Face cache, filesystem, shell, git worktrees.
+4. Runtime services: model chat router, MLX runtime, remote chat adapter, workspace runtime, execution logs, background tasks.
+5. External systems: Python venv, MLX server, Hugging Face cache, configured model provider APIs, filesystem, shell, git worktrees.
 
 Renderer code may depend on shared types and preload API, but not Node runtime APIs. CLI and Electron adapters may depend on shared runtime modules. Shared runtime modules should avoid depending on BrowserWindow.
 
@@ -184,8 +196,8 @@ This diagram is included because the architecture defines ordered layers and dep
 flowchart TB
   UserSurfaces["User surfaces\nElectron renderer and CLI terminal"] --> Adapters["Adapters\npreload, main IPC, CLI entrypoint"]
   Adapters --> HarnessCore["Harness core\nprompts, plan engine, parser, evidence, verification"]
-  HarnessCore --> RuntimeServices["Runtime services\nMLX, workspaces, logs, background tasks"]
-  RuntimeServices --> LocalSystems["External local systems\nPython venv, MLX server, cache, filesystem, shell, worktrees"]
+  HarnessCore --> RuntimeServices["Runtime services\nmodel router, MLX, remote chat, workspaces, logs"]
+  RuntimeServices --> LocalSystems["External systems\nPython venv, MLX server, cache, provider APIs, filesystem, shell, worktrees"]
 
   RendererBoundary["Renderer boundary"] --> PreloadOnly["Preload API only"]
   PreloadOnly --> Adapters
@@ -194,6 +206,7 @@ flowchart TB
 ## Key Components
 
 - [Local Model Runtime](../subsystems/local-model-runtime.md) owns MLX installation, cache validation, server lifecycle, warmup, and streaming.
+- [Shared Types And Model Registry](../modules/shared-types-and-model-registry.md) owns configured model metadata, endpoint metadata, and model routing contracts.
 - [Agent Harness](../subsystems/agent-harness.md) owns prompt, plan, tool, evidence, and verification flow.
 - [Tool And Workspace Runtime](../subsystems/tool-and-workspace-runtime.md) owns tool execution and safe local file/workspace access.
 - [Electron App Runtime](../subsystems/electron-app-runtime.md) owns desktop UI and IPC integration.
@@ -208,7 +221,9 @@ This diagram is included because the key components are associated through share
 flowchart LR
   ElectronRuntime["Electron App Runtime"] --> AgentHarness["Agent Harness"]
   CliRuntime["CLI Agent Runtime"] --> AgentHarness
-  AgentHarness --> LocalModelRuntime["Local Model Runtime"]
+  AgentHarness --> ModelRouter["Model Chat Router"]
+  ModelRouter --> LocalModelRuntime["Local Model Runtime"]
+  ModelRouter --> RemoteEndpointAdapter["Remote Endpoint Adapter"]
   AgentHarness --> ToolWorkspaceRuntime["Tool And Workspace Runtime"]
   LocalModelRuntime --> Observability["Observability And Debugging"]
   ToolWorkspaceRuntime --> Observability
@@ -219,7 +234,7 @@ flowchart LR
 
 ## Data Flow
 
-A user request starts in the renderer or CLI, becomes a ChatRequest or CLI run option, is converted into MLX chat messages, streams through the model, is parsed for actions or plan artifacts, runs tools against the active workspace, records evidence and logs, and emits stream chunks or terminal output back to the user surface.
+A user request starts in the renderer or CLI, becomes a ChatRequest or CLI run option, is converted into model chat messages, streams through the configured model route, is parsed for actions or plan artifacts, runs tools against the active workspace, records evidence and logs, and emits stream chunks or terminal output back to the user surface.
 
 ## Request Data Flow Diagram
 
@@ -229,8 +244,8 @@ This diagram is included because requests, messages, tool actions, evidence, log
 flowchart LR
   UserRequest["User request"] --> Surface["Renderer or CLI"]
   Surface --> RequestShape["ChatRequest or CLI run option"]
-  RequestShape --> Messages["MLX chat messages"]
-  Messages --> ModelStream["Local model stream"]
+  RequestShape --> Messages["Model chat messages"]
+  Messages --> ModelStream["Local or remote model stream"]
   ModelStream --> Parser["Action or plan parser"]
   Parser --> ToolExecution["Tool execution in active workspace"]
   ToolExecution --> Evidence["Evidence and execution logs"]
@@ -240,7 +255,7 @@ flowchart LR
 
 ## Lifecycle Flow
 
-App startup sets runtime paths, creates the Electron window, starts workspace services, and initializes setup state. Setup locates or installs MLX, validates model cache, starts the model server, warms inference, and reports ready. Chat/code requests run bounded tool loops and stop on done, error, abort, or plan failure. Shutdown stops the server, workspace server, and background tasks.
+App startup sets runtime paths, creates the Electron window, starts workspace services, and initializes setup state. Local setup locates or installs MLX, validates model cache, starts the model server, warms inference, and reports ready. Remote setup validates configured endpoint credentials and reports ready without starting MLX. Chat/code requests run bounded tool loops and stop on done, error, abort, or plan failure. Shutdown stops the local server, workspace server, and background tasks.
 
 ## Lifecycle Diagram
 
@@ -264,7 +279,8 @@ stateDiagram-v2
 
 ## Cross-Cutting Concerns
 
-- Local-first privacy: model inference and file operations run locally.
+- Local-first privacy: local model inference and file operations run locally by default.
+- Configured cloud inference: selecting a remote model sends prompt and tool context to the configured provider, so credentials and model choice are explicit boundaries.
 - Evidence-backed verification: code execution steps require visible tool evidence before verify passes.
 - Source path safety: workspace helpers block path escapes.
 - Context isolation: renderer communicates through preload only.
@@ -278,6 +294,7 @@ This diagram is included because cross-cutting concerns are owned or enforced by
 ```mermaid
 flowchart TB
   Privacy["Local-first privacy"] --> LocalModelRuntime["Local Model Runtime"]
+  CloudBoundary["Configured cloud inference boundary"] --> RemoteEndpointAdapter["Remote Endpoint Adapter"]
   Privacy --> ToolWorkspaceRuntime["Tool And Workspace Runtime"]
   Verification["Evidence-backed verification"] --> AgentHarness["Agent Harness"]
   PathSafety["Source path safety"] --> ToolWorkspaceRuntime
@@ -301,6 +318,7 @@ flowchart TB
 
 - Code and tests outrank wiki summaries.
 - Ready model state requires successful local warmup inference.
+- Ready remote model state requires configured endpoint credentials.
 - Renderer code does not receive raw Electron IPC access.
 - Tool actions are parsed from explicit XML action blocks.
 - Verification should not rely on hidden state or intended behavior.
@@ -308,6 +326,7 @@ flowchart TB
 ## Risks And Trade-Offs
 
 - A local model can be slower or less capable than cloud models, so the harness compensates with strict prompts, tools, and verification.
+- Remote model experiments can improve capability but may send prompts, repository snippets, and tool outputs to the configured provider.
 - MLX and model cache behavior depend on upstream Python packages and Hugging Face cache layout.
 - Sharing runtime modules between Electron and CLI reduces duplication but requires adapter boundaries to stay clean.
 - The current CLI default model differs from the shared app default; see [Open Decisions](../open-decisions.md).

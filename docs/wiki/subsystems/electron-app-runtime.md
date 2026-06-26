@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The Electron app runtime combines the main process, preload bridge, renderer UI, shared types, workspace server, and MLX setup flow into the desktop application experience.
+The Electron app runtime combines the main process, preload bridge, renderer UI, shared types, workspace server, local MLX setup flow, and configured remote model setup flow into the desktop application experience.
 
 ## Authoritative Sources
 
@@ -58,7 +58,7 @@ Includes desktop boot, setup, model switch, chat, code/build modes, workspace pr
 
 - App state phases are boot, setup, ready, and switching.
 - Conversations persist in localStorage.
-- ChatRequest and StreamChunk records cross the preload boundary.
+- ChatRequest, StreamChunk, ModelListResult, and ModelProvenance records cross the preload boundary.
 
 ## Constituent Modules
 
@@ -73,15 +73,15 @@ Renderer actions call preload API methods, preload invokes main IPC, main stream
 
 ## Lifecycle
 
-The app configures runtime paths, creates the window, starts workspace services, runs setup, accepts chat/code requests, and stops model/runtime resources during shutdown.
+The app configures runtime paths, creates the window, starts workspace services, runs local or remote setup, accepts chat/code requests, and stops local model/runtime resources during shutdown.
 
 ## Data Shapes And Contracts
 
-SetupStatus, ChatRequest, StreamChunk, ExecutionLogSnapshot, WorkspaceInfo, WorkspaceFile, and ModelProvenance cross the app boundary.
+SetupStatus, ChatRequest, StreamChunk, ModelListResult, ExecutionLogSnapshot, WorkspaceInfo, WorkspaceFile, and ModelProvenance cross the app boundary.
 
 ## Configuration
 
-Electron uses app user-data path named for Gemma Code and app id configured in main.
+Electron uses app user-data path named for Gemma Code and app id configured in main. The model picker is loaded from the configured model catalog and filters local MLX models when local MLX support is unavailable.
 
 ## Implementation Order
 
@@ -90,7 +90,7 @@ IPC contract changes should update shared types, preload, main handlers, rendere
 ## Invariants
 
 - Renderer remains context-isolated.
-- Setup ready means local inference is warm.
+- Setup ready means local inference is warm or the selected remote endpoint credential is valid.
 - Conversation and model state stay visible and recoverable.
 
 ## Non-Goals
@@ -99,7 +99,7 @@ IPC contract changes should update shared types, preload, main handlers, rendere
 
 ## Definition Of Good
 
-The desktop app can set up local runtime, run chat/code workflows, show streaming state, inspect logs, and navigate workspace output without cloud model calls.
+The desktop app can set up local runtime, validate configured remote model credentials, run chat/code workflows, show streaming state, inspect logs, and navigate workspace output.
 
 ## Verification
 

@@ -2,11 +2,15 @@
 
 ## Current Understanding
 
-The shared types module defines cross-process contracts for setup status, runtime activity, tool calls, messages, plan nodes, chat requests, stream chunks, model metadata, model provenance, workspace data, and model runtime lookup.
+The shared types module defines cross-process contracts for setup status, runtime activity, tool calls, messages, plan nodes, chat requests, stream chunks, model metadata, model endpoint metadata, model provenance, and workspace data. The main-process model configuration module loads the configured model catalog and resolves runtime routing for local and remote models.
 
 ## Authoritative Sources
 
 - [Shared types source](../../../src/shared/types.ts)
+- [Model configuration file](../../../models.config.json)
+- [Model configuration source](../../../src/main/modelConfig.ts)
+- [Model chat router](../../../src/main/modelChat.ts)
+- [Remote chat source](../../../src/main/remoteChat.ts)
 - [Renderer app source](../../../src/renderer/src/App.tsx)
 - [Main process source](../../../src/main/index.ts)
 - [CLI args source](../../../src/cli/args.ts)
@@ -15,6 +19,10 @@ The shared types module defines cross-process contracts for setup status, runtim
 ## Related Code
 
 - [src/shared/types.ts](../../../src/shared/types.ts)
+- [models.config.json](../../../models.config.json)
+- [src/main/modelConfig.ts](../../../src/main/modelConfig.ts)
+- [src/main/modelChat.ts](../../../src/main/modelChat.ts)
+- [src/main/remoteChat.ts](../../../src/main/remoteChat.ts)
 - [src/cli/args.ts](../../../src/cli/args.ts)
 - [src/main/mlx.ts](../../../src/main/mlx.ts)
 - [src/renderer/src/components/Setup.tsx](../../../src/renderer/src/components/Setup.tsx)
@@ -41,7 +49,7 @@ No open wiki questions are recorded for this topic.
 
 ## Maintenance Notes
 
-- Recheck this page when the model registry, setup states, stream chunk union, or chat request shape changes.
+- Recheck this page when the model configuration file, endpoint metadata, setup states, stream chunk union, or chat request shape changes.
 
 ## Runtime Path
 
@@ -54,13 +62,14 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 ## Responsibilities
 
 - Define setup, chat, plan, workspace, log, and model contracts shared by main, preload, renderer, and CLI.
-- Register available Gemma model choices and model runtime mapping.
+- Define model metadata, runtime, endpoint, and provenance contracts.
+- Load configured model choices and resolve model runtime mapping in the main process.
 - Format provenance summary text for display.
-- Export the shared app default model.
+- Return the configured default model after capability filtering.
 
 ## Callers
 
-- Main process, preload bridge, renderer, CLI, MLX runtime, tests, and model setup UI.
+- Main process, preload bridge, renderer, CLI, MLX runtime, remote chat adapter, tests, and model setup UI.
 
 ## Dependencies
 
@@ -68,35 +77,43 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 ## Public Contracts
 
-- [AVAILABLE_MODELS](../../../src/shared/types.ts) is the shared model registry.
-- [DEFAULT_MODEL](../../../src/shared/types.ts) is the shared app default model.
-- [modelRuntimeForName](../../../src/shared/types.ts) chooses MLX LM or MLX VLM runtime.
+- [models.config.json](../../../models.config.json) is the configured model catalog.
+- [src/main/modelConfig.ts](../../../src/main/modelConfig.ts) loads model configuration, applies local capability filtering, resolves default model selection, and validates remote endpoint readiness.
+- [ModelInfo](../../../src/shared/types.ts) carries user-visible model metadata plus runtime and optional endpoint metadata.
+- [ModelEndpointInfo](../../../src/shared/types.ts) describes provider protocol, base URL, credential environment variable, and optional provider model override.
+- [src/main/modelChat.ts](../../../src/main/modelChat.ts) routes chat requests to local MLX or configured remote endpoints.
 
 ## Internal Data And State
 
-- Model repo ids and byte sizes are constants.
+- The model catalog is read from the configured JSON file.
+- GEMMA_MODEL_CONFIG can point to an alternate model catalog.
 
 ## Processing Rules
 
-- Unknown model names default to the MLX LM runtime.
+- Unknown model names default to the MLX LM runtime for legacy local paths.
+- Local MLX models are filtered out of the displayed model list when the main process reports no local MLX support.
+- Remote models are visible when configured, but setup must validate the configured credential environment variable before cloud inference starts.
 - Provenance summary returns an empty string when provenance is unavailable.
 
 ## Invariants
 
 - Shared stream chunk variants must remain compatible with renderer handling and main emission.
-- Model registry order drives default UI selection and setup display.
+- Model configuration order drives setup display.
+- The configured default model is used when it remains visible after capability filtering. Otherwise the first visible configured model becomes the UI default.
 
 ## Configuration
 
-- Model registry constants define user-visible labels, descriptions, sizes, byte estimates, runtime type, and recommended status.
+- The model configuration file defines user-visible labels, descriptions, sizes, byte estimates, runtime type, recommended status, and endpoint information.
 
 ## External Interfaces
 
-- Hugging Face model names are stored as registry ids.
+- Hugging Face model names are stored as local model ids.
+- Remote provider model ids are stored as configured model names or endpoint model overrides.
+- Supported endpoint kinds are OpenAI-compatible chat completions and Gemini generateContent streaming.
 
 ## UI And Notification Behavior
 
-- Setup and model picker UI render labels, descriptions, sizes, provenance summaries, and recommended status from shared data.
+- Setup and model picker UI render labels, descriptions, sizes, provenance summaries, endpoint credential prompts, and recommended status from configured data.
 
 ## Error Handling
 

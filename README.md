@@ -6,15 +6,15 @@
 
 <p align="center">
   <strong>Local-first coding with Gemma on Apple Silicon.</strong><br/>
-  An Electron app and CLI that run a Gemma coding agent through MLX on your Mac.<br/>
-  Plan, verify, execute, inspect logs, and iterate without sending code to a cloud model.
+  An Electron app and CLI that run a coding agent through local MLX or configured cloud endpoints.<br/>
+  Plan, verify, execute, inspect logs, and iterate with explicit model routing.
 </p>
 
 ---
 
 ## What This Is
 
-Gemma Code is an experimental local coding agent built from the Gemma Chat app. It runs a Gemma model through MLX, exposes file and shell tools through a small XML action protocol, and supports both an Electron UI and a command-line workflow.
+Gemma Code is an experimental coding agent built from the Gemma Chat app. It runs local Gemma models through MLX, can route configured remote models through provider endpoints, exposes file and shell tools through a small XML action protocol, and supports both an Electron UI and a command-line workflow.
 
 The project is used to explore what a small local model can do when the surrounding harness is precise: planning is explicit, execution is verified, file edits refresh context automatically, and every tool call can be inspected.
 
@@ -30,6 +30,7 @@ The project is used to explore what a small local model can do when the surround
 - Per-run execution logs with actual prompts, model responses, tool calls, and tool results.
 - Tool implementations split into one file per tool under src/main/tools.
 - Local MLX setup, status checks, and server reuse.
+- Configured remote model endpoints for online experiments.
 
 ## Documentation
 
@@ -52,7 +53,7 @@ Key entry pages:
 - Node 20 or newer.
 - Git.
 
-The first MLX run creates the local Python environment, installs MLX packages, and downloads the selected model.
+The first local MLX run creates the local Python environment, installs MLX packages, and downloads the selected model. Remote models require their configured provider credential environment variable.
 
 ## Install And Run
 
@@ -255,7 +256,7 @@ The planning prompt keeps planning focused on inspection and executable steps. T
 
 ## Model Runtime
 
-The runtime uses MLX-LM through an app-managed Python environment. The CLI and Electron app share the same runtime setup and can reuse an already-running MLX server.
+The local runtime uses MLX-LM through an app-managed Python environment. The CLI and Electron app share the same runtime setup and can reuse an already-running MLX server. Remote models are read from models.config.json and use their configured endpoint kind, base URL, and credential environment variable.
 
 Check runtime status:
 

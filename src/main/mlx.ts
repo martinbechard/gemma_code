@@ -15,10 +15,9 @@ import {
   writeFileSync,
 } from "fs";
 import { userDataDir } from "./runtimePaths";
-import {
-  modelRuntimeForName,
-  type ModelProvenance,
-} from "../shared/types";
+import { type ModelProvenance } from "../shared/types";
+import { modelRuntimeForName } from "./modelConfig";
+import { readSSE } from "./sse";
 
 const MLX_PORT = 11435;
 export const MLX_SERVER_PORT = MLX_PORT;
@@ -1493,44 +1492,6 @@ export async function* chatStream(
     if (timeoutHandle) clearTimeout(timeoutHandle);
     if (opts.signal) {
       opts.signal.removeEventListener("abort", handleAbort);
-    }
-  }
-}
-
-/** Parse an SSE byte stream into individual data payloads */
-async function* readSSE(
-  stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
-    let idx: number;
-    while ((idx = buf.indexOf("\n\n")) >= 0) {
-      const block = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 2);
-      if (!block) continue;
-      for (const line of block.split("\n")) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-          if (data) yield data;
-        }
-      }
-    }
-  }
-
-  // Flush remaining buffer
-  if (buf.trim()) {
-    for (const line of buf.trim().split("\n")) {
-      if (line.startsWith("data: ")) {
-        const data = line.slice(6).trim();
-        if (data) yield data;
-      }
     }
   }
 }

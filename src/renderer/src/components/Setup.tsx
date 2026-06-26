@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import {
-  AVAILABLE_MODELS,
   formatModelProvenanceSummary,
+  isLocalMlxRuntime,
+  type ModelInfo,
   type ModelProvenance,
   type SetupStatus,
 } from "@shared/types";
@@ -10,6 +11,7 @@ import gemmaLogoUrl from "../assets/gemma-logo.png";
 const ERROR_COPY_CONFIRM_MS = 1500;
 
 interface Props {
+  models: ModelInfo[];
   status: SetupStatus;
   model: string;
   onModelChange: (m: string) => void;
@@ -41,6 +43,7 @@ export function setupErrorClipboardText(status: SetupStatus): string {
 }
 
 export default function Setup({
+  models,
   status,
   model,
   onModelChange,
@@ -61,6 +64,7 @@ export default function Setup({
   if (status.stage === "checking" && status.message === "Welcome") {
     return (
       <WelcomeScreen
+        models={models}
         model={model}
         onModelChange={onModelChange}
         onStart={onStart}
@@ -79,7 +83,7 @@ export default function Setup({
               Setting things up
             </h1>
             <p className="mt-1.5 text-sm text-ink-400">
-              Everything runs locally. Nothing leaves your Mac.
+              Preparing the selected model.
             </p>
           </div>
 
@@ -160,28 +164,29 @@ export default function Setup({
 }
 
 function WelcomeScreen({
+  models,
   model,
   onModelChange,
   onStart,
 }: {
+  models: ModelInfo[];
   model: string;
   onModelChange: (m: string) => void;
   onStart: (model: string) => void;
 }) {
-  // Use the first registry entry so the welcome screen follows the validated default model order.
-  const selected =
-    AVAILABLE_MODELS.find((m) => m.name === model) ?? AVAILABLE_MODELS[0];
+  const selected = models.find((m) => m.name === model) ?? models[0];
   const [modelProvenance, setModelProvenance] = useState<
     Record<string, ModelProvenance>
   >({});
 
   useEffect(() => {
     let cancelled = false;
-    for (const availableModel of AVAILABLE_MODELS) {
+    for (const availableModel of models) {
+      if (!isLocalMlxRuntime(availableModel.runtime)) continue;
       window.api
         .getModelProvenance(availableModel.name)
         .then((provenance) => {
-          if (cancelled) return;
+          if (cancelled || !provenance) return;
           setModelProvenance((current) => ({
             ...current,
             [availableModel.name]: provenance,
@@ -194,7 +199,18 @@ function WelcomeScreen({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [models]);
+
+  if (!selected) {
+    return (
+      <div className="drag flex h-full w-full items-center justify-center px-8">
+        <div className="no-drag text-sm text-ink-300">
+          No configured models are available.
+        </div>
+      </div>
+    );
+  }
+  const selectedUsesMlx = isLocalMlxRuntime(selected.runtime);
 
   return (
     <div className="drag flex h-full w-full flex-col">
@@ -207,9 +223,9 @@ function WelcomeScreen({
               Welcome to Gemma Code
             </h1>
             <p className="mt-2 text-[13.5px] leading-relaxed text-ink-400">
-              A local AI assistant, powered by Google's Gemma.
+              A coding assistant, powered by configured models.
               <br />
-              Runs 100% on your Mac. No account, no cloud.
+              Local models stay on your Mac; cloud models use configured endpoints.
             </p>
           </div>
 
@@ -217,7 +233,7 @@ function WelcomeScreen({
             Pick a model
           </div>
           <div className="anim-stagger space-y-2">
-            {AVAILABLE_MODELS.map((m) => (
+            {models.map((m) => (
               <button
                 key={m.name}
                 onClick={() => onModelChange(m.name)}
@@ -258,8 +274,9 @@ function WelcomeScreen({
             Start with {selected.label} &nbsp;·&nbsp; {selected.size}
           </button>
           <p className="mt-3 text-center text-[11px] text-ink-400">
-            We'll install MLX runtime if needed. Model weights are loaded from
-            local cache when available.
+            {selectedUsesMlx
+              ? "We'll install MLX runtime if needed. Model weights are loaded from local cache when available."
+              : `${selected.endpoint?.apiKeyEnv ?? "Configured endpoint credentials"} must be set before cloud inference starts.`}
           </p>
         </div>
       </div>

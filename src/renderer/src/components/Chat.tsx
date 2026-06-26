@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AVAILABLE_MODELS,
   formatModelProvenanceSummary,
+  isLocalMlxRuntime,
   type AgentMode,
   type ChatMessage,
   type CodeSubmode,
   type ExecutionLogEntry,
   type ExecutionLogSnapshot,
+  type ModelInfo,
   type ModelProvenance,
   type ToolCall,
   type StreamChunk,
@@ -34,6 +35,7 @@ import {
 
 interface Props {
   model: string;
+  models: ModelInfo[];
   onSwitchModel: (model: string) => void;
 }
 
@@ -219,7 +221,7 @@ function fileContextPathsFromResult(result: string): string[] {
   return paths.filter((path) => path.length > 0);
 }
 
-export default function Chat({ model, onSwitchModel }: Props) {
+export default function Chat({ model, models, onSwitchModel }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const loaded = loadConversations();
     return loaded.length ? loaded : [newConversation()];
@@ -472,11 +474,12 @@ export default function Chat({ model, onSwitchModel }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    for (const availableModel of AVAILABLE_MODELS) {
+    for (const availableModel of models) {
+      if (!isLocalMlxRuntime(availableModel.runtime)) continue;
       window.api
         .getModelProvenance(availableModel.name)
         .then((provenance) => {
-          if (cancelled) return;
+          if (cancelled || !provenance) return;
           setModelProvenance((current) => ({
             ...current,
             [availableModel.name]: provenance,
@@ -489,7 +492,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [models]);
 
   async function handleSend(
     input: string,
@@ -765,7 +768,11 @@ export default function Chat({ model, onSwitchModel }: Props) {
   function selectConversation(nextId: string): void {
     setActiveId(nextId);
     const next = conversations.find((c) => c.id === nextId);
-    if (next?.model && next.model !== model) {
+    if (
+      next?.model &&
+      next.model !== model &&
+      models.some((candidate) => candidate.name === next.model)
+    ) {
       onSwitchModel(next.model);
     }
   }
@@ -795,6 +802,7 @@ export default function Chat({ model, onSwitchModel }: Props) {
         <div className="flex min-w-0 flex-1 flex-col">
           <Header
             model={model}
+            models={models}
             modelProvenance={modelProvenance}
             pillKey={pillKeyOf(activeConversation)}
             workingDir={activeConversation.workingDir}
@@ -1555,6 +1563,7 @@ function executionLogEventClass(entry: ExecutionLogEntry): string {
 
 function Header({
   model,
+  models,
   modelProvenance,
   pillKey,
   workingDir,
@@ -1577,6 +1586,7 @@ function Header({
   onOpenExecutionLog,
 }: {
   model: string;
+  models: ModelInfo[];
   modelProvenance: Record<string, ModelProvenance>;
   pillKey: PillKey;
   workingDir?: string;
@@ -1613,8 +1623,7 @@ function Header({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [pickerOpen]);
 
-  const currentLabel =
-    AVAILABLE_MODELS.find((m) => m.name === model)?.label ?? model;
+  const currentLabel = models.find((m) => m.name === model)?.label ?? model;
 
   return (
     <div className="drag flex h-11 shrink-0 items-center justify-between border-b border-white/[0.06] px-4">
@@ -1809,7 +1818,7 @@ function Header({
               <div className="mb-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
                 Switch model
               </div>
-              {AVAILABLE_MODELS.map((m) => (
+              {models.map((m) => (
                 <button
                   key={m.name}
                   onClick={() => {

@@ -4,7 +4,18 @@ import { describe, expect, it } from "vitest";
 import Setup, {
   setupErrorClipboardText,
 } from "../../../src/renderer/src/components/Setup";
-import type { SetupStatus } from "../../../src/shared/types";
+import type { ModelInfo, SetupStatus } from "../../../src/shared/types";
+
+const TEST_MODELS: ModelInfo[] = [
+  {
+    name: "mlx-community/gemma-4-e4b-it-4bit",
+    label: "Gemma 4 E4B",
+    size: "5.2 GB",
+    sizeBytes: 5_216_992_212,
+    description: "Larger local model.",
+    runtime: "mlx-lm",
+  },
+];
 
 const ERROR_STATUS: SetupStatus = {
   stage: "error",
@@ -34,6 +45,7 @@ describe("Setup error display", () => {
   it("renders setup errors as selectable text with a copy action", () => {
     const html = renderToStaticMarkup(
       createElement(Setup, {
+        models: TEST_MODELS,
         status: ERROR_STATUS,
         model: ERROR_STATUS.repair!.model,
         onModelChange: () => undefined,

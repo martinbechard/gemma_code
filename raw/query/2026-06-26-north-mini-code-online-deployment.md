@@ -42,7 +42,8 @@ Approximate hourly infrastructure costs for self-hosting are dominated by GPU ru
 
 ## Durable Concepts Detected
 
-- The current Gemma Code runtime is local-first and hardwired around a local MLX OpenAI-compatible server, so remote models require either a provider abstraction or use of an OpenAI-compatible endpoint.
+- Gemma Code is local-first and now routes model traffic through configured model metadata. Local models use MLX, while remote models use configured endpoint information.
+- Local MLX models should be hidden from the offered model list when the host cannot support MLX. Supported Apple Silicon hosts can still show local models before MLX is installed because setup can install MLX.
 - Cohere Cloud is the preferred zero-infrastructure experiment path for model behavior and prompt/tool-call quality.
 - Cohere Cloud requires a Cohere API key. Trial keys are free and rate limited. North Mini Code is listed at 20 requests per minute for trial keys and 500 requests per minute for production keys, with a separate note that trial keys and production keys on newer Chat model variants are limited to 1,000 API calls per month.
 - North Mini Code has no per-token price listed by Cohere as of the check date; Cohere says it is free until rate limits are reached.
@@ -50,6 +51,7 @@ Approximate hourly infrastructure costs for self-hosting are dominated by GPU ru
 - Hugging Face Inference Endpoints are a managed deployment path when the experiment needs a dedicated endpoint, but North Mini Code likely needs the vLLM-oriented w4a16 checkpoint or a custom container, not the MLX artifact.
 - GPU VMs and serverless GPU platforms are the highest-control path for serving experiments, especially when testing vLLM, SGLang, llama.cpp, context limits, and interleaved reasoning handling.
 - Hardware class should be chosen from context length needs: short-context experiments may fit lower-cost 48GB GPUs, while long-context or production-like runs should target A100 80GB, H100, H200, or equivalent.
+- Gemma 4 31B can be called remotely through the Gemini API using model ID gemma-4-31b-it and the native streamGenerateContent endpoint.
 
 ## Candidate Wiki Destinations
 
@@ -65,19 +67,24 @@ Approximate hourly infrastructure costs for self-hosting are dominated by GPU ru
 - docs/wiki/modules/mlx-runtime.md
 - docs/wiki/modules/shared-types-and-model-registry.md
 - docs/wiki/subsystems/local-model-runtime.md
+- README.md
+
+## Resolved Decisions
+
+- Gemma Code supports configured remote endpoints for experiments while retaining local MLX as the default local runtime path.
+- North Mini Code uses Cohere OpenAI-compatible chat completions through configured endpoint metadata.
+- Gemma 4 31B uses Gemini native generateContent streaming through configured endpoint metadata.
 
 ## Open Questions
 
-- Should Gemma Code remain local-only, or should it gain a remote provider abstraction for experiments?
-- Should Cohere Cloud support use the Cohere SDK, Cohere Compatibility API, or a generic OpenAI-compatible provider path?
 - Should remote endpoints be allowed to receive repository code by default, or should the app require explicit consent before sending code to a cloud model?
 - Should the first comparison be North Mini Code versus Command A, North Mini Code versus Command A+, or hosted North Mini Code versus self-hosted North Mini Code?
 - Should self-hosted North Mini Code experiments use Cohere-hosted north-mini-code-1-0, Hugging Face dedicated endpoints with w4a16, or a GPU VM first?
 
 ## Privacy And Sensitivity Notes
 
-Running experiments online changes the privacy model. The current app states that inference and file operations run locally. Any remote provider support must avoid sending source code, PII, or company confidential information unless the user explicitly opts in.
+Running experiments online changes the privacy model. Local model inference and file operations run locally by default, but a selected remote model sends prompt and tool context to the configured provider. Remote provider support must avoid sending source code, PII, or company confidential information unless the user explicitly opts in.
 
 ## Ingest Rationale
 
-This query records a remote-model decision boundary for Gemma Code. It affects architecture, provider abstraction, privacy posture, model registry metadata, and future support for North Mini Code experiments.
+This query records a remote-model decision boundary for Gemma Code. It affects architecture, provider abstraction, privacy posture, configured model metadata, and future support for North Mini Code experiments.

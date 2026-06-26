@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The renderer UI owns setup, chat, model selection, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context presentation, workspace interactions, and renderer-side voice input.
+The renderer UI owns setup, configured model selection, chat, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context presentation, workspace interactions, and renderer-side voice input.
 
 ## Authoritative Sources
 
@@ -64,7 +64,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 ## Responsibilities
 
 - Show boot, setup, ready, and model-switching phases.
-- Let users select and repair models.
+- Let users select configured models and repair local model caches.
 - Manage conversations and persist them in localStorage.
 - Distinguish Chat, Build, and Code UI modes.
 - Send ChatRequest payloads through preload.
@@ -93,7 +93,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 ## Processing Rules
 
-- Startup prefers the most recently stamped conversation model when it is locally available.
+- Startup prefers the most recently stamped conversation model when it remains available in the filtered configured model list. Local models also need local cache availability for auto-start.
 - Code conversations with a working directory lock mode after messages are exchanged.
 - System and harness messages are not sent back as normal conversation history.
 - Planning messages can collapse once execution begins.
@@ -104,7 +104,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 - Nothing in the renderer calls Node or Electron APIs directly.
 - Setup repair UI appears only when setup status includes repair metadata.
-- Conversation model stamping drives startup model preference.
+- Conversation model stamping drives startup model preference within the filtered configured model list.
 - Voice transcription remains independent of the chat and code model runtime.
 
 ## Configuration
@@ -118,7 +118,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 ## UI And Notification Behavior
 
-- Shows setup progress, byte counts, repair controls, model provenance summaries, stream content, tool calls, plan views, log entries, workspace context, voice recording state, Whisper loading progress, and local transcription state.
+- Shows setup progress, byte counts, repair controls, model provenance summaries, configured endpoint credential prompts, stream content, tool calls, plan views, log entries, workspace context, voice recording state, Whisper loading progress, and local transcription state.
 
 ## Error Handling
 

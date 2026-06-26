@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  AVAILABLE_MODELS,
-  DEFAULT_MODEL,
   formatModelProvenanceSummary,
 } from "../../src/shared/types";
+import {
+  allConfiguredModels,
+  configuredModelList,
+} from "../../src/main/modelConfig";
 
 const GEMMA_4_E2B_REPO = "mlx-community/gemma-4-e2b-it-4bit";
 const GEMMA_4_E2B_SIZE = "3.6 GB";
@@ -19,10 +21,10 @@ const GEMMA_4_12B_QAT_SIZE = "11 GB";
 const GEMMA_4_12B_QAT_BYTES = 11_000_000_000;
 
 function modelByName(name: string) {
-  return AVAILABLE_MODELS.find((model) => model.name === name);
+  return allConfiguredModels().find((model) => model.name === name);
 }
 
-describe("AVAILABLE_MODELS", () => {
+describe("configured models", () => {
   it("keeps Gemma 4 E2B available with its real MLX weight size", () => {
     const model = modelByName(GEMMA_4_E2B_REPO);
 
@@ -34,7 +36,9 @@ describe("AVAILABLE_MODELS", () => {
   });
 
   it("uses Gemma 4 E4B as the default larger Gemma 4 model", () => {
-    expect(DEFAULT_MODEL).toBe(GEMMA_4_E4B_REPO);
+    expect(configuredModelList({ hasMLX: true }).defaultModel).toBe(
+      GEMMA_4_E4B_REPO,
+    );
     expect(modelByName(GEMMA_4_E4B_REPO)).toMatchObject({
       label: "Gemma 4 E4B",
       size: GEMMA_4_E4B_SIZE,
@@ -44,7 +48,9 @@ describe("AVAILABLE_MODELS", () => {
   });
 
   it("includes supported Gemma 4 QAT comparison models without changing the default", () => {
-    expect(DEFAULT_MODEL).toBe(GEMMA_4_E4B_REPO);
+    expect(configuredModelList({ hasMLX: true }).defaultModel).toBe(
+      GEMMA_4_E4B_REPO,
+    );
     expect(modelByName(GEMMA_4_E4B_QAT_REPO)).toMatchObject({
       label: "Gemma 4 E4B QAT",
       size: GEMMA_4_E4B_QAT_SIZE,
@@ -59,6 +65,29 @@ describe("AVAILABLE_MODELS", () => {
       size: GEMMA_4_12B_QAT_SIZE,
       sizeBytes: GEMMA_4_12B_QAT_BYTES,
       runtime: "mlx-vlm",
+    });
+  });
+
+  it("hides local MLX models when MLX is unavailable", () => {
+    const list = configuredModelList({ hasMLX: false });
+
+    expect(list.models.some((model) => model.runtime === "mlx-lm")).toBe(false);
+    expect(list.models.some((model) => model.runtime === "mlx-vlm")).toBe(false);
+    expect(modelByName("north-mini-code-1-0")).toMatchObject({
+      runtime: "remote",
+      endpoint: {
+        kind: "openai-compatible",
+        baseUrl: "https://api.cohere.ai/compatibility/v1",
+        apiKeyEnv: "COHERE_API_KEY",
+      },
+    });
+    expect(modelByName("gemma-4-31b-it")).toMatchObject({
+      runtime: "remote",
+      endpoint: {
+        kind: "gemini-generate-content",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        apiKeyEnv: "GEMINI_API_KEY",
+      },
     });
   });
 });

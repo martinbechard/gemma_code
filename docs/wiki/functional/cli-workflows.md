@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The CLI lets terminal users check model/runtime status, prepare local runtime, chat, run code workflows, generate plans, pause for approval, execute saved plans, continue saved conversations, and run inside isolated git worktrees.
+The CLI lets terminal users check local or remote model/runtime status, prepare local runtime or validate remote credentials, chat, run code workflows, generate plans, pause for approval, execute saved plans, continue saved conversations, and run inside isolated git worktrees.
 
 ## Authoritative Sources
 
@@ -87,7 +87,7 @@ Includes CLI command parsing, setup/status output, terminal chat/code output, ap
 1. User runs a CLI command through the package script.
 2. CLI parses command, flags, model, prompt, and required file paths.
 3. CLI sets runtime paths.
-4. setup/status execute runtime checks or setup.
+4. setup/status execute local runtime checks or remote credential validation.
 5. chat/code/plan commands prepare workspace or worktree and run the shared agent loop.
 6. continue loads a conversation snapshot and resumes from it.
 

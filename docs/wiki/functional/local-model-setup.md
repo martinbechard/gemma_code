@@ -45,7 +45,7 @@ No open wiki questions are recorded for this topic.
 
 ## Maintenance Notes
 
-- Recheck when setup stages, repair metadata, model registry, warmup, or cache validation changes.
+- Recheck when setup stages, repair metadata, configured model list behavior, warmup, or cache validation changes.
 
 ## Parent Workflow
 
@@ -78,8 +78,8 @@ Includes MLX installation, cache validation, download progress, repairable incom
 ## Workflows
 
 1. User opens the app.
-2. App selects a startup model from recent conversation state or the shared default.
-3. User starts setup or the app auto-starts setup when the model is locally available and MLX is installed.
+2. App selects a startup model from recent conversation state or the configured default.
+3. User starts setup or the app auto-starts setup when the local model is locally available and MLX support is present.
 4. The main process emits setup stages.
 5. The setup UI displays progress, byte counts, errors, and repair action when available.
 6. When warmup inference succeeds, the app moves to ready.
@@ -100,6 +100,7 @@ CLI setup follows the same runtime work and prints stages to stdout.
 - Incomplete model cache reports repairable setup error.
 - Server startup failure includes command and log file where available.
 - Local model unavailable leaves the setup screen available.
+- Local MLX models are not offered when local MLX support is unavailable.
 
 ## Verification
 
@@ -115,10 +116,10 @@ Steps:
 
 1. Exercise setup component states.
 2. Exercise MLX stream and server patch behavior.
-3. Exercise model registry behavior.
+3. Exercise configured model list behavior.
 
 Assertions:
 
 - Setup UI renders progress and repairable error behavior.
 - MLX runtime errors carry actionable context.
-- Model registry supplies the UI model list.
+- Configured model list supplies the UI model list.

@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The CLI runtime exposes setup, status, chat, code, plan, approve, execute-plan, continue, and worktree workflows in the terminal while reusing the main MLX, tool, workspace, and plan modules.
+The CLI runtime exposes setup, status, chat, code, plan, approve, execute-plan, continue, and worktree workflows in the terminal while reusing the main model routing, MLX, remote chat, tool, workspace, and plan modules.
 
 ## Authoritative Sources
 
@@ -16,6 +16,9 @@ The CLI runtime exposes setup, status, chat, code, plan, approve, execute-plan, 
 ## Related Code
 
 - [src/cli](../../../src/cli)
+- [src/main/modelChat.ts](../../../src/main/modelChat.ts)
+- [src/main/modelConfig.ts](../../../src/main/modelConfig.ts)
+- [src/main/remoteChat.ts](../../../src/main/remoteChat.ts)
 - [src/main/mlx.ts](../../../src/main/mlx.ts)
 - [src/main/tools/index.ts](../../../src/main/tools/index.ts)
 - [src/main/plan](../../../src/main/plan)
@@ -60,7 +63,7 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 
 - Parse CLI commands and options.
 - Set runtime paths before importing main runtime modules.
-- Run setup and status checks against the local MLX runtime.
+- Run setup and status checks against the local MLX runtime or configured remote endpoint credentials.
 - Run chat and code prompts in terminal output.
 - Assemble, review, approve, execute, and continue plans.
 - Save and load CLI conversation snapshots.
@@ -73,7 +76,7 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 
 ## Dependencies
 
-- Main runtime modules for MLX, tools, workspace, plan engine, chat history, and background task cleanup.
+- Main runtime modules for model routing, MLX, remote chat, tools, workspace, plan engine, chat history, and background task cleanup.
 
 ## Public Contracts
 
@@ -87,8 +90,8 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 
 ## Processing Rules
 
-- setup installs or reuses MLX, starts the server, and warms inference.
-- status reports MLX installation and model cache readiness.
+- setup installs or reuses MLX, starts the server, and warms inference for local models. For remote models it validates configured endpoint credentials.
+- status reports MLX installation and model cache readiness for local models. For remote models it reports endpoint kind and credential readiness.
 - code defaults to plan-review-execute unless approve or freestyle mode changes the flow.
 - continue requires a saved conversation snapshot.
 
@@ -100,11 +103,11 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 
 ## Configuration
 
-- CLI default model currently comes from [src/cli/args.ts](../../../src/cli/args.ts), while renderer/app default model comes from [src/shared/types.ts](../../../src/shared/types.ts).
+- CLI default model currently comes from [src/cli/args.ts](../../../src/cli/args.ts), while renderer/app default model comes from [models.config.json](../../../models.config.json).
 
 ## External Interfaces
 
-- Terminal stdin/stdout, git worktree commands, local filesystem, local MLX server, and shell process cleanup.
+- Terminal stdin/stdout, git worktree commands, local filesystem, local MLX server, configured remote model APIs, and shell process cleanup.
 
 ## UI And Notification Behavior
 

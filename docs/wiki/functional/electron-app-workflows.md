@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The Electron app lets users set up a local model, chat, use voice input, run code workflows in sandbox or working-directory mode, inspect generated plans, execute plans, view tool calls, inspect logs, and switch models.
+The Electron app lets users set up a configured model, chat, use voice input, run code workflows in sandbox or working-directory mode, inspect generated plans, execute plans, view tool calls, inspect logs, and switch models.
 
 ## Authoritative Sources
 
@@ -75,7 +75,7 @@ This page belongs to [Functional Workflows](index.md).
 
 ## Scope
 
-Includes conversation management, chat, renderer-side voice input, build/code workflows, plan display, tool display, model switching, workspace preview, file-context display, and execution log reading.
+Includes conversation management, chat, renderer-side voice input, build/code workflows, plan display, tool display, configured model switching, workspace preview, file-context display, and execution log reading.
 
 ## Concepts
 
@@ -101,7 +101,7 @@ Includes conversation management, chat, renderer-side voice input, build/code wo
 - Conversations persist in localStorage.
 - Code mode with a working directory locks mode after messages are exchanged.
 - System and harness messages are not resent as normal user-visible conversation history.
-- Model switching shows overlay while setup for the target model runs.
+- Model switching shows overlay while local runtime setup or remote endpoint validation for the target model runs.
 - Execution log viewer polls while open.
 - Voice input transcribes in the renderer with Whisper and stays independent of the selected Gemma chat or code model.
 

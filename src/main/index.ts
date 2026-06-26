@@ -10,14 +10,11 @@ import {
 } from "electron";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import { AVAILABLE_MODELS } from "@shared/types";
 import {
   locateMLX,
   installMLX,
   startServer,
   stopServer,
-  chatStream,
-  buildChatRequestBody,
   listLocalModels,
   inspectModelCache,
   inspectModelProvenance,
@@ -29,6 +26,16 @@ import {
   MLX_SERVER_PORT,
   type MLXChatMessage,
 } from "./mlx";
+import {
+  buildModelChatRequestBody,
+  chatStream,
+} from "./modelChat";
+import {
+  configuredModelList,
+  isLocalModel,
+  modelInfoForName,
+  validateRemoteModelReady,
+} from "./modelConfig";
 import {
   TOOLS,
   chatSystemPrompt,
@@ -126,6 +133,8 @@ const LIVE_WRITE_PREVIEW_THROTTLE_MS = 450;
 const MODEL_DOWNLOAD_PROGRESS_POLL_MS = 1000;
 const MODEL_DOWNLOAD_COMPLETE_PROGRESS = 1;
 const MODEL_DOWNLOAD_MAX_WAIT_MS = 60 * 60 * 1000;
+const MLX_SUPPORTED_PLATFORM = "darwin";
+const MLX_SUPPORTED_ARCH = "arm64";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -175,7 +184,17 @@ function send(channel: string, payload: unknown): void {
 }
 
 function modelLabel(model: string): string {
-  return AVAILABLE_MODELS.find((m) => m.name === model)?.label ?? model;
+  return modelInfoForName(model)?.label ?? model;
+}
+
+function hasLocalMLXSupport(): boolean {
+  if (
+    process.platform !== MLX_SUPPORTED_PLATFORM ||
+    process.arch !== MLX_SUPPORTED_ARCH
+  ) {
+    return false;
+  }
+  return locateMLX() !== null;
 }
 
 class ModelCacheRepairRequiredError extends Error {
@@ -394,7 +413,11 @@ async function ensureMLXRunning(
 async function handleSetup(model: string): Promise<void> {
   try {
     send("setup:status", { stage: "checking", message: "Checking system…" });
-    await ensureMLXRunning(model);
+    if (isLocalModel(model)) {
+      await ensureMLXRunning(model);
+    } else {
+      validateRemoteModelReady(model);
+    }
     send("setup:status", { stage: "ready", message: "Ready to chat." });
   } catch (e) {
     if (e instanceof ModelCacheRepairRequiredError) {
@@ -405,10 +428,14 @@ async function handleSetup(model: string): Promise<void> {
       stage: "error",
       message: "Setup failed",
       error: (e as Error).message,
-      command:
-        getLastMlxServerCommand() ||
-        `python -m mlx_lm server --model ${model} --port ${MLX_SERVER_PORT}`,
-      logFile: getMlxServerLogPath(),
+      ...(isLocalModel(model)
+        ? {
+            command:
+              getLastMlxServerCommand() ||
+              `python -m mlx_lm server --model ${model} --port ${MLX_SERVER_PORT}`,
+            logFile: getMlxServerLogPath(),
+          }
+        : {}),
     });
   }
 }
@@ -1151,7 +1178,7 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
           newMessages,
           fullMessages,
           newFullMessages,
-          requestBody: buildChatRequestBody({
+          requestBody: buildModelChatRequestBody({
             model: req.model,
             messages: requestMessages,
             signal: abort.signal,
@@ -2578,7 +2605,11 @@ app.whenReady().then(async () => {
     });
     try {
       stopServer();
-      await ensureMLXRunning(model);
+      if (isLocalModel(model)) {
+        await ensureMLXRunning(model);
+      } else {
+        validateRemoteModelReady(model);
+      }
       send("setup:status", { stage: "ready", message: "Ready to chat." });
     } catch (e) {
       if (e instanceof ModelCacheRepairRequiredError) {
@@ -2589,17 +2620,20 @@ app.whenReady().then(async () => {
         stage: "error",
         message: "Model switch failed",
         error: (e as Error).message,
-        command:
-          getLastMlxServerCommand() ||
-          `python -m mlx_lm server --model ${model} --port ${MLX_SERVER_PORT}`,
-        logFile: getMlxServerLogPath(),
+        ...(isLocalModel(model)
+          ? {
+              command:
+                getLastMlxServerCommand() ||
+                `python -m mlx_lm server --model ${model} --port ${MLX_SERVER_PORT}`,
+              logFile: getMlxServerLogPath(),
+            }
+          : {}),
       });
     }
   });
 
   ipcMain.handle("setup:status", async () => {
-    const mlx = locateMLX();
-    return { hasMLX: !!(mlx && mlx.installed) };
+    return { hasMLX: hasLocalMLXSupport() };
   });
 
   ipcMain.handle("model:repair", async (_e, model: string) => {
@@ -2610,7 +2644,12 @@ app.whenReady().then(async () => {
     return listLocalModels();
   });
 
+  ipcMain.handle("models:list", async () =>
+    configuredModelList({ hasMLX: hasLocalMLXSupport() }),
+  );
+
   ipcMain.handle("models:provenance", async (_e, model: string) => {
+    if (!isLocalModel(model)) return null;
     return inspectModelProvenance(model);
   });
 

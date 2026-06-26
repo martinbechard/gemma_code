@@ -1,0 +1,72 @@
+{
+  "defaultModel": "mlx-community/gemma-4-e4b-it-4bit",
+  "models": [
+    {
+      "name": "mlx-community/gemma-4-e4b-it-4bit",
+      "label": "Gemma 4 E4B",
+      "size": "5.2 GB",
+      "sizeBytes": 5216992212,
+      "description": "Larger local model. Runs best on 16GB+ Macs.",
+      "runtime": "mlx-lm",
+      "recommended": true
+    },
+    {
+      "name": "mlx-community/gemma-4-12B-it-qat-4bit",
+      "label": "Gemma 4 12B QAT",
+      "size": "11 GB",
+      "sizeBytes": 11000000000,
+      "description": "Unified architecture model served through MLX VLM.",
+      "runtime": "mlx-vlm"
+    },
+    {
+      "name": "mlx-community/gemma-4-E4B-it-qat-4bit",
+      "label": "Gemma 4 E4B QAT",
+      "size": "6.8 GB",
+      "sizeBytes": 6800000000,
+      "description": "QAT comparison model with stronger memory efficiency tradeoffs.",
+      "runtime": "mlx-lm"
+    },
+    {
+      "name": "mlx-community/gemma-4-e2b-it-4bit",
+      "label": "Gemma 4 E2B",
+      "size": "3.6 GB",
+      "sizeBytes": 3580765126,
+      "description": "Edge-sized. Fast & lightweight. Runs on 8GB+ Macs.",
+      "runtime": "mlx-lm"
+    },
+    {
+      "name": "mlx-community/gemma-3-text-4b-it-4bit",
+      "label": "Gemma 3 Text 4B",
+      "size": "3.2 GB",
+      "sizeBytes": 3200000000,
+      "description": "Text-only fallback. Use if Gemma 4 doesn't load.",
+      "runtime": "mlx-lm"
+    },
+    {
+      "name": "north-mini-code-1-0",
+      "label": "North Mini Code",
+      "size": "cloud",
+      "sizeBytes": 0,
+      "description": "Cohere-hosted coding model for online experiments.",
+      "runtime": "remote",
+      "endpoint": {
+        "kind": "openai-compatible",
+        "baseUrl": "https://api.cohere.ai/compatibility/v1",
+        "apiKeyEnv": "COHERE_API_KEY"
+      }
+    },
+    {
+      "name": "gemma-4-31b-it",
+      "label": "Gemma 4 31B",
+      "size": "cloud",
+      "sizeBytes": 0,
+      "description": "Largest Gemma 4 core model through the Gemini API.",
+      "runtime": "remote",
+      "endpoint": {
+        "kind": "gemini-generate-content",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "apiKeyEnv": "GEMINI_API_KEY"
+      }
+    }
+  ]
+}

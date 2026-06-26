@@ -2,7 +2,7 @@
 
 ## Current Understanding
 
-The agent harness transforms user prompts into local model requests, structured planning, semantic review, tool execution, evidence gathering, verification, and streamed UI or terminal events.
+The agent harness transforms user prompts into model chat requests, structured planning, semantic review, tool execution, evidence gathering, verification, and streamed UI or terminal events.
 
 ## Authoritative Sources
 
@@ -80,13 +80,13 @@ flowchart TB
 
 ## Current Data Anchors
 
-- User messages and tool results become MLX chat messages.
+- User messages and tool results become model chat messages.
 - Plan steps are YAML records with name, prompt, and verify fields.
 - StreamChunk records carry model tokens, tool calls, plan nodes, reviews, harness messages, done, and errors.
 
 ```mermaid
 flowchart LR
-  UserMessages["User messages"] --> MlxMessages["MLX chat messages"]
+  UserMessages["User messages"] --> MlxMessages["Model chat messages"]
   ToolResults["Tool results"] --> MlxMessages
   PlanYaml["Plan YAML records"] --> PlanExecutionState["Plan execution state"]
   StreamChunk["StreamChunk records"] --> ElectronEvents["Electron stream events"]
