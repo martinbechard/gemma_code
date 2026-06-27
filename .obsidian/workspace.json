@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "acbae2a66c252f5b",
+    "type": "split",
+    "children": [
+      {
+        "id": "19a7f7f75f1ebd8a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "920e990d99c1ab86",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/wiki/subsystems/agent-harness.md",
+                "mode": "preview",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "agent-harness"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "426ddc3dd050f907",
+    "type": "split",
+    "children": [
+      {
+        "id": "c7cca45986223f47",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "17c9e5c6a6e2653a",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "08874897bc8855f8",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "32705ae58e323ff3",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "6b40c32955205804",
+    "type": "split",
+    "children": [
+      {
+        "id": "b3d99bb94d6a7cdb",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "c1100b89ccfa9a93",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "docs/wiki/modules/preload-ipc-bridge.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for preload-ipc-bridge"
+            }
+          },
+          {
+            "id": "7ac83e6e5ccdc5c6",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "docs/wiki/modules/preload-ipc-bridge.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from preload-ipc-bridge"
+            }
+          },
+          {
+            "id": "a718da670de016c1",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "f146fe710c63fd34",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "f451b92592145b3b",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "docs/wiki/modules/preload-ipc-bridge.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of preload-ipc-bridge"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "920e990d99c1ab86",
+  "lastOpenFiles": [
+    "docs/wiki/modules/preload-ipc-bridge.md",
+    "docs/wiki/modules/renderer-ui.md",
+    "raw/wiki-fragments",
+    "raw/processed",
+    "raw",
+    "docs/wiki/subsystems/agent-harness.md",
+    "out/renderer/index.html",
+    "out/renderer/assets/ort-wasm-simd-threaded.asyncify-CtKKja6V.wasm",
+    "out/renderer/assets/index-DPyyazWU.css",
+    "out/renderer/assets/index-DBR2A2aN.js",
+    "out/renderer/assets/gemma-logo-wWWFj9py.png",
+    "out/renderer/assets",
+    "electron.vite.config.1782270236759.mjs",
+    "docs/wiki/technical/architecture.md",
+    "docs/wiki/modules/main-process.md",
+    "docs/wiki/functional/local-model-setup.md",
+    "README.md",
+    "docs/wiki/functional/index.md",
+    "docs/wiki/functional/electron-app-workflows.md",
+    "docs/wiki/functional/code-task-execution.md",
+    "docs/wiki/functional/cli-workflows.md",
+    "node_modules/electron-builder/node_modules/fs-extra/README.md",
+    "node_modules/dunder-proto/README.md",
+    "docs/wiki/subsystems/cli-agent-runtime.md",
+    "docs/wiki/code/index.md",
+    "docs/wiki/subsystems/observability-and-debugging.md",
+    "docs/wiki/subsystems/electron-app-runtime.md",
+    "docs/wiki/subsystems/tool-and-workspace-runtime.md",
+    "docs/wiki/subsystems/local-model-runtime.md",
+    "docs/wiki/subsystems/index.md",
+    "docs/wiki/modules/execution-logs-and-background-tasks.md",
+    "docs/wiki/modules/shared-types-and-model-registry.md",
+    "docs/wiki/modules/cli-runtime.md",
+    "docs/wiki/modules/workspace-runtime.md",
+    "docs/wiki/modules/plan-engine.md",
+    "docs/wiki/code"
+  ]
+}

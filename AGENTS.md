@@ -7,6 +7,14 @@
 - This is experimental open-source work used to understand the capabilities of Gemma 4 as a local coding model.
 - Prioritize simple, verified changes over compatibility layers or process overhead.
 
+## Project Wiki Workflow
+
+- Use the project-wiki-query skill for wiki-backed questions and lightweight project knowledge lookups.
+- Check docs/wiki first when answering questions about this project, then verify the answer against authoritative project files before replying. The wiki is a synthesis layer, not the source of truth.
+- When reviewing project files reveals durable project knowledge that is not captured in the wiki, create a raw wiki fragment under raw before synthesizing it into docs/wiki.
+- Raw wiki fragments should name the source file, record the extracted facts, and note the wiki page or topic that should receive the synthesis.
+- Keep fragments out of raw/processed until the knowledge has been synthesized into docs/wiki and wiki lint has passed.
+
 ## Commit Hygiene
 
 - After completing a coherent change and passing verification, run git status.
