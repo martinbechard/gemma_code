@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "CLI Workflows Functional Specification"
+description: "The CLI lets terminal users check local or remote model/runtime status, prepare local runtime or validate remote credentials, chat, run code workflows, generate plans, pause for..."
+tags: ["functional"]
+---
+
 # CLI Workflows Functional Specification
 
 ## Current Understanding

@@ -1,3 +1,10 @@
+---
+type: "Subsystem"
+title: "Local Model Runtime High-Level Design"
+description: "The local model runtime installs and supervises MLX, validates model cache readiness, starts the local model server, warms inference, and streams local model responses to both..."
+tags: ["subsystems"]
+---
+
 # Local Model Runtime High-Level Design
 
 ## Current Understanding

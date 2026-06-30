@@ -1,3 +1,10 @@
+---
+type: "Subsystem"
+title: "Agent Harness High-Level Design"
+description: "The agent harness transforms user prompts into model chat requests, structured planning, semantic review, tool execution, evidence gathering, verification, and streamed UI or..."
+tags: ["subsystems"]
+---
+
 # Agent Harness High-Level Design
 
 ## Current Understanding

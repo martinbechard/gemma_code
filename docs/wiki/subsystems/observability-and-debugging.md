@@ -1,3 +1,10 @@
+---
+type: "Subsystem"
+title: "Observability And Debugging High-Level Design"
+description: "Observability is centered on execution logs, MLX server logs, runtime activity chunks, setup status records, model cache inspection, and background task snapshots."
+tags: ["subsystems"]
+---
+
 # Observability And Debugging High-Level Design
 
 ## Current Understanding

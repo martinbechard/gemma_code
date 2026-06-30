@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "MLX Runtime Design"
+description: "The MLX runtime module supervises the app-managed Python environment, model cache inspection, MLX server process, runtime patching, local chat-completion requests, warmup..."
+tags: ["modules"]
+---
+
 # MLX Runtime Design
 
 ## Current Understanding
@@ -101,6 +108,7 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 ## Configuration
 
 - Model runtime mapping comes from the configured model catalog.
+- Gemma 4 12B QAT and Ornith 1.0 9B route through the MLX VLM server path; standard text-compatible local models route through the MLX LM server path.
 - Environment variables can tune MLX VLM KV cache size, KV bits, and quantization scheme.
 - The canonical server port is exported as [MLX_SERVER_PORT](../../../src/main/mlx.ts).
 

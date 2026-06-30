@@ -1,3 +1,9 @@
+---
+type: "Decision Log"
+title: "Open Decisions"
+description: "The configured renderer/app default model is Gemma 4 E4B, while the CLI argument parser defaults to Gemma 4 E2B."
+---
+
 # Open Decisions
 
 ## Current Decisions Needed

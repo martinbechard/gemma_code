@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Local Model Setup Functional Specification"
+description: "Users prepare a selected local model by letting Gemma Code install or reuse MLX, validate model files, start the local server, download or reuse weights, warm inference, and report..."
+tags: ["functional"]
+---
+
 # Local Model Setup Functional Specification
 
 ## Current Understanding
@@ -93,6 +100,7 @@ CLI setup follows the same runtime work and prints stages to stdout.
 - ready means the runtime can chat.
 - error with repair metadata shows Resume download.
 - non-repair error shows Try again.
+- The model picker can offer both MLX LM and MLX VLM local models when local MLX support is available; Ornith 1.0 9B appears as an experimental MLX VLM agentic coding option.
 
 ## Edge Cases
 

@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Tool Runtime Design"
+description: "The tool runtime defines available tools, renders tool instructions into prompts, parses XML action blocks from model output, protects action boundaries during streaming, and..."
+tags: ["modules"]
+---
+
 # Tool Runtime Design
 
 ## Current Understanding

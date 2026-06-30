@@ -1,3 +1,9 @@
+---
+type: "Project Wiki"
+title: "Gemma Code Project Wiki"
+description: "This wiki is the maintained documentation surface for Gemma Code."
+---
+
 # Gemma Code Project Wiki
 
 This wiki is the maintained documentation surface for Gemma Code. It summarizes the current project understanding across source code, tests, README content, design notes, and runtime behavior.

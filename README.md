@@ -102,6 +102,8 @@ Use a specific model with:
 npm run cli -- code --model mlx-community/gemma-4-e4b-it-4bit "Add a focused feature."
 ```
 
+The configured local catalog includes Gemma models for the default local workflow and an experimental Ornith 1.0 9B 4-bit MLX VLM option for agentic coding tests on 16GB Apple Silicon Macs.
+
 Allow shell execution with:
 
 ```bash
@@ -256,7 +258,7 @@ The planning prompt keeps planning focused on inspection and executable steps. T
 
 ## Model Runtime
 
-The local runtime uses MLX-LM through an app-managed Python environment. The CLI and Electron app share the same runtime setup and can reuse an already-running MLX server. Remote models are read from models.config.json and use their configured endpoint kind, base URL, and credential environment variable.
+The local runtime uses MLX-LM and MLX-VLM through an app-managed Python environment. The CLI and Electron app share the same runtime setup and can reuse an already-running MLX server. Remote models are read from models.config.json and use their configured endpoint kind, base URL, and credential environment variable.
 
 Check runtime status:
 

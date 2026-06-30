@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Electron App Workflows Functional Specification"
+description: "The Electron app lets users set up a configured model, chat, use voice input, run code workflows in sandbox or working-directory mode, inspect generated plans, execute plans, view..."
+tags: ["functional"]
+---
+
 # Electron App Workflows Functional Specification
 
 ## Current Understanding

@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Preload IPC Bridge Design"
+description: "The preload bridge exposes a typed renderer API over Electron IPC while preserving context isolation."
+tags: ["modules"]
+---
+
 # Preload IPC Bridge Design
 
 ## Current Understanding

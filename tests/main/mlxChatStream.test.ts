@@ -7,6 +7,7 @@ import {
 } from "../../src/main/mlx";
 
 const TEST_MODEL = "test-model";
+const ORNITH_9B_REPO = "mlx-community/Ornith-1.0-9B-4bit";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -102,6 +103,19 @@ describe("buildServerArgs", () => {
       "mlx_vlm.server",
       "--model",
       "mlx-community/gemma-4-12B-it-qat-4bit",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "11435",
+    ]);
+  });
+
+  it("uses mlx-vlm server for Ornith 9B", () => {
+    expect(buildServerArgs(ORNITH_9B_REPO)).toEqual([
+      "-m",
+      "mlx_vlm.server",
+      "--model",
+      ORNITH_9B_REPO,
       "--host",
       "127.0.0.1",
       "--port",

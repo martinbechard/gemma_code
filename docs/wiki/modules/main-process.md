@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Main Process Design"
+description: "The main process is the Electron adapter and runtime coordinator."
+tags: ["modules"]
+---
+
 # Main Process Design
 
 ## Current Understanding

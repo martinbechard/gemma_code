@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Workspace Runtime Design"
+description: "The workspace runtime owns per-conversation sandbox paths, user-selected working-directory overrides, safe path resolution, preview HTTP serving, workspace file listing, and atomic..."
+tags: ["modules"]
+---
+
 # Workspace Runtime Design
 
 ## Current Understanding

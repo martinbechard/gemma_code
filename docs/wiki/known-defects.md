@@ -1,3 +1,9 @@
+---
+type: "Defect Summary"
+title: "Known Defects"
+description: "No defect backlog folder is currently identified in the repository."
+---
+
 # Known Defects
 
 ## Current Understanding

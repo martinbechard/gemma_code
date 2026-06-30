@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Shared Types And Model Registry Design"
+description: "The shared types module defines cross-process contracts for setup status, runtime activity, tool calls, messages, plan nodes, chat requests, stream chunks, model metadata, model..."
+tags: ["modules"]
+---
+
 # Shared Types And Model Registry Design
 
 ## Current Understanding
@@ -104,6 +111,8 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 ## Configuration
 
 - The model configuration file defines user-visible labels, descriptions, sizes, byte estimates, runtime type, recommended status, and endpoint information.
+- The configured local catalog includes Gemma 4 MLX models and the experimental Ornith 1.0 9B 4-bit MLX VLM model for local agentic coding tests on 16GB Apple Silicon Macs.
+- Ornith 1.0 9B is cataloged as an MLX VLM model because the selected MLX Community conversion is served through the MLX VLM runtime.
 
 ## External Interfaces
 

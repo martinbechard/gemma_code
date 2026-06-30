@@ -1,3 +1,10 @@
+---
+type: "Subsystem"
+title: "Electron App Runtime High-Level Design"
+description: "The Electron app runtime combines the main process, preload bridge, renderer UI, shared types, workspace server, local MLX setup flow, and configured remote model setup flow into..."
+tags: ["subsystems"]
+---
+
 # Electron App Runtime High-Level Design
 
 ## Current Understanding

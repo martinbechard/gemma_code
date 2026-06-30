@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Gemma Code Architecture"
+description: "Gemma Code is a local-first coding agent for macOS on Apple Silicon."
+tags: ["technical"]
+---
+
 # Gemma Code Architecture
 
 ## Current Understanding

@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Execution Logs And Background Tasks Design"
+description: "Execution logging records per-run JSONL debug events, consolidates adjacent model and stream chunks, and provides bounded snapshots for the UI."
+tags: ["modules"]
+---
+
 # Execution Logs And Background Tasks Design
 
 ## Current Understanding

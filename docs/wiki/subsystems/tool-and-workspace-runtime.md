@@ -1,3 +1,10 @@
+---
+type: "Subsystem"
+title: "Tool And Workspace Runtime High-Level Design"
+description: "The tool and workspace subsystem gives the model controlled access to filesystem, shell, search, preview, web, time, background task, and file-context capabilities inside either a..."
+tags: ["subsystems"]
+---
+
 # Tool And Workspace Runtime High-Level Design
 
 ## Current Understanding

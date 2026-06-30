@@ -1,3 +1,9 @@
+---
+type: "Wiki Schema"
+title: "Wiki Schema"
+description: "The wiki is a maintained synthesis layer for Gemma Code. It summarizes and links project knowledge but does not replace authoritative sources."
+---
+
 # Wiki Schema
 
 The wiki is a maintained synthesis layer for Gemma Code. It summarizes and links project knowledge but does not replace authoritative sources.

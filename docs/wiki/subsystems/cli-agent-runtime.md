@@ -1,3 +1,10 @@
+---
+type: "Subsystem"
+title: "CLI Agent Runtime High-Level Design"
+description: "The CLI agent runtime is a terminal adapter over the same local MLX, tool, workspace, and plan harness used by the Electron app."
+tags: ["subsystems"]
+---
+
 # CLI Agent Runtime High-Level Design
 
 ## Current Understanding

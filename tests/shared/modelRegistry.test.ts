@@ -19,6 +19,9 @@ const GEMMA_4_E4B_QAT_BYTES = 6_800_000_000;
 const GEMMA_4_12B_QAT_REPO = "mlx-community/gemma-4-12B-it-qat-4bit";
 const GEMMA_4_12B_QAT_SIZE = "11 GB";
 const GEMMA_4_12B_QAT_BYTES = 11_000_000_000;
+const ORNITH_9B_REPO = "mlx-community/Ornith-1.0-9B-4bit";
+const ORNITH_9B_SIZE = "6.0 GB";
+const ORNITH_9B_BYTES = 5_977_072_107;
 
 function modelByName(name: string) {
   return allConfiguredModels().find((model) => model.name === name);
@@ -64,6 +67,16 @@ describe("configured models", () => {
       label: "Gemma 4 12B QAT",
       size: GEMMA_4_12B_QAT_SIZE,
       sizeBytes: GEMMA_4_12B_QAT_BYTES,
+      runtime: "mlx-vlm",
+    });
+  });
+
+  it("offers Ornith 1.0 9B as a local MLX VLM coding model for 16GB Macs", () => {
+    expect(modelByName(ORNITH_9B_REPO)).toMatchObject({
+      label: "Ornith 1.0 9B",
+      size: ORNITH_9B_SIZE,
+      sizeBytes: ORNITH_9B_BYTES,
+      description: "Agentic coding model. Experimental 9B 4-bit MLX VLM option for 16GB Macs.",
       runtime: "mlx-vlm",
     });
   });

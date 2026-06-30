@@ -19,6 +19,14 @@
       "runtime": "mlx-vlm"
     },
     {
+      "name": "mlx-community/Ornith-1.0-9B-4bit",
+      "label": "Ornith 1.0 9B",
+      "size": "6.0 GB",
+      "sizeBytes": 5977072107,
+      "description": "Agentic coding model. Experimental 9B 4-bit MLX VLM option for 16GB Macs.",
+      "runtime": "mlx-vlm"
+    },
+    {
       "name": "mlx-community/gemma-4-E4B-it-qat-4bit",
       "label": "Gemma 4 E4B QAT",
       "size": "6.8 GB",

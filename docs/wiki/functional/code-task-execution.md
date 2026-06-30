@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Code Task Execution Functional Specification"
+description: "Code task execution guides a user request through planning, semantic review, execution, tool evidence, verification, retries, and final completion."
+tags: ["functional"]
+---
+
 # Code Task Execution Functional Specification
 
 ## Current Understanding

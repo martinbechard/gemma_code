@@ -1,3 +1,9 @@
+---
+type: "Glossary"
+title: "Glossary"
+description: "Gemma Code: The local-first coding agent implemented by this repository."
+---
+
 # Glossary
 
 ## Terms

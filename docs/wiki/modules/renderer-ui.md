@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Renderer UI Design"
+description: "The renderer UI owns setup, configured model selection, chat, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context..."
+tags: ["modules"]
+---
+
 # Renderer UI Design
 
 ## Current Understanding

@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "CLI Runtime Design"
+description: "The CLI runtime exposes setup, status, chat, code, plan, approve, execute-plan, continue, and worktree workflows in the terminal while reusing the main model routing, MLX, remote..."
+tags: ["modules"]
+---
+
 # CLI Runtime Design
 
 ## Current Understanding

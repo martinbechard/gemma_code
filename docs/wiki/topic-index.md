@@ -1,3 +1,9 @@
+---
+type: "Topic Index"
+title: "Topic Index"
+description: "Architecture explains the whole-system structure."
+---
+
 # Topic Index
 
 ## Primary Topics

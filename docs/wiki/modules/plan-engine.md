@@ -1,3 +1,10 @@
+---
+type: "Topic"
+title: "Plan Engine Design"
+description: "The plan engine turns a user coding request into executable plan steps, validates plan shape and semantics, tracks step and verify state, records evidence, and enforces..."
+tags: ["modules"]
+---
+
 # Plan Engine Design
 
 ## Current Understanding
