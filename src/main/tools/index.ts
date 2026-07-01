@@ -13,6 +13,7 @@ import { runBashTool } from "./runBash";
 import { runProjectScriptTool } from "./runProjectScript";
 import { searchFilesTool } from "./searchFiles";
 import { generateUuidTool } from "./uuid";
+import { gitTool } from "./git";
 import { webSearchTool } from "./webSearch";
 import { writeFileTool } from "./writeFile";
 import { USE_WRITE_FILE_FOR_FILE_CHANGES } from "./constants";
@@ -54,6 +55,7 @@ export const TOOLS: Record<string, ToolSpec> = {
   "kill_background_task": killBackgroundTaskTool,
   "open_preview": openPreviewTool,
   "generate_uuid": generateUuidTool,
+  git: gitTool,
 };
 
 const PLAN_INSPECTION_TOOL_NAMES = new Set([
@@ -63,6 +65,7 @@ const PLAN_INSPECTION_TOOL_NAMES = new Set([
   "search_files",
   "list_files",
   "run_bash",
+  "git",
 ]);
 
 function renderToolHelp(mode: "chat" | "code" | "plan"): string {
