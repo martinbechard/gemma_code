@@ -9,7 +9,7 @@ tags: ["modules"]
 
 ## Current Understanding
 
-The preload bridge exposes a typed renderer API over Electron IPC while preserving context isolation. It is the renderer-facing bridge to setup, configured model listing, model switching, chat, debug log, tools, workspace, directory picker, file streaming, raw chunk, and an audio transcription IPC method.
+The preload bridge exposes a typed renderer API while preserving context isolation. It is the renderer-facing bridge to setup, configured model listing, model switching, chat, debug log, tools, workspace, directory picker, clipboard writes, file streaming, raw chunk, and an audio transcription IPC method.
 
 ## Authoritative Sources
 
@@ -59,7 +59,7 @@ This module implements the bridge between the [Renderer UI](renderer-ui.md) and 
 
 ## Responsibilities
 
-- Expose setup, model list, model switching, chat, log, tools, workspace, dialog, streaming, and audio transcription methods on window.api.
+- Expose setup, model list, model switching, chat, log, tools, workspace, dialog, clipboard, streaming, and audio transcription methods on window.api.
 - Register and unregister event listeners for setup status, workspace changes, raw chunks, and file streaming.
 - Convert chat:send into a per-request stream subscription.
 
@@ -70,12 +70,13 @@ This module implements the bridge between the [Renderer UI](renderer-ui.md) and 
 
 ## Dependencies
 
-- Electron contextBridge, ipcRenderer, and shared TypeScript types.
+- Electron contextBridge, clipboard, ipcRenderer, and shared TypeScript types.
 
 ## Public Contracts
 
 - The exposed Api type is exported from preload and declared for renderer use.
 - listModels resolves a ModelListResult filtered by main-process capability detection.
+- copyTextToClipboard writes text through Electron clipboard so context-isolated renderer components do not call Electron APIs directly.
 - sendChat resolves when a done or error chunk arrives.
 - transcribeAudio invokes the audio:transcribe IPC channel with base64 audio and a model name, but the current composer voice-input path uses renderer-side Whisper transcription instead.
 
@@ -99,7 +100,7 @@ This module implements the bridge between the [Renderer UI](renderer-ui.md) and 
 
 ## External Interfaces
 
-- Electron IPC.
+- Electron IPC and Electron clipboard.
 
 ## UI And Notification Behavior
 
@@ -111,4 +112,4 @@ This module implements the bridge between the [Renderer UI](renderer-ui.md) and 
 
 ## Verification
 
-- Preload parity is indirectly covered by renderer and main tests. No focused preload test is currently identified.
+- Preload parity is indirectly covered by renderer and main tests. Setup error copy is covered by [Setup component tests](../../../tests/renderer/components/Setup.test.ts).

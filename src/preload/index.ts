@@ -1,4 +1,9 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
+import {
+  clipboard,
+  contextBridge,
+  ipcRenderer,
+  IpcRendererEvent,
+} from "electron";
 import type {
   ChatRequest,
   ExecutionLogSnapshot,
@@ -26,6 +31,10 @@ const api = {
 
   checkMLX: (): Promise<{ hasMLX: boolean }> =>
     ipcRenderer.invoke("setup:status"),
+
+  copyTextToClipboard: async (text: string): Promise<void> => {
+    clipboard.writeText(text);
+  },
 
   onSetupStatus: (cb: (s: SetupStatus) => void): (() => void) => {
     const listener = (_: IpcRendererEvent, s: SetupStatus): void => cb(s);

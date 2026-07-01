@@ -11,6 +11,10 @@ import gemmaLogoUrl from "../assets/gemma-logo.png";
 
 const ERROR_COPY_CONFIRM_MS = 1500;
 
+interface SetupErrorClipboardApi {
+  copyTextToClipboard: (text: string) => Promise<void>;
+}
+
 interface Props {
   models: ModelInfo[];
   status: SetupStatus;
@@ -43,6 +47,28 @@ export function setupErrorClipboardText(status: SetupStatus): string {
   ]
     .filter((line) => line.length > 0)
     .join("\n");
+}
+
+function defaultSetupErrorClipboardApi(): SetupErrorClipboardApi | undefined {
+  if (typeof window === "undefined") return undefined;
+  return window.api;
+}
+
+export async function copySetupErrorToClipboard(
+  status: SetupStatus,
+  api: SetupErrorClipboardApi | undefined = defaultSetupErrorClipboardApi(),
+): Promise<void> {
+  const text = setupErrorClipboardText(status);
+  if (api) {
+    await api.copyTextToClipboard(text);
+    return;
+  }
+  const browserClipboard = globalThis.navigator?.clipboard;
+  if (browserClipboard) {
+    await browserClipboard.writeText(text);
+    return;
+  }
+  throw new Error("Clipboard is not available.");
 }
 
 export default function Setup({
@@ -125,8 +151,7 @@ export default function Setup({
                 <button
                   type="button"
                   onClick={() => {
-                    const text = setupErrorClipboardText(status);
-                    void navigator.clipboard?.writeText(text).then(() => {
+                    void copySetupErrorToClipboard(status).then(() => {
                       setCopiedError(true);
                       window.setTimeout(
                         () => setCopiedError(false),

@@ -121,7 +121,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 ## External Interfaces
 
-- Browser localStorage, Clipboard API for setup error copy, browser microphone and Web Audio APIs, Hugging Face model download endpoints allowed by the renderer CSP, and preload IPC.
+- Browser localStorage, preload clipboard bridge for setup error copy, browser microphone and Web Audio APIs, Hugging Face model download endpoints allowed by the renderer CSP, and preload IPC.
 
 ## UI And Notification Behavior
 

@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import Setup, {
+  copySetupErrorToClipboard,
   setupErrorClipboardText,
 } from "../../../src/renderer/src/components/Setup";
 import type {
@@ -87,6 +88,19 @@ describe("Setup error display", () => {
     expect(html).toContain("MLX warmup failed after 60000ms");
     expect(html).toContain("missing model weight shards");
     expect(html).toContain("mlx-server.log");
+  });
+
+  it("copies setup errors through the preload clipboard bridge", async () => {
+    const copiedText: string[] = [];
+    const api = {
+      copyTextToClipboard: async (text: string): Promise<void> => {
+        copiedText.push(text);
+      },
+    };
+
+    await copySetupErrorToClipboard(ERROR_STATUS, api);
+
+    expect(copiedText).toEqual([setupErrorClipboardText(ERROR_STATUS)]);
   });
 });
 
