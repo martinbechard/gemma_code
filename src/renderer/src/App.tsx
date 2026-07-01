@@ -8,6 +8,7 @@ import {
 } from "@shared/types";
 import Setup from "./components/Setup";
 import Chat from "./components/Chat";
+import { applySetupStatus, type AppState } from "./lib/appState";
 import {
   pickStartupModel,
   readPersistedSelectedModel,
@@ -15,11 +16,6 @@ import {
   writePersistedSelectedModel,
 } from "./lib/conversationStore";
 
-type AppState =
-  | { phase: "boot" }
-  | { phase: "setup"; status: SetupStatus; model: string }
-  | { phase: "ready"; model: string }
-  | { phase: "switching"; model: string; toModel: string; status: SetupStatus };
 type RepairCapableApi = typeof window.api & {
   repairModel?: (model: string) => Promise<void>;
 };
@@ -95,33 +91,7 @@ export default function App() {
       setModelDownloads(await window.api.listModelDownloads());
       const defaultModel = loadedModels.defaultModel;
       unsub = window.api.onSetupStatus((status) => {
-        setState((prev) => {
-          if (status.stage === "ready") {
-            // If we were switching, the new model is now ready
-            if (prev.phase === "switching") {
-              return { phase: "ready", model: prev.toModel };
-            }
-            return {
-              phase: "ready",
-              model: prev.phase === "setup" ? prev.model : defaultModel,
-            };
-          }
-          if (status.stage === "error") {
-            if (status.repair) {
-              return { phase: "setup", status, model: status.repair.model };
-            }
-            // If switch failed, go back to the previous model
-            if (prev.phase === "switching") {
-              return { phase: "ready", model: prev.model };
-            }
-          }
-          // If we're in switching phase, keep it as switching
-          if (prev.phase === "switching") {
-            return { ...prev, status };
-          }
-          const model = prev.phase === "setup" ? prev.model : defaultModel;
-          return { phase: "setup", status, model };
-        });
+        setState((prev) => applySetupStatus(prev, status));
       });
 
       const local = await window.api.listLocalModels();
@@ -244,26 +214,15 @@ export default function App() {
     );
   }
 
-  if (state.phase === "switching") {
-    return (
-      <div key="switching" className="anim-fade-in h-full w-full">
-        <Chat
-          model={state.toModel}
-          models={modelList.models}
-          onSwitchModel={handleSwitchModel}
-        />
-        <SwitchingOverlay status={state.status} />
-      </div>
-    );
-  }
-
+  const chatModel = state.phase === "switching" ? state.toModel : state.model;
   return (
     <div key="chat" className="anim-fade-scale h-full w-full">
       <Chat
-        model={state.model}
+        model={chatModel}
         models={modelList.models}
         onSwitchModel={handleSwitchModel}
       />
+      {state.phase === "switching" && <SwitchingOverlay status={state.status} />}
     </div>
   );
 }

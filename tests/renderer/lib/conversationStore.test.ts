@@ -11,6 +11,7 @@ import {
   isModeLocked,
   hasSystemPromptSnapshot,
   hasConversationStarted,
+  reconcileConversationsForSelectedModel,
   resolveConversationModel,
   shouldStartNewConversationForSelectedModel,
   stampConversationModelBeforeFirstPrompt,
@@ -300,6 +301,102 @@ describe("shouldStartNewConversationForSelectedModel", () => {
         "north-mini-code-1-0",
       ),
     ).toBe(false);
+  });
+});
+
+describe("reconcileConversationsForSelectedModel", () => {
+  it("stamps the selected empty active conversation even when it is not first", () => {
+    const first = conv({
+      id: "c-first",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+      messages: [{ id: "u1", role: "user" }],
+    });
+    const active = conv({
+      id: "c-active",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+      messages: [],
+    });
+
+    const result = reconcileConversationsForSelectedModel(
+      [first, active],
+      "c-active",
+      "north-mini-code-1-0",
+      (source, model) =>
+        conv({
+          id: `new-${source?.id ?? "empty"}`,
+          mode: source?.mode ?? "chat",
+          workingDir: source?.workingDir,
+          model,
+          messages: [],
+        }),
+    );
+
+    expect(result.activeId).toBe("c-active");
+    expect(result.conversations[0]).toMatchObject({
+      id: "c-first",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+    });
+    expect(result.conversations[1]).toMatchObject({
+      id: "c-active",
+      model: "north-mini-code-1-0",
+    });
+  });
+
+  it("starts a new conversation when the selected model conflicts with a started active conversation", () => {
+    const active = conv({
+      id: "c-active",
+      mode: "code",
+      workingDir: "/tmp/project",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+      messages: [{ id: "u1", role: "user" }],
+    });
+
+    const result = reconcileConversationsForSelectedModel(
+      [active],
+      "c-active",
+      "north-mini-code-1-0",
+      (source, model) =>
+        conv({
+          id: "c-new",
+          mode: source?.mode ?? "chat",
+          workingDir: source?.workingDir,
+          model,
+          messages: [],
+        }),
+    );
+
+    expect(result.activeId).toBe("c-new");
+    expect(result.conversations).toHaveLength(2);
+    expect(result.conversations[0]).toMatchObject({
+      id: "c-new",
+      mode: "code",
+      workingDir: "/tmp/project",
+      model: "north-mini-code-1-0",
+      messages: [],
+    });
+    expect(result.conversations[1]).toBe(active);
+  });
+
+  it("creates an empty selected-model conversation when no conversations exist", () => {
+    const result = reconcileConversationsForSelectedModel(
+      [],
+      "",
+      "north-mini-code-1-0",
+      (_source, model) =>
+        conv({
+          id: "c-new",
+          model,
+          messages: [],
+        }),
+    );
+
+    expect(result.activeId).toBe("c-new");
+    expect(result.conversations).toEqual([
+      expect.objectContaining({
+        id: "c-new",
+        model: "north-mini-code-1-0",
+      }),
+    ]);
   });
 });
 
@@ -655,7 +752,12 @@ describe("prompt display helpers", () => {
     expect(chatSource).toContain("saveConversations(nextConversations)");
     expect(chatSource).toContain("writePersistedSelectedModel(nextModel)");
     expect(chatSource).toContain("initialConversationsForModel(model)");
-    expect(appSource).toContain("model={state.toModel}");
+    expect(chatSource).toContain("reconcileConversationsForSelectedModel");
+    expect(appSource).toContain(
+      'const chatModel = state.phase === "switching" ? state.toModel : state.model',
+    );
+    expect(appSource).toContain("model={chatModel}");
+    expect(appSource).not.toContain('key="switching"');
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

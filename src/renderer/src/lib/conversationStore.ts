@@ -109,6 +109,53 @@ export function shouldStartNewConversationForSelectedModel(
   return c.model?.trim() !== selected;
 }
 
+export interface ConversationModelSelection<
+  T extends PersistedConversationLite,
+> {
+  conversations: T[];
+  activeId: string;
+}
+
+export function reconcileConversationsForSelectedModel<
+  T extends PersistedConversationLite,
+>(
+  conversations: T[],
+  activeId: string,
+  selectedModel: string,
+  createConversation: (source: T | undefined, model: string) => T,
+): ConversationModelSelection<T> {
+  const selected = selectedModel.trim();
+  if (conversations.length === 0) {
+    const created = createConversation(undefined, selected);
+    return { conversations: [created], activeId: created.id };
+  }
+
+  const active = conversations.find((c) => c.id === activeId) ?? conversations[0];
+  if (!selected) {
+    return { conversations, activeId: active.id };
+  }
+
+  if (shouldStartNewConversationForSelectedModel(active, selected)) {
+    const created = createConversation(active, selected);
+    return {
+      conversations: [created, ...conversations],
+      activeId: created.id,
+    };
+  }
+
+  const stamped = stampConversationModelBeforeFirstPrompt(active, selected);
+  if (stamped === active) {
+    return { conversations, activeId: active.id };
+  }
+
+  return {
+    conversations: conversations.map((conversation) =>
+      conversation.id === active.id ? stamped : conversation,
+    ),
+    activeId: active.id,
+  };
+}
+
 export function resolveConversationModel(
   c: PersistedConversationLite,
   fallbackModel: string,

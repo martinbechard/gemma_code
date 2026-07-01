@@ -26,8 +26,8 @@ import {
   isClearCommand,
   isModeLocked,
   pickLastWorkingDir,
+  reconcileConversationsForSelectedModel,
   resolveConversationModel,
-  shouldStartNewConversationForSelectedModel,
   stampConversationModelBeforeFirstPrompt,
   rewindToUserRequest,
   shouldSendConversationMessage,
@@ -141,6 +141,18 @@ function newConversation(
   };
 }
 
+function newConversationForSelectedModel(
+  source: Conversation | undefined,
+  model: string,
+): Conversation {
+  return newConversation(
+    source?.mode ?? "code",
+    source?.workingDir,
+    source?.codeSubmode,
+    model,
+  );
+}
+
 function newId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -230,20 +242,12 @@ function fileContextPathsFromResult(result: string): string[] {
 
 function initialConversationsForModel(model: string): Conversation[] {
   const loaded = loadConversations();
-  if (loaded.length === 0) {
-    return [newConversation("code", undefined, undefined, model)];
-  }
-  const active = loaded[0];
-  if (shouldStartNewConversationForSelectedModel(active, model)) {
-    return [
-      newConversation(active.mode, active.workingDir, active.codeSubmode, model),
-      ...loaded,
-    ];
-  }
-  return [
-    stampConversationModelBeforeFirstPrompt(active, model),
-    ...loaded.slice(1),
-  ];
+  return reconcileConversationsForSelectedModel(
+    loaded,
+    loaded[0]?.id ?? "",
+    model,
+    newConversationForSelectedModel,
+  ).conversations;
 }
 
 export default function Chat({ model, models, onSwitchModel }: Props) {
@@ -292,6 +296,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
   >({});
   const logViewerEndRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<{ abort: boolean }>({ abort: false });
+  const lastReconciledModelRef = useRef(model);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? conversations[0],
@@ -311,6 +316,22 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
   useEffect(() => {
     saveConversations(conversations);
   }, [conversations]);
+
+  useEffect(() => {
+    if (lastReconciledModelRef.current === model) return;
+    lastReconciledModelRef.current = model;
+    setConversations((current) => {
+      const next = reconcileConversationsForSelectedModel(
+        current,
+        activeId,
+        model,
+        newConversationForSelectedModel,
+      );
+      if (next.activeId !== activeId) setActiveId(next.activeId);
+      if (next.conversations !== current) saveConversations(next.conversations);
+      return next.conversations;
+    });
+  }, [activeId, model]);
 
   useEffect(() => {
     try {
