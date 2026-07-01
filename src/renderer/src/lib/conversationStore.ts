@@ -7,10 +7,16 @@ import type { ChatMessage, SystemPromptSnapshot } from "@shared/types";
 
 export const STORAGE_KEY = "gemma-code:conversations:v2";
 export const LAST_WORKING_DIR_STORAGE_KEY = "gemma-code:last-working-dir";
+export const SELECTED_MODEL_STORAGE_KEY = "gemma-code:selected-model";
 export const CLEAR_COMMAND = "/clear";
 export const AUTO_PLANNING_SUMMARY_ID = "auto-planning-summary";
 const AUTO_EXECUTION_SEPARATOR_ID = "auto-execution-separator";
 const NO_EXPANDED_PLANNING_SUMMARIES: ReadonlySet<string> = new Set();
+
+interface PreferenceStorage {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+}
 
 // Minimal shape this module needs from a persisted conversation. Components
 // pass the full Conversation type at runtime; the lite shape exists so tests
@@ -72,11 +78,63 @@ export function rewindToUserRequest(
 // Empty-string models are treated as "not stamped".
 export function pickStartupModel(
   convs: PersistedConversationLite[],
+  selectedModel: string | null = null,
 ): string | null {
+  const selected = selectedModel?.trim();
+  if (selected) return selected;
   for (const c of convs) {
     if (typeof c.model === "string" && c.model.length > 0) return c.model;
   }
   return null;
+}
+
+export function hasConversationStarted(c: PersistedConversationLite): boolean {
+  return (c.messages ?? []).some(shouldSendConversationMessage);
+}
+
+export function resolveConversationModel(
+  c: PersistedConversationLite,
+  fallbackModel: string,
+  availableModelNames?: readonly string[],
+): string {
+  const stamped = c.model?.trim();
+  if (!stamped) return fallbackModel;
+  if (availableModelNames && !availableModelNames.includes(stamped)) {
+    return fallbackModel;
+  }
+  return stamped;
+}
+
+function selectedModelStorage(): PreferenceStorage | undefined {
+  try {
+    return typeof localStorage === "undefined" ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function readPersistedSelectedModel(
+  storage: PreferenceStorage | undefined = selectedModelStorage(),
+): string | null {
+  try {
+    const value = storage?.getItem(SELECTED_MODEL_STORAGE_KEY)?.trim();
+    return value ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writePersistedSelectedModel(
+  model: string,
+  storage: PreferenceStorage | undefined = selectedModelStorage(),
+): void {
+  const value = model.trim();
+  if (!value) return;
+  try {
+    storage?.setItem(SELECTED_MODEL_STORAGE_KEY, value);
+  } catch {
+    // ignore
+  }
 }
 
 export function pickLastWorkingDir(

@@ -21,12 +21,15 @@ import {
   LAST_WORKING_DIR_STORAGE_KEY,
   STORAGE_KEY,
   buildMessageRenderItems,
+  hasConversationStarted,
   hasSystemPromptSnapshot,
   isClearCommand,
   isModeLocked,
   pickLastWorkingDir,
+  resolveConversationModel,
   rewindToUserRequest,
   shouldSendConversationMessage,
+  writePersistedSelectedModel,
 } from "../lib/conversationStore";
 import {
   appendReasoningToMessage,
@@ -273,6 +276,16 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     () => conversations.find((c) => c.id === activeId) ?? conversations[0],
     [conversations, activeId],
   );
+  const availableModelNames = useMemo(
+    () => models.map((availableModel) => availableModel.name),
+    [models],
+  );
+  const activeModel = resolveConversationModel(
+    activeConversation,
+    model,
+    availableModelNames,
+  );
+  const modelLocked = hasConversationStarted(activeConversation);
 
   useEffect(() => {
     saveConversations(conversations);
@@ -451,7 +464,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
       ...c,
       title: "New chat",
       messages: [],
-      model,
+      model: activeModel,
     }));
   }
 
@@ -505,6 +518,11 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     }
 
     const conv = conversations.find((c) => c.id === activeId)!;
+    const requestModel = resolveConversationModel(
+      conv,
+      activeModel,
+      availableModelNames,
+    );
     const priorMessages = priorMessagesOverride ?? conv.messages;
     const codeSubmode = codeSubmodeOf(conv);
     const phase =
@@ -524,7 +542,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
       role: "assistant",
       content: "",
       createdAt: Date.now(),
-      model,
+      model: requestModel,
       toolCalls: [],
       activity: { kind: "thinking" },
       phase,
@@ -535,12 +553,12 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
         !priorMessages.some((m) => m.role === "user")
           ? input.slice(0, 48) + (input.length > 48 ? "…" : "")
           : c.title;
-      // Stamp the current global model on the conversation so it can be
-      // auto-loaded next time the conversation is opened.
+      // Stamp the request model so the conversation reopens with the same
+      // runtime.
       return {
         ...c,
         title,
-        model,
+        model: requestModel,
         messages: [...priorMessages, userMsg, assistantMsg],
       };
     });
@@ -555,7 +573,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
         {
           conversationId: activeId,
           messages: history,
-          model,
+          model: requestModel,
           enableTools: true,
           mode: conv.mode,
           workingDir: conv.workingDir,
@@ -564,14 +582,18 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
           enableThinking: thinkingEnabled,
           generatePlanInOneStepWhenThinking: planOneShotWhenThinkingEnabled,
         },
-        (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
+        (chunk: StreamChunk) => onStreamChunk(activeId, chunk, requestModel),
       );
     } finally {
       setStreaming(false);
     }
   }
 
-  function onStreamChunk(targetId: string, chunk: StreamChunk): void {
+  function onStreamChunk(
+    targetId: string,
+    chunk: StreamChunk,
+    chunkModel: string,
+  ): void {
     if (streamRef.current.abort) return;
     setConversations((cs) =>
       cs.map((c) => {
@@ -639,7 +661,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
             role: "harness",
             content: chunk.content,
             createdAt: Date.now(),
-            model,
+            model: chunkModel,
             phase: chunk.phase,
             harnessLabel: chunk.label,
           };
@@ -648,7 +670,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
             role: "assistant",
             content: "",
             createdAt: Date.now(),
-            model,
+            model: chunkModel,
             toolCalls: [],
             activity: { kind: "thinking" },
             phase: chunk.phase,
@@ -706,6 +728,11 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     if (streaming) return;
     const conv = conversations.find((c) => c.id === activeId);
     if (!conv) return;
+    const requestModel = resolveConversationModel(
+      conv,
+      activeModel,
+      availableModelNames,
+    );
     const proposalMsg = conv.messages.find((m) => m.id === messageId);
     if (!proposalMsg || !proposalMsg.proposedPlan) return;
 
@@ -714,7 +741,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
       role: "assistant",
       content: "",
       createdAt: Date.now(),
-      model,
+      model: requestModel,
       toolCalls: [],
       activity: { kind: "thinking" },
       phase: "execution",
@@ -740,7 +767,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
         {
           conversationId: activeId,
           messages: history,
-          model,
+          model: requestModel,
           enableTools: true,
           mode: conv.mode,
           workingDir: conv.workingDir,
@@ -750,7 +777,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
           debugLogging: executionLogging,
           enableThinking: thinkingEnabled,
         },
-        (chunk: StreamChunk) => onStreamChunk(activeId, chunk),
+        (chunk: StreamChunk) => onStreamChunk(activeId, chunk, requestModel),
       );
     } finally {
       setStreaming(false);
@@ -801,7 +828,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
       <div className="flex min-w-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <Header
-            model={model}
+            model={activeModel}
             models={models}
             modelProvenance={modelProvenance}
             pillKey={pillKeyOf(activeConversation)}
@@ -815,7 +842,11 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
             }
             onSelectCodeSubmode={selectCodeSubmode}
             onToggleCanvas={toggleCanvas}
-            onSwitchModel={onSwitchModel}
+            onSwitchModel={(nextModel) => {
+              if (modelLocked) return;
+              writePersistedSelectedModel(nextModel);
+              onSwitchModel(nextModel);
+            }}
             executionLogging={executionLogging}
             executionLogPath={executionLogPath}
             executionLogOpenError={executionLogViewerError}
@@ -829,6 +860,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
               setPlanOneShotWhenThinkingEnabled((current) => !current)
             }
             onOpenExecutionLog={handleOpenExecutionLog}
+            modelLocked={modelLocked}
           />
           {(activeConversation.mode === "code" || filesInContext.length > 0) && (
             <FileContextZone paths={filesInContext} />
@@ -846,7 +878,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
             onStop={handleStop}
             streaming={streaming}
             disabled={false}
-            model={model}
+            model={activeModel}
             placeholder={
               activeConversation.mode === "code"
                 ? "Describe what to build — a webpage, component, or script…"
@@ -1584,6 +1616,7 @@ function Header({
   onToggleThinking,
   onTogglePlanOneShotWhenThinking,
   onOpenExecutionLog,
+  modelLocked,
 }: {
   model: string;
   models: ModelInfo[];
@@ -1607,6 +1640,7 @@ function Header({
   onToggleThinking: () => void;
   onTogglePlanOneShotWhenThinking: () => void;
   onOpenExecutionLog: () => void;
+  modelLocked: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -1795,6 +1829,12 @@ function Header({
         <div className="relative" ref={pickerRef}>
           <button
             onClick={() => setPickerOpen((o) => !o)}
+            disabled={modelLocked}
+            title={
+              modelLocked
+                ? "Model locked for this conversation."
+                : "Switch model"
+            }
             className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[11.5px] text-ink-400 transition-all duration-200 hover:bg-white/[0.05] hover:text-ink-100"
           >
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -1813,7 +1853,7 @@ function Header({
               />
             </svg>
           </button>
-          {pickerOpen && (
+          {pickerOpen && !modelLocked && (
             <div className="anim-fade-scale absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-white/10 bg-[#1a1a1a] p-1.5 shadow-2xl backdrop-blur-xl">
               <div className="mb-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
                 Switch model

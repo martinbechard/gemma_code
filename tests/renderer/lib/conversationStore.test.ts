@@ -5,15 +5,31 @@ import {
   AUTO_PLANNING_SUMMARY_ID,
   buildMessageRenderItems,
   isClearCommand,
+  readPersistedSelectedModel,
   pickStartupModel,
   pickLastWorkingDir,
   isModeLocked,
   hasSystemPromptSnapshot,
+  hasConversationStarted,
+  resolveConversationModel,
   rewindToUserRequest,
   shouldDisplayConversationMessage,
   shouldSendConversationMessage,
+  writePersistedSelectedModel,
   type PersistedConversationLite,
 } from "../../../src/renderer/src/lib/conversationStore";
+
+class MemoryStorage {
+  private readonly values = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+}
 
 function conv(
   partial: Partial<PersistedConversationLite> = {},
@@ -62,6 +78,41 @@ describe("pickStartupModel", () => {
         conv({ id: "c2", model: "model-B" }),
       ]),
     ).toBe("model-B");
+  });
+
+  it("prefers the persisted selected model over conversation stamps", () => {
+    expect(
+      pickStartupModel(
+        [
+          conv({ id: "c1", model: "model-A" }),
+          conv({ id: "c2", model: "model-B" }),
+        ],
+        "gemma-4-31b-it",
+      ),
+    ).toBe("gemma-4-31b-it");
+  });
+
+  it("falls back to stamped conversations when the persisted selected model is blank", () => {
+    expect(
+      pickStartupModel([conv({ id: "c1", model: "model-A" })], "  "),
+    ).toBe("model-A");
+  });
+});
+
+describe("persisted selected model", () => {
+  it("stores and reads the last selected model", () => {
+    const storage = new MemoryStorage();
+
+    writePersistedSelectedModel(" gemma-4-31b-it ", storage);
+
+    expect(readPersistedSelectedModel(storage)).toBe("gemma-4-31b-it");
+  });
+
+  it("returns null when the stored selected model is blank", () => {
+    const storage = new MemoryStorage();
+    storage.setItem("gemma-code:selected-model", "  ");
+
+    expect(readPersistedSelectedModel(storage)).toBeNull();
   });
 });
 
@@ -140,6 +191,55 @@ describe("isModeLocked", () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("hasConversationStarted", () => {
+  it("returns false before the first prompt", () => {
+    expect(hasConversationStarted(conv({ messages: [] }))).toBe(false);
+  });
+
+  it("ignores system and harness messages", () => {
+    expect(
+      hasConversationStarted(
+        conv({
+          messages: [
+            { id: "s1", role: "system" },
+            { id: "h1", role: "harness" },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns true after the first sendable message", () => {
+    expect(
+      hasConversationStarted(
+        conv({ messages: [{ id: "u1", role: "user" }] }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("resolveConversationModel", () => {
+  it("uses the stamped conversation model when it is available", () => {
+    expect(
+      resolveConversationModel(
+        conv({ model: "gemma-4-31b-it" }),
+        "mlx-community/gemma-4-e4b-it-4bit",
+        ["gemma-4-31b-it"],
+      ),
+    ).toBe("gemma-4-31b-it");
+  });
+
+  it("falls back when the stamped model is not in the configured list", () => {
+    expect(
+      resolveConversationModel(
+        conv({ model: "missing-model" }),
+        "mlx-community/gemma-4-e4b-it-4bit",
+        ["mlx-community/gemma-4-e4b-it-4bit"],
+      ),
+    ).toBe("mlx-community/gemma-4-e4b-it-4bit");
   });
 });
 
@@ -472,6 +572,22 @@ describe("prompt display helpers", () => {
     expect(chatSource).toContain("clearActiveConversation");
     expect(chatSource).toContain("Change");
     expect(chatSource).toContain("chooseFolder: true");
+  });
+
+  it("wires conversation model locking into the Chat model picker", () => {
+    const chatSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
+      "utf8",
+    );
+
+    expect(chatSource).toContain(
+      "const modelLocked = hasConversationStarted(activeConversation)",
+    );
+    expect(chatSource).toContain("model={activeModel}");
+    expect(chatSource).toContain("modelLocked={modelLocked}");
+    expect(chatSource).toContain("disabled={modelLocked}");
+    expect(chatSource).toContain("if (modelLocked) return");
+    expect(chatSource).toContain("writePersistedSelectedModel(nextModel)");
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

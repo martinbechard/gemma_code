@@ -9,7 +9,7 @@ tags: ["modules"]
 
 ## Current Understanding
 
-The renderer UI owns setup, configured model selection, cloud credential configuration, chat, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context presentation, workspace interactions, and renderer-side voice input.
+The renderer UI owns setup, configured model selection, selected-model preference persistence, cloud credential configuration, chat, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context presentation, workspace interactions, and renderer-side voice input.
 
 ## Authoritative Sources
 
@@ -58,7 +58,7 @@ No open wiki questions are recorded for this topic.
 
 ## Maintenance Notes
 
-- Recheck this page when conversation persistence, setup state, chat stream handling, mode selection, or log viewer behavior changes.
+- Recheck this page when conversation persistence, selected-model preference behavior, setup state, chat stream handling, mode selection, or log viewer behavior changes.
 
 ## Runtime Path
 
@@ -93,16 +93,17 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 - The renderer uses window.api methods exposed by [Preload IPC Bridge](preload-ipc-bridge.md).
 - The setup UI asks preload for remote credential status and saves provider keys through preload without reading existing secret values.
-- Persisted conversations use the storage keys defined in [conversationStore](../../../src/renderer/src/lib/conversationStore.ts).
+- Persisted conversations and the selected-model preference use the storage keys defined in [conversationStore](../../../src/renderer/src/lib/conversationStore.ts).
 - Voice input is a renderer-side input accessory. [Composer](../../../src/renderer/src/components/Composer.tsx) records microphone audio with browser media APIs, passes the Blob to [transcribeAudioBlob](../../../src/renderer/src/lib/whisper.ts), and appends returned text to the composer draft without sending the message automatically.
 
 ## Internal Data And State
 
-- App owns setup phase state. Chat owns conversations, active id, streaming state, log viewer state, runtime toggles, last working directory, and model provenance cache.
+- App owns setup phase state and the current selected model preference. Chat owns conversations, active id, conversation model stamping, streaming state, log viewer state, runtime toggles, last working directory, and model provenance cache.
 
 ## Processing Rules
 
-- Startup prefers the most recently stamped conversation model when it remains available in the filtered configured model list. Local models also need local cache availability for auto-start.
+- Startup prefers the persisted selected-model preference when it remains available in the filtered configured model list, then falls back to the most recently stamped conversation model, then to the configured default. Local models also need local cache availability for auto-start.
+- Empty conversations can switch models before the first sendable message. Once a conversation has user or assistant history, the model picker becomes read-only and model requests use the conversation-stamped model.
 - Remote model setup surfaces a Configure API key action from the setup picker and a Set API key action from missing-key setup errors.
 - Code conversations with a working directory lock mode after messages are exchanged.
 - System and harness messages are not sent back as normal conversation history.
@@ -114,7 +115,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 - Nothing in the renderer calls Node or Electron APIs directly.
 - Setup repair UI appears only when setup status includes repair metadata.
-- Conversation model stamping drives startup model preference within the filtered configured model list.
+- The selected-model preference drives startup model preference within the filtered configured model list, and conversation model stamping preserves the runtime for started conversations.
 - Voice transcription remains independent of the chat and code model runtime.
 
 ## Configuration
@@ -128,7 +129,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 ## UI And Notification Behavior
 
-- Shows setup progress, byte counts, repair controls, model provenance summaries, configured endpoint credential prompts, cloud credential modal, stream content, tool calls, plan views, log entries, workspace context, voice recording state, Whisper loading progress, and local transcription state.
+- Shows setup progress, byte counts, repair controls, model provenance summaries, configured endpoint credential prompts, cloud credential modal, read-only model state for started conversations, stream content, tool calls, plan views, log entries, workspace context, voice recording state, Whisper loading progress, and local transcription state.
 
 ## Error Handling
 

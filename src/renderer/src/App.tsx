@@ -10,7 +10,9 @@ import Setup from "./components/Setup";
 import Chat from "./components/Chat";
 import {
   pickStartupModel,
+  readPersistedSelectedModel,
   readPersistedConversations,
+  writePersistedSelectedModel,
 } from "./lib/conversationStore";
 
 type AppState =
@@ -140,7 +142,10 @@ export default function App() {
       // model yet (first launch). The Setup welcome screen and the in-chat
       // model picker remain reachable as a safe-mode fallback when the
       // chosen model isn't locally available.
-      const stamped = pickStartupModel(readPersistedConversations());
+      const stamped = pickStartupModel(
+        readPersistedConversations(),
+        readPersistedSelectedModel(),
+      );
       const startupModel =
         stamped && isVisibleStartupModel(stamped) ? stamped : defaultModel;
 
@@ -188,17 +193,19 @@ export default function App() {
   }
 
   function handleSwitchModel(newModel: string): void {
-    setState((prev) => {
-      if (prev.phase !== "ready") return prev;
-      if (prev.model === newModel) return prev;
-      return {
-        phase: "switching",
-        model: prev.model,
-        toModel: newModel,
-        status: { stage: "downloading-model", message: "Switching model…" },
-      };
+    writePersistedSelectedModel(newModel);
+    if (state.phase === "setup") {
+      setState({ ...state, model: newModel });
+      return;
+    }
+    if (state.phase !== "ready" || state.model === newModel) return;
+    setState({
+      phase: "switching",
+      model: state.model,
+      toModel: newModel,
+      status: { stage: "downloading-model", message: "Switching model…" },
     });
-    window.api.switchModel(newModel);
+    void window.api.switchModel(newModel);
   }
 
   if (state.phase === "boot") {
@@ -217,10 +224,12 @@ export default function App() {
           status={state.status}
           model={state.model}
           modelDownloads={modelDownloads}
-          onModelChange={(m) =>
-            setState((s) => (s.phase === "setup" ? { ...s, model: m } : s))
-          }
+          onModelChange={(m) => {
+            writePersistedSelectedModel(m);
+            setState((s) => (s.phase === "setup" ? { ...s, model: m } : s));
+          }}
           onStart={(model) => {
+            writePersistedSelectedModel(model);
             setState({
               phase: "setup",
               status: { stage: "checking", message: "Checking system…" },
