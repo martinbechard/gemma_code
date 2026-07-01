@@ -8,6 +8,12 @@ import {
   nativeImage,
   dialog,
 } from "electron";
+import {
+  accessSync,
+  constants as fsConstants,
+  existsSync,
+  statSync,
+} from "fs";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import {
@@ -140,6 +146,18 @@ import {
 const APP_NAME = "Gemma Code";
 const APP_ID = "com.martinbechard.gemmacode";
 const APP_USER_DATA_DIR_NAME = "gemma-code";
+const CHROMIUM_CACHE_PATHS = [
+  {
+    label: "shared-dictionary-cache",
+    parentName: "Shared Dictionary",
+    cacheName: "cache",
+  },
+  {
+    label: "http-cache-data",
+    parentName: "Cache",
+    cacheName: "Cache_Data",
+  },
+] as const;
 const COMMAND_TARGET_MAX_CHARS = 80;
 const RUNTIME_ACTIVITY_THROTTLE_MS = 400;
 const LIVE_WRITE_PREVIEW_THROTTLE_MS = 450;
@@ -148,8 +166,112 @@ const MODEL_DOWNLOAD_COMPLETE_PROGRESS = 1;
 const MODEL_DOWNLOAD_MAX_WAIT_MS = 60 * 60 * 1000;
 const MLX_SUPPORTED_PLATFORM = "darwin";
 const MLX_SUPPORTED_ARCH = "arm64";
+const FILE_MODE_PERMISSION_MASK = 0o777;
+const FILE_MODE_RADIX = 8;
+const FILE_MODE_DIGITS = 3;
 
 let mainWindow: BrowserWindow | null = null;
+
+interface PathWriteCheck {
+  writable: boolean;
+  error: string | null;
+}
+
+interface StartupPathDiagnostic {
+  path: string;
+  exists: boolean;
+  isDirectory: boolean | null;
+  mode: string | null;
+  uid: number | null;
+  gid: number | null;
+  writable: boolean;
+  error: string | null;
+}
+
+function describeStartupError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  return String(error);
+}
+
+function checkPathWritable(path: string): PathWriteCheck {
+  try {
+    accessSync(path, fsConstants.W_OK);
+    return { writable: true, error: null };
+  } catch (error) {
+    return { writable: false, error: describeStartupError(error) };
+  }
+}
+
+function inspectStartupPath(path: string): StartupPathDiagnostic {
+  if (!existsSync(path)) {
+    return {
+      path,
+      exists: false,
+      isDirectory: null,
+      mode: null,
+      uid: null,
+      gid: null,
+      writable: false,
+      error: "path does not exist",
+    };
+  }
+
+  try {
+    const stats = statSync(path);
+    const writeCheck = checkPathWritable(path);
+    return {
+      path,
+      exists: true,
+      isDirectory: stats.isDirectory(),
+      mode: (stats.mode & FILE_MODE_PERMISSION_MASK)
+        .toString(FILE_MODE_RADIX)
+        .padStart(FILE_MODE_DIGITS, "0"),
+      uid: stats.uid,
+      gid: stats.gid,
+      writable: writeCheck.writable,
+      error: writeCheck.error,
+    };
+  } catch (error) {
+    return {
+      path,
+      exists: true,
+      isDirectory: null,
+      mode: null,
+      uid: null,
+      gid: null,
+      writable: false,
+      error: describeStartupError(error),
+    };
+  }
+}
+
+function configureAppIdentityAndPaths(): void {
+  app.setName(APP_NAME);
+  app.setPath("userData", join(app.getPath("appData"), APP_USER_DATA_DIR_NAME));
+}
+
+function logChromiumCacheDiagnostics(stage: string): void {
+  const userData = app.getPath("userData");
+  console.log(
+    `[startup] ${stage}: appName=${app.getName()} appData=${app.getPath(
+      "appData",
+    )} userData=${userData}`,
+  );
+
+  for (const cachePath of CHROMIUM_CACHE_PATHS) {
+    const parentPath = join(userData, cachePath.parentName);
+    const diskCachePath = join(parentPath, cachePath.cacheName);
+    console.log(
+      `[startup] chromium-cache ${stage}: ${JSON.stringify({
+        label: cachePath.label,
+        parent: inspectStartupPath(parentPath),
+        cache: inspectStartupPath(diskCachePath),
+      })}`,
+    );
+  }
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -2623,15 +2745,18 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
 
 const chatAbortControllers = new Map<string, AbortController>();
 
-app.setName(APP_NAME);
+// Set userData before Chromium utility processes are spawned so every process
+// inherits the same profile path and sandbox grants.
+configureAppIdentityAndPaths();
+logChromiumCacheDiagnostics("pre-ready");
 
 app.whenReady().then(async () => {
-  app.setPath("userData", join(app.getPath("appData"), APP_USER_DATA_DIR_NAME));
   setRuntimePaths({
     userData: app.getPath("userData"),
     appRoot: app.getAppPath(),
     packaged: app.isPackaged,
   });
+  logChromiumCacheDiagnostics("ready");
   electronApp.setAppUserModelId(APP_ID);
   nativeTheme.themeSource = "dark";
 
