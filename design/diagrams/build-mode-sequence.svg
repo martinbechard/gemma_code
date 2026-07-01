@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="860" viewBox="0 0 1180 860" role="img" aria-labelledby="title desc">
+  <title id="title">Build mode sequence diagram</title>
+  <desc id="desc">Sequence diagram with four timelines: User, App, Harness, and Model. Build mode runs the code harness without a selected working directory, creates a sandbox workspace, and streams artifact changes back to the app.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#31546f" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f7f8d" />
+    </marker>
+    <style>
+      .background { fill: #f7f4ee; }
+      .panel { fill: #fffdf8; stroke: #d9d1c2; stroke-width: 1.5; }
+      .title { fill: #21313d; font-family: Arial, Helvetica, sans-serif; font-size: 30px; font-weight: 700; }
+      .subtitle { fill: #56636e; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: 500; }
+      .participant { fill: #ffffff; stroke: #31546f; stroke-width: 2; }
+      .participant-text { fill: #21313d; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; text-anchor: middle; }
+      .lifeline { stroke: #9aa6ae; stroke-width: 2; stroke-dasharray: 8 9; }
+      .message { stroke: #31546f; stroke-width: 2.4; marker-end: url(#arrow); }
+      .message-soft { stroke: #6f7f8d; stroke-width: 2.2; marker-end: url(#arrow-soft); }
+      .label { fill: #243440; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 600; text-anchor: middle; }
+      .small-label { fill: #50616f; font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 600; text-anchor: middle; }
+      .note { fill: #eef5f4; stroke: #7aa69b; stroke-width: 1.5; }
+      .note-text { fill: #24443f; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; text-anchor: middle; }
+      .loop { fill: none; stroke: #c7945d; stroke-width: 2; stroke-dasharray: 7 7; }
+      .loop-label-bg { fill: #fff7ea; stroke: #c7945d; stroke-width: 1.2; }
+      .loop-label { fill: #7a4b16; font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect class="background" x="0" y="0" width="1180" height="860" />
+  <rect class="panel" x="28" y="28" width="1124" height="804" rx="18" />
+
+  <text class="title" x="64" y="78">Build Mode</text>
+  <text class="subtitle" x="64" y="107">Artifact-building workflow. The code harness works in a per-conversation sandbox and preview, not the user's project folder.</text>
+
+  <g>
+    <rect class="participant" x="90" y="132" width="150" height="48" rx="10" />
+    <text class="participant-text" x="165" y="162">User</text>
+
+    <rect class="participant" x="350" y="132" width="150" height="48" rx="10" />
+    <text class="participant-text" x="425" y="162">App</text>
+
+    <rect class="participant" x="610" y="132" width="150" height="48" rx="10" />
+    <text class="participant-text" x="685" y="162">Harness</text>
+
+    <rect class="participant" x="870" y="132" width="150" height="48" rx="10" />
+    <text class="participant-text" x="945" y="162">Model</text>
+  </g>
+
+  <line class="lifeline" x1="165" y1="180" x2="165" y2="794" />
+  <line class="lifeline" x1="425" y1="180" x2="425" y2="794" />
+  <line class="lifeline" x1="685" y1="180" x2="685" y2="794" />
+  <line class="lifeline" x1="945" y1="180" x2="945" y2="794" />
+
+  <line class="message" x1="165" y1="220" x2="425" y2="220" />
+  <text class="label" x="295" y="210">Choose Build; ask for artifact</text>
+
+  <line class="message" x1="425" y1="282" x2="685" y2="282" />
+  <text class="label" x="555" y="272">mode code, no workingDir</text>
+
+  <rect class="note" x="548" y="320" width="274" height="52" rx="8" />
+  <text class="note-text" x="685" y="342">Create sandbox workspace</text>
+  <text class="note-text" x="685" y="361">and preview URL</text>
+
+  <line class="message" x1="685" y1="406" x2="945" y2="406" />
+  <text class="label" x="815" y="396">Build prompt: create in sandbox</text>
+
+  <rect class="loop" x="602" y="438" width="432" height="192" rx="10" />
+  <rect class="loop-label-bg" x="614" y="428" width="174" height="24" rx="6" />
+  <text class="loop-label" x="626" y="445">Direct build loop</text>
+
+  <line class="message-soft" x1="945" y1="478" x2="685" y2="478" />
+  <text class="label" x="815" y="468">Action block: write, read, run, preview</text>
+
+  <line class="message-soft" x1="685" y1="532" x2="945" y2="532" />
+  <text class="label" x="815" y="522">Tool result and file context</text>
+
+  <line class="message-soft" x1="685" y1="586" x2="425" y2="586" />
+  <text class="label" x="555" y="576">Workspace changed; stream tool chunk</text>
+
+  <line class="message" x1="945" y1="672" x2="685" y2="672" />
+  <text class="label" x="815" y="662">Summary or done sentinel</text>
+
+  <line class="message" x1="685" y1="730" x2="425" y2="730" />
+  <text class="label" x="555" y="720">Done/error with artifact state</text>
+
+  <line class="message" x1="425" y1="780" x2="165" y2="780" />
+  <text class="label" x="295" y="770">Show files, preview, result</text>
+
+  <text class="small-label" x="590" y="822">Four timelines: user, app, harness, model</text>
+</svg>
