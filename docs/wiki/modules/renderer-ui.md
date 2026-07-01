@@ -9,7 +9,7 @@ tags: ["modules"]
 
 ## Current Understanding
 
-The renderer UI owns setup, configured model selection, chat, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context presentation, workspace interactions, and renderer-side voice input.
+The renderer UI owns setup, configured model selection, cloud credential configuration, chat, conversation persistence, code/build mode selection, streamed message rendering, execution log viewing, file-context presentation, workspace interactions, and renderer-side voice input.
 
 ## Authoritative Sources
 
@@ -71,6 +71,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 ## Responsibilities
 
 - Show boot, setup, ready, and model-switching phases.
+- Show the cloud credential configuration modal for selected remote models and for missing-key setup errors.
 - Let users select configured models and repair local model caches.
 - Manage conversations and persist them in localStorage.
 - Distinguish Chat, Build, and Code UI modes.
@@ -91,6 +92,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 ## Public Contracts
 
 - The renderer uses window.api methods exposed by [Preload IPC Bridge](preload-ipc-bridge.md).
+- The setup UI asks preload for remote credential status and saves provider keys through preload without reading existing secret values.
 - Persisted conversations use the storage keys defined in [conversationStore](../../../src/renderer/src/lib/conversationStore.ts).
 - Voice input is a renderer-side input accessory. [Composer](../../../src/renderer/src/components/Composer.tsx) records microphone audio with browser media APIs, passes the Blob to [transcribeAudioBlob](../../../src/renderer/src/lib/whisper.ts), and appends returned text to the composer draft without sending the message automatically.
 
@@ -101,6 +103,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 ## Processing Rules
 
 - Startup prefers the most recently stamped conversation model when it remains available in the filtered configured model list. Local models also need local cache availability for auto-start.
+- Remote model setup surfaces a Configure API key action from the setup picker and a Set API key action from missing-key setup errors.
 - Code conversations with a working directory lock mode after messages are exchanged.
 - System and harness messages are not sent back as normal conversation history.
 - Planning messages can collapse once execution begins.
@@ -121,11 +124,11 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 ## External Interfaces
 
-- Browser localStorage, preload clipboard bridge for setup error copy, browser microphone and Web Audio APIs, Hugging Face model download endpoints allowed by the renderer CSP, and preload IPC.
+- Browser localStorage, preload clipboard bridge for setup error copy, preload remote credential bridge, browser microphone and Web Audio APIs, Hugging Face model download endpoints allowed by the renderer CSP, and preload IPC.
 
 ## UI And Notification Behavior
 
-- Shows setup progress, byte counts, repair controls, model provenance summaries, configured endpoint credential prompts, stream content, tool calls, plan views, log entries, workspace context, voice recording state, Whisper loading progress, and local transcription state.
+- Shows setup progress, byte counts, repair controls, model provenance summaries, configured endpoint credential prompts, cloud credential modal, stream content, tool calls, plan views, log entries, workspace context, voice recording state, Whisper loading progress, and local transcription state.
 
 ## Error Handling
 

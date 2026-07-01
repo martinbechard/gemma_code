@@ -16,6 +16,8 @@ The shared types module defines cross-process contracts for setup status, runtim
 - [Shared types source](../../../src/shared/types.ts)
 - [Model configuration file](../../../models.config.json)
 - [Model configuration source](../../../src/main/modelConfig.ts)
+- [Environment file credential source](../../../src/main/envFile.ts)
+- [Remote credential source](../../../src/main/remoteCredentials.ts)
 - [Model chat router](../../../src/main/modelChat.ts)
 - [Remote chat source](../../../src/main/remoteChat.ts)
 - [Renderer app source](../../../src/renderer/src/App.tsx)
@@ -28,6 +30,8 @@ The shared types module defines cross-process contracts for setup status, runtim
 - [src/shared/types.ts](../../../src/shared/types.ts)
 - [models.config.json](../../../models.config.json)
 - [src/main/modelConfig.ts](../../../src/main/modelConfig.ts)
+- [src/main/envFile.ts](../../../src/main/envFile.ts)
+- [src/main/remoteCredentials.ts](../../../src/main/remoteCredentials.ts)
 - [src/main/modelChat.ts](../../../src/main/modelChat.ts)
 - [src/main/remoteChat.ts](../../../src/main/remoteChat.ts)
 - [src/cli/args.ts](../../../src/cli/args.ts)
@@ -86,6 +90,7 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 - [models.config.json](../../../models.config.json) is the configured model catalog.
 - [src/main/modelConfig.ts](../../../src/main/modelConfig.ts) loads model configuration, applies local capability filtering, resolves default model selection, and validates remote endpoint readiness.
+- [src/main/envFile.ts](../../../src/main/envFile.ts) loads provider credentials from the project .env file when the matching process environment value is missing.
 - [ModelInfo](../../../src/shared/types.ts) carries user-visible model metadata plus runtime and optional endpoint metadata.
 - [ModelEndpointInfo](../../../src/shared/types.ts) describes provider protocol, base URL, credential environment variable, and optional provider model override.
 - [src/main/modelChat.ts](../../../src/main/modelChat.ts) routes chat requests to local MLX or configured remote endpoints.
@@ -94,12 +99,14 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 - The model catalog is read from the configured JSON file.
 - GEMMA_MODEL_CONFIG can point to an alternate model catalog.
+- Remote credential status reports whether the configured provider key exists without returning the secret value.
 
 ## Processing Rules
 
 - Unknown model names default to the MLX LM runtime for legacy local paths.
 - Local MLX models are filtered out of the displayed model list when the main process reports no local MLX support.
-- Remote models are visible when configured, but setup must validate the configured credential environment variable before cloud inference starts.
+- Remote models are visible when configured, but setup must validate the configured provider key before cloud inference starts.
+- Process environment values take precedence over .env values. Missing process values are filled from the project .env file before remote setup or chat uses a provider endpoint.
 - Provenance summary returns an empty string when provenance is unavailable.
 
 ## Invariants
@@ -111,6 +118,7 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 ## Configuration
 
 - The model configuration file defines user-visible labels, descriptions, sizes, byte estimates, runtime type, recommended status, and endpoint information.
+- .env stores local remote provider credentials such as GEMINI_API_KEY and COHERE_API_KEY. The sample file is [.env.example](../../../.env.example).
 - The configured local catalog includes Gemma 4 MLX models, Gemma 3 Text 12B as the text-only MLX LM comparison model, Gemma 3 12B 6-bit as a higher-precision MLX VLM experiment, and Ornith 1.0 9B as an experimental MLX VLM agentic coding model for 16GB Apple Silicon Macs.
 - Gemma 3 Text 12B is cataloged as an MLX LM model because the selected MLX Community text conversion is served through the text runtime.
 - Gemma 3 12B 6-bit and Ornith 1.0 9B are cataloged as MLX VLM models because the selected MLX Community conversions are served through the MLX VLM runtime.
@@ -123,7 +131,7 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 ## UI And Notification Behavior
 
-- Setup and model picker UI render labels, descriptions, sizes, provenance summaries, endpoint credential prompts, and recommended status from configured data. The welcome model picker keeps the model choices inside an internal scroll area so the start button remains reachable as the catalog grows.
+- Setup and model picker UI render labels, descriptions, sizes, provenance summaries, endpoint credential prompts, credential status, and recommended status from configured data. The welcome model picker keeps the model choices inside an internal scroll area so the start button remains reachable as the catalog grows.
 
 ## Error Handling
 
@@ -131,4 +139,4 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 ## Verification
 
-- Use [tests/shared/modelRegistry.test.ts](../../../tests/shared/modelRegistry.test.ts), [tests/renderer/components/Setup.test.ts](../../../tests/renderer/components/Setup.test.ts), [tests/cli/args.test.ts](../../../tests/cli/args.test.ts), and [tests/cli/setup.test.ts](../../../tests/cli/setup.test.ts).
+- Use [tests/shared/modelRegistry.test.ts](../../../tests/shared/modelRegistry.test.ts), [tests/main/envFile.test.ts](../../../tests/main/envFile.test.ts), [tests/renderer/components/Setup.test.ts](../../../tests/renderer/components/Setup.test.ts), [tests/cli/args.test.ts](../../../tests/cli/args.test.ts), and [tests/cli/setup.test.ts](../../../tests/cli/setup.test.ts).

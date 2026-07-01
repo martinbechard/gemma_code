@@ -22,6 +22,20 @@ const TEST_MODELS: ModelInfo[] = [
   },
 ];
 
+const TEST_REMOTE_MODEL: ModelInfo = {
+  name: "gemma-4-31b-it",
+  label: "Gemma 4 31B",
+  size: "cloud",
+  sizeBytes: 0,
+  description: "Largest Gemma 4 core model through the Gemini API.",
+  runtime: "remote",
+  endpoint: {
+    kind: "gemini-generate-content",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+  },
+};
+
 const WELCOME_STATUS: SetupStatus = {
   stage: "checking",
   message: "Welcome",
@@ -38,6 +52,13 @@ const ERROR_STATUS: SetupStatus = {
   command:
     "/Users/example/mlx/venv/bin/python3 -m mlx_lm server --model mlx-community/gemma-4-E4B-it-qat-4bit",
   logFile: "/Users/example/Library/Application Support/gemma-code/mlx/logs/mlx-server.log",
+};
+
+const REMOTE_ERROR_STATUS: SetupStatus = {
+  stage: "error",
+  message: "Setup failed",
+  error:
+    "Gemma 4 31B requires GEMINI_API_KEY before it can use cloud inference.",
 };
 
 const DOWNLOAD_STATUSES: LocalModelDownloadStatus[] = [
@@ -102,6 +123,21 @@ describe("Setup error display", () => {
 
     expect(copiedText).toEqual([setupErrorClipboardText(ERROR_STATUS)]);
   });
+
+  it("offers to set the API key from a remote setup error", () => {
+    const html = renderToStaticMarkup(
+      createElement(Setup, {
+        models: [TEST_REMOTE_MODEL],
+        status: REMOTE_ERROR_STATUS,
+        model: TEST_REMOTE_MODEL.name,
+        onModelChange: () => undefined,
+        onStart: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Set API key");
+    expect(html).toContain("GEMINI_API_KEY");
+  });
 });
 
 describe("Setup welcome model list", () => {
@@ -151,5 +187,20 @@ describe("Setup welcome model list", () => {
     expect(html).toContain("Download");
     expect(html).toContain("Resume download");
     expect(html).toContain("50%");
+  });
+
+  it("offers a cloud configuration action for remote models", () => {
+    const html = renderToStaticMarkup(
+      createElement(Setup, {
+        models: [TEST_REMOTE_MODEL],
+        status: WELCOME_STATUS,
+        model: TEST_REMOTE_MODEL.name,
+        onModelChange: () => undefined,
+        onStart: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Configure API key");
+    expect(html).toContain("GEMINI_API_KEY");
   });
 });

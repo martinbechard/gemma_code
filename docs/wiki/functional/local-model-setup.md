@@ -9,7 +9,7 @@ tags: ["functional"]
 
 ## Current Understanding
 
-Users prepare a selected local model by letting Gemma Code install or reuse MLX, validate model files, start the local server, download or reuse weights, warm inference, and report readiness. Local models can also be downloaded in the background before selection, with resumable state shown in the setup model list. Electron and CLI downloads share the same app cache and model-downloads.json state file.
+Users prepare a selected local model by letting Gemma Code install or reuse MLX, validate model files, start the local server, download or reuse weights, warm inference, and report readiness. Local models can also be downloaded in the background before selection, with resumable state shown in the setup model list. Remote models validate configured provider credentials from process environment or .env before readiness. Electron and CLI downloads share the same app cache and model-downloads.json state file.
 
 ## Authoritative Sources
 
@@ -71,18 +71,21 @@ This page belongs to [Functional Workflows](index.md) and supports both [Electro
 - Model switching in the app.
 - Local model row Download and Resume download buttons.
 - Resume download repair button for selected-model setup failures.
+- Configure API key action for selected remote models.
+- Set API key action for missing remote credential setup errors.
 - CLI setup command.
 - CLI status command for readiness inspection.
 
 ## Scope
 
-Includes MLX installation, cache validation, background download progress, repairable incomplete download state, server startup, warmup, and ready state.
+Includes MLX installation, cache validation, background download progress, repairable incomplete download state, server startup, warmup, remote credential configuration, and ready state.
 
 ## Concepts
 
 - Setup stage: current model preparation state.
 - Repairable setup error: incomplete or unusable model cache that can be resumed.
 - Background model download: persisted local-model cache download that runs through Hugging Face snapshot_download without starting the MLX server. The Electron app and CLI download-model command both use this state model.
+- Remote credential: provider key stored in the local .env file and validated before remote model readiness.
 - Model provenance: optional model revision/cache display detail.
 
 ## Workflows
@@ -111,6 +114,7 @@ Background model downloads follow this flow:
 - ready means the runtime can chat.
 - error with repair metadata shows Resume download.
 - non-repair error shows Try again.
+- missing remote credential error shows Set API key.
 - Local model rows show Download for never-requested missing models, Resume download for requested or incomplete models, Downloading for active background downloads, and Downloaded for ready caches.
 - The model picker can offer both MLX LM and MLX VLM local models when local MLX support is available; Gemma 3 Text 12B appears as a text-only MLX LM comparison model, Gemma 3 12B 6-bit appears as a higher-precision MLX VLM experiment, and Ornith 1.0 9B appears as an experimental MLX VLM agentic coding option.
 - The welcome model picker keeps model choices in an internal scroll area so setup actions remain reachable when the catalog contains more entries than fit vertically.
@@ -144,7 +148,7 @@ Steps:
 
 Assertions:
 
-- Setup UI renders progress and repairable error behavior.
+- Setup UI renders progress, repairable error behavior, and remote credential configuration behavior.
 - Setup UI renders local model Download, Resume download, Downloading, and Downloaded states.
 - Setup UI keeps the model list scrollable without hiding the start action.
 - Requested incomplete model downloads derive as resumable after restart.

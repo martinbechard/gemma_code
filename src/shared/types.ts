@@ -288,6 +288,19 @@ export interface ModelListResult {
   defaultModel: string;
 }
 
+export interface RemoteCredentialStatus {
+  model: string;
+  label: string;
+  apiKeyEnv: string;
+  hasCredential: boolean;
+  envFilePath: string;
+}
+
+export interface RemoteCredentialSaveRequest {
+  model: string;
+  value: string;
+}
+
 export interface ModelProvenance {
   model: string;
   revision: string | null;

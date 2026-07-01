@@ -5,6 +5,7 @@ import {
   type LocalModelDownloadStatus,
   type ModelInfo,
   type ModelProvenance,
+  type RemoteCredentialStatus,
   type SetupStatus,
 } from "@shared/types";
 import gemmaLogoUrl from "../assets/gemma-logo.png";
@@ -13,6 +14,12 @@ const ERROR_COPY_CONFIRM_MS = 1500;
 
 interface SetupErrorClipboardApi {
   copyTextToClipboard: (text: string) => Promise<void>;
+}
+
+interface RemoteCredentialEditorState {
+  credentialStatus: RemoteCredentialStatus | null;
+  modal: React.ReactNode;
+  openModal: () => void;
 }
 
 interface Props {
@@ -71,6 +78,97 @@ export async function copySetupErrorToClipboard(
   throw new Error("Clipboard is not available.");
 }
 
+function useRemoteCredentialEditor(
+  selected: ModelInfo | undefined,
+): RemoteCredentialEditorState {
+  const [credentialStatus, setCredentialStatus] =
+    useState<RemoteCredentialStatus | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [keyValue, setKeyValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedModelName = selected?.name;
+  const selectedHasEndpoint = selected?.endpoint != null;
+
+  useEffect(() => {
+    let cancelled = false;
+    setCredentialStatus(null);
+    setError(null);
+    if (!selectedModelName || !selectedHasEndpoint) return;
+    window.api
+      .getRemoteCredentialStatus(selectedModelName)
+      .then((nextStatus) => {
+        if (!cancelled) setCredentialStatus(nextStatus);
+      })
+      .catch((nextError: unknown) => {
+        if (!cancelled) setError(errorMessage(nextError));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedModelName, selectedHasEndpoint]);
+
+  const openModal = (): void => {
+    setKeyValue("");
+    setError(null);
+    setModalOpen(true);
+  };
+
+  const closeModal = (): void => {
+    if (saving) return;
+    setModalOpen(false);
+    setKeyValue("");
+    setError(null);
+  };
+
+  const saveCredential = (): void => {
+    if (
+      !selectedModelName ||
+      !selectedHasEndpoint ||
+      keyValue.trim().length === 0
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    window.api
+      .saveRemoteCredential({ model: selectedModelName, value: keyValue })
+      .then((nextStatus) => {
+        setCredentialStatus(nextStatus);
+        setModalOpen(false);
+        setKeyValue("");
+      })
+      .catch((nextError: unknown) => {
+        setError(errorMessage(nextError));
+      })
+      .finally(() => {
+        setSaving(false);
+      });
+  };
+
+  return {
+    credentialStatus,
+    openModal,
+    modal: (
+      <RemoteCredentialModal
+        model={selected}
+        status={credentialStatus}
+        open={modalOpen}
+        value={keyValue}
+        saving={saving}
+        error={error}
+        onValueChange={setKeyValue}
+        onCancel={closeModal}
+        onSave={saveCredential}
+      />
+    ),
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Could not save API key.";
+}
+
 export default function Setup({
   models,
   status,
@@ -81,6 +179,8 @@ export default function Setup({
   onDownloadModel,
   onRepairModel,
 }: Props) {
+  const selected = models.find((candidate) => candidate.name === model);
+  const credentialEditor = useRemoteCredentialEditor(selected);
   const isWorking =
     status.stage === "checking" ||
     status.stage === "installing-mlx" ||
@@ -90,108 +190,129 @@ export default function Setup({
     status.stage === "downloading-model" ||
     status.stage === "warming-model";
   const isRepairable = !!status.repair?.model && onRepairModel != null;
+  const showsRemoteCredentialAction =
+    selected?.endpoint != null &&
+    status.stage === "error" &&
+    (status.error?.includes(selected.endpoint.apiKeyEnv) ?? false);
   const [copiedError, setCopiedError] = useState(false);
 
   if (status.stage === "checking" && status.message === "Welcome") {
     return (
-      <WelcomeScreen
-        models={models}
-        model={model}
-        onModelChange={onModelChange}
-        onStart={onStart}
-        modelDownloads={modelDownloads}
-        onDownloadModel={onDownloadModel}
-      />
+      <>
+        <WelcomeScreen
+          models={models}
+          model={model}
+          onModelChange={onModelChange}
+          onStart={onStart}
+          modelDownloads={modelDownloads}
+          onDownloadModel={onDownloadModel}
+          credentialStatus={credentialEditor.credentialStatus}
+          onConfigureCredential={credentialEditor.openModal}
+        />
+        {credentialEditor.modal}
+      </>
     );
   }
 
   return (
-    <div className="drag flex h-full w-full flex-col">
-      <div className="h-9" />
-      <div className="flex flex-1 items-center justify-center px-8">
-        <div className="no-drag w-full max-w-md">
-          <div className="mb-8 text-center">
-            <GemmaLogo className="mx-auto mb-5 h-20 w-20" />
-            <h1 className="text-[22px] font-semibold tracking-tight">
-              Setting things up
-            </h1>
-            <p className="mt-1.5 text-sm text-ink-400">
-              Preparing the selected model.
-            </p>
+    <>
+      <div className="drag flex h-full w-full flex-col">
+        <div className="h-9" />
+        <div className="flex flex-1 items-center justify-center px-8">
+          <div className="no-drag w-full max-w-md">
+            <div className="mb-8 text-center">
+              <GemmaLogo className="mx-auto mb-5 h-20 w-20" />
+              <h1 className="text-[22px] font-semibold tracking-tight">
+                Setting things up
+              </h1>
+              <p className="mt-1.5 text-sm text-ink-400">
+                Preparing the selected model.
+              </p>
+            </div>
+
+            <StageList status={status} />
+
+            {isWorking && status.progress != null && (
+              <div className="mt-6">
+                <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/5">
+                  <div
+                    className="h-full rounded-full bg-white/70 transition-[width] duration-200 ease-out"
+                    style={{
+                      width: `${Math.max(2, Math.round((status.progress ?? 0) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <div className="mt-2 flex justify-between text-[11px] tabular-nums text-ink-400">
+                  <span>{Math.round((status.progress ?? 0) * 100)}%</span>
+                  {status.bytesDone != null && status.bytesTotal != null && (
+                    <span>
+                      {formatBytes(status.bytesDone)} /{" "}
+                      {formatBytes(status.bytesTotal)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {status.stage === "error" && (
+              <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium">Something went wrong</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void copySetupErrorToClipboard(status).then(() => {
+                        setCopiedError(true);
+                        window.setTimeout(
+                          () => setCopiedError(false),
+                          ERROR_COPY_CONFIRM_MS,
+                        );
+                      });
+                    }}
+                    className="shrink-0 rounded-md border border-red-300/30 bg-red-300/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-300/20"
+                  >
+                    {copiedError ? "Copied" : "Copy error"}
+                  </button>
+                </div>
+                <pre className="selectable mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-red-300/20 bg-black/25 p-2 text-[11px] leading-5 text-red-100">
+                  {setupErrorClipboardText(status)}
+                </pre>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {showsRemoteCredentialAction && (
+                    <button
+                      type="button"
+                      onClick={credentialEditor.openModal}
+                      className="rounded-md border border-red-200/30 bg-red-200/10 px-3 py-1.5 text-xs text-red-50 hover:bg-red-200/20"
+                    >
+                      Set API key
+                    </button>
+                  )}
+                  {!isRepairable && (
+                    <button
+                      type="button"
+                      onClick={() => onStart(model)}
+                      className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+                    >
+                      Try again
+                    </button>
+                  )}
+                  {isRepairable && (
+                    <button
+                      type="button"
+                      onClick={() => onRepairModel(status.repair!.model)}
+                      className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-400/20"
+                    >
+                      Resume download
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-
-          <StageList status={status} />
-
-          {isWorking && status.progress != null && (
-            <div className="mt-6">
-              <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/5">
-                <div
-                  className="h-full rounded-full bg-white/70 transition-[width] duration-200 ease-out"
-                  style={{
-                    width: `${Math.max(2, Math.round((status.progress ?? 0) * 100))}%`,
-                  }}
-                />
-              </div>
-              <div className="mt-2 flex justify-between text-[11px] tabular-nums text-ink-400">
-                <span>{Math.round((status.progress ?? 0) * 100)}%</span>
-                {status.bytesDone != null && status.bytesTotal != null && (
-                  <span>
-                    {formatBytes(status.bytesDone)} /{" "}
-                    {formatBytes(status.bytesTotal)}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {status.stage === "error" && (
-            <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              <div className="flex items-center justify-between gap-3">
-                <div className="font-medium">Something went wrong</div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copySetupErrorToClipboard(status).then(() => {
-                      setCopiedError(true);
-                      window.setTimeout(
-                        () => setCopiedError(false),
-                        ERROR_COPY_CONFIRM_MS,
-                      );
-                    });
-                  }}
-                  className="shrink-0 rounded-md border border-red-300/30 bg-red-300/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-300/20"
-                >
-                  {copiedError ? "Copied" : "Copy error"}
-                </button>
-              </div>
-              <pre className="selectable mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-red-300/20 bg-black/25 p-2 text-[11px] leading-5 text-red-100">
-                {setupErrorClipboardText(status)}
-              </pre>
-              <div className="mt-3 flex gap-2">
-                {!isRepairable && (
-                  <button
-                    type="button"
-                    onClick={() => onStart(model)}
-                    className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
-                  >
-                    Try again
-                  </button>
-                )}
-                {isRepairable && (
-                  <button
-                    type="button"
-                    onClick={() => onRepairModel(status.repair!.model)}
-                    className="rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-400/20"
-                  >
-                    Resume download
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </div>
-    </div>
+      {credentialEditor.modal}
+    </>
   );
 }
 
@@ -202,6 +323,8 @@ function WelcomeScreen({
   onStart,
   modelDownloads,
   onDownloadModel,
+  credentialStatus,
+  onConfigureCredential,
 }: {
   models: ModelInfo[];
   model: string;
@@ -209,6 +332,8 @@ function WelcomeScreen({
   onStart: (model: string) => void;
   modelDownloads: LocalModelDownloadStatus[];
   onDownloadModel?: (model: string) => void;
+  credentialStatus?: RemoteCredentialStatus | null;
+  onConfigureCredential: () => void;
 }) {
   const selected = models.find((m) => m.name === model) ?? models[0];
   const downloadStatusByModel = new Map(
@@ -250,6 +375,8 @@ function WelcomeScreen({
     );
   }
   const selectedUsesMlx = isLocalMlxRuntime(selected.runtime);
+  const selectedApiKeyEnv = selected.endpoint?.apiKeyEnv;
+  const selectedHasCredential = credentialStatus?.hasCredential ?? false;
 
   return (
     <div className="drag flex h-full w-full flex-col">
@@ -330,11 +457,107 @@ function WelcomeScreen({
           >
             Start with {selected.label} &nbsp;·&nbsp; {selected.size}
           </button>
-          <p className="mt-3 shrink-0 text-center text-[11px] text-ink-400">
-            {selectedUsesMlx
-              ? "We'll install MLX runtime if needed. Model weights are loaded from local cache when available."
-              : `${selected.endpoint?.apiKeyEnv ?? "Configured endpoint credentials"} must be set before cloud inference starts.`}
-          </p>
+          {selectedUsesMlx ? (
+            <p className="mt-3 shrink-0 text-center text-[11px] text-ink-400">
+              We'll install MLX runtime if needed. Model weights are loaded from local cache when available.
+            </p>
+          ) : (
+            <div className="mt-3 flex shrink-0 items-center justify-between gap-3 text-[11px] text-ink-400">
+              <span className="min-w-0">
+                {selectedApiKeyEnv}{" "}
+                {selectedHasCredential
+                  ? "is saved for cloud inference."
+                  : "is missing for cloud inference."}
+              </span>
+              <button
+                type="button"
+                onClick={onConfigureCredential}
+                className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-ink-100 hover:bg-white/10"
+              >
+                Configure API key
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RemoteCredentialModal({
+  model,
+  status,
+  open,
+  value,
+  saving,
+  error,
+  onValueChange,
+  onCancel,
+  onSave,
+}: {
+  model: ModelInfo | undefined;
+  status: RemoteCredentialStatus | null;
+  open: boolean;
+  value: string;
+  saving: boolean;
+  error: string | null;
+  onValueChange: (value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  if (!open || !model?.endpoint) return null;
+  const apiKeyEnv = status?.apiKeyEnv ?? model.endpoint.apiKeyEnv;
+  const canSave = value.trim().length > 0 && !saving;
+  return (
+    <div className="no-drag fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-white/10 bg-ink-950 p-4 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-ink-100">
+              Cloud model configuration
+            </h2>
+            <p className="mt-1 text-xs text-ink-400">{model.label}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-ink-200 hover:bg-white/10"
+          >
+            Close
+          </button>
+        </div>
+        <label className="mt-4 block text-[11px] font-medium uppercase tracking-wider text-ink-400">
+          {apiKeyEnv}
+        </label>
+        <input
+          type="password"
+          value={value}
+          onChange={(event) => onValueChange(event.currentTarget.value)}
+          placeholder={
+            status?.hasCredential ? "Saved key present" : "Paste API key"
+          }
+          className="mt-2 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink-100 outline-none placeholder:text-ink-500 focus:border-white/30"
+        />
+        <p className="mt-2 text-[11px] text-ink-500">
+          Saved in .env for the Electron app and CLI.
+        </p>
+        {error && <div className="mt-3 text-xs text-red-300">{error}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-ink-200 hover:bg-white/10"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!canSave}
+            className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-ink-900 transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving" : "Save key"}
+          </button>
         </div>
       </div>
     </div>

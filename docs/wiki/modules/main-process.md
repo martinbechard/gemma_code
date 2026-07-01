@@ -23,6 +23,8 @@ The main process is the Electron adapter and runtime coordinator. It owns app wi
 
 - [src/main/index.ts](../../../src/main/index.ts)
 - [src/main/modelConfig.ts](../../../src/main/modelConfig.ts)
+- [src/main/envFile.ts](../../../src/main/envFile.ts)
+- [src/main/remoteCredentials.ts](../../../src/main/remoteCredentials.ts)
 - [src/main/modelChat.ts](../../../src/main/modelChat.ts)
 - [src/main/remoteChat.ts](../../../src/main/remoteChat.ts)
 - [src/main/mlx.ts](../../../src/main/mlx.ts)
@@ -71,10 +73,10 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 ## Responsibilities
 
 - Configure Electron application identity, user-data path, native theme, app window, and renderer loading.
-- Expose IPC handlers for setup, model listing, model switching, repair, chat, abort, logs, tools, workspace operations, directory selection, and the app-level audio transcription placeholder.
+- Expose IPC handlers for setup, model listing, model switching, remote credential status and saving, repair, chat, abort, logs, tools, workspace operations, directory selection, and the app-level audio transcription placeholder.
 - Build and emit mode-specific system prompts.
 - Run local setup through MLX install, model validation, server start, download polling, cache repair detection, and warmup inference.
-- Run remote setup by validating configured endpoint credentials before chat starts.
+- Run remote setup by validating configured endpoint credentials from process environment or .env before chat starts.
 - Drive chat, planning, semantic review, execution, verification, tool calls, step evidence, and stream chunks.
 - Forward workspace changes, raw chunks, file streaming, and runtime activities to the renderer.
 
@@ -108,7 +110,7 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 ## Processing Rules
 
 - Local setup must prove warmup inference before sending ready.
-- Remote setup must validate configured endpoint credentials before sending ready.
+- Remote setup must validate configured endpoint credentials loaded from process environment or .env before sending ready.
 - Code auto mode assembles a plan before execution unless freestyle or execute-plan mode is selected.
 - Tool actions are one-at-a-time and tool results are replayed into model context.
 - Verification cannot mutate files and must rely on visible evidence.
@@ -125,10 +127,11 @@ This module contributes to the [Architecture](../technical/architecture.md), [El
 - Runtime paths are set from Electron app state.
 - Model choice arrives through IPC request payloads.
 - Model catalog data comes from the configured model JSON file.
+- Remote credential save requests write the selected provider key to the project .env file and update the active main process environment.
 
 ## External Interfaces
 
-- Electron IPC, local MLX server, configured remote model APIs, local filesystem, shell opening, directory dialogs, and the workspace HTTP preview server.
+- Electron IPC, local MLX server, configured remote model APIs, local .env file, local filesystem, shell opening, directory dialogs, and the workspace HTTP preview server.
 
 ## UI And Notification Behavior
 

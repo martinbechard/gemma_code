@@ -55,7 +55,7 @@ Key entry pages:
 - Node 20 or newer.
 - Git.
 
-The first local MLX run creates the local Python environment, installs MLX packages, and downloads the selected model before warmup. Local models can also be downloaded ahead of selection from the setup screen or CLI. Remote models require their configured provider credential environment variable.
+The first local MLX run creates the local Python environment, installs MLX packages, and downloads the selected model before warmup. Local models can also be downloaded ahead of selection from the setup screen or CLI. Remote models read provider credentials from the local .env file, and the Electron setup screen can save the selected cloud model key there.
 
 ## Install And Run
 
@@ -65,6 +65,7 @@ Clone the current repo:
 git clone git@github.com:martinbechard/gemma_code.git
 cd gemma_code
 npm install
+cp .env.example .env
 npm run dev
 ```
 
@@ -264,7 +265,7 @@ The planning prompt keeps planning focused on inspection and executable steps. T
 
 ## Model Runtime
 
-The local runtime uses MLX-LM and MLX-VLM through an app-managed Python environment. The CLI and Electron app share the same runtime setup and can reuse an already-running MLX server. Remote models are read from models.config.json and use their configured endpoint kind, base URL, and credential environment variable.
+The local runtime uses MLX-LM and MLX-VLM through an app-managed Python environment. The CLI and Electron app share the same runtime setup and can reuse an already-running MLX server. Remote models are read from models.config.json and use their configured endpoint kind, base URL, and provider key name. Credentials are loaded from .env, while already-set shell variables still take precedence for one-off overrides.
 
 Check runtime status:
 

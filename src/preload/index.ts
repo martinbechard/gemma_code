@@ -10,6 +10,8 @@ import type {
   LocalModelDownloadStatus,
   ModelListResult,
   ModelProvenance,
+  RemoteCredentialSaveRequest,
+  RemoteCredentialStatus,
   SetupStatus,
   StreamChunk,
   WorkspaceInfo,
@@ -46,6 +48,16 @@ const api = {
     ipcRenderer.invoke("models:list-local"),
 
   listModels: (): Promise<ModelListResult> => ipcRenderer.invoke("models:list"),
+
+  getRemoteCredentialStatus: (
+    model: string,
+  ): Promise<RemoteCredentialStatus> =>
+    ipcRenderer.invoke("remote-credentials:status", model),
+
+  saveRemoteCredential: (
+    request: RemoteCredentialSaveRequest,
+  ): Promise<RemoteCredentialStatus> =>
+    ipcRenderer.invoke("remote-credentials:save", request),
 
   listModelDownloads: (): Promise<LocalModelDownloadStatus[]> =>
     ipcRenderer.invoke("models:downloads:list"),

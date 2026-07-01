@@ -65,6 +65,7 @@ import type {
   ChatRequest,
   CodeSubmode,
   LocalModelDownloadStatus,
+  RemoteCredentialSaveRequest,
   StreamChunk,
   ToolCall,
 } from "../shared/types";
@@ -131,6 +132,10 @@ import {
   readPersistedModelDownloadRecords,
   writePersistedModelDownloadRecords,
 } from "./modelDownloadState";
+import {
+  remoteCredentialStatusForModel,
+  saveRemoteCredentialForModel,
+} from "./remoteCredentials";
 
 const APP_NAME = "Gemma Code";
 const APP_ID = "com.martinbechard.gemmacode";
@@ -2719,6 +2724,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("models:list", async () =>
     configuredModelList({ hasMLX: hasLocalMLXSupport() }),
+  );
+
+  ipcMain.handle("remote-credentials:status", async (_e, model: string) =>
+    remoteCredentialStatusForModel(model),
+  );
+
+  ipcMain.handle(
+    "remote-credentials:save",
+    async (_e, request: RemoteCredentialSaveRequest) =>
+      saveRemoteCredentialForModel(request.model, request.value),
   );
 
   ipcMain.handle("models:provenance", async (_e, model: string) => {

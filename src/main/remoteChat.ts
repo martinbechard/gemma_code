@@ -2,6 +2,7 @@ import {
   endpointForModel,
   validateRemoteModelReady,
 } from "./modelConfig";
+import { readCredentialEnvValue } from "./envFile";
 import { readSSE } from "./sse";
 import type {
   GeminiGenerateContentEndpointInfo,
@@ -153,7 +154,7 @@ export async function* remoteChatStream(
   if (!endpoint) {
     throw new Error(`${opts.model} does not have endpoint configuration.`);
   }
-  const apiKey = process.env[endpoint.apiKeyEnv]?.trim();
+  const apiKey = readCredentialEnvValue(endpoint.apiKeyEnv);
   if (!apiKey) {
     throw new Error(`${opts.model} requires ${endpoint.apiKeyEnv}.`);
   }

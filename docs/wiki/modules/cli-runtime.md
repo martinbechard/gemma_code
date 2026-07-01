@@ -70,7 +70,7 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 
 - Parse CLI commands and options.
 - Set runtime paths before importing main runtime modules.
-- Run setup and status checks against the local MLX runtime or configured remote endpoint credentials.
+- Run setup and status checks against the local MLX runtime or configured remote endpoint credentials loaded from process environment or .env.
 - Run chat and code prompts in terminal output.
 - Assemble, review, approve, execute, and continue plans.
 - Save and load CLI conversation snapshots.
@@ -97,7 +97,7 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 
 ## Processing Rules
 
-- setup installs or reuses MLX, starts the server, and warms inference for local models. For remote models it validates configured endpoint credentials.
+- setup installs or reuses MLX, starts the server, and warms inference for local models. For remote models it validates configured endpoint credentials from process environment or .env.
 - status reports MLX installation and model cache readiness for local models. For remote models it reports endpoint kind and credential readiness.
 - code defaults to plan-review-execute unless approve or freestyle mode changes the flow.
 - continue requires a saved conversation snapshot.
@@ -111,6 +111,7 @@ This module implements the [CLI Agent Runtime](../subsystems/cli-agent-runtime.m
 ## Configuration
 
 - CLI default model currently comes from [src/cli/args.ts](../../../src/cli/args.ts), while renderer/app default model comes from [models.config.json](../../../models.config.json).
+- Remote provider credentials are shared with the Electron app through the project .env file. Already-set shell variables take precedence for the current CLI process.
 
 ## External Interfaces
 

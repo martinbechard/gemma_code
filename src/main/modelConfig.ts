@@ -8,6 +8,7 @@ import {
   type ModelListResult,
   type ModelRuntime,
 } from "../shared/types";
+import { readCredentialEnvValue } from "./envFile";
 
 const MODEL_CONFIG_ENV = "GEMMA_MODEL_CONFIG";
 const DEFAULT_MODEL_CONFIG_FILE = "models.config.json";
@@ -64,7 +65,7 @@ export function validateRemoteModelReady(model: string): void {
   if (!info.endpoint) {
     throw new Error(`${info.label} does not have endpoint configuration.`);
   }
-  const token = process.env[info.endpoint.apiKeyEnv];
+  const token = readCredentialEnvValue(info.endpoint.apiKeyEnv);
   if (!token || token.trim().length === 0) {
     throw new Error(
       `${info.label} requires ${info.endpoint.apiKeyEnv} before it can use cloud inference.`,
