@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   formatModelProvenanceSummary,
   isLocalMlxRuntime,
+  type LocalModelDownloadStatus,
   type ModelInfo,
   type ModelProvenance,
   type SetupStatus,
@@ -16,6 +17,8 @@ interface Props {
   model: string;
   onModelChange: (m: string) => void;
   onStart: (model: string) => void;
+  modelDownloads?: LocalModelDownloadStatus[];
+  onDownloadModel?: (model: string) => void;
   onRepairModel?: (model: string) => void;
 }
 
@@ -48,6 +51,8 @@ export default function Setup({
   model,
   onModelChange,
   onStart,
+  modelDownloads = [],
+  onDownloadModel,
   onRepairModel,
 }: Props) {
   const isWorking =
@@ -68,6 +73,8 @@ export default function Setup({
         model={model}
         onModelChange={onModelChange}
         onStart={onStart}
+        modelDownloads={modelDownloads}
+        onDownloadModel={onDownloadModel}
       />
     );
   }
@@ -168,13 +175,20 @@ function WelcomeScreen({
   model,
   onModelChange,
   onStart,
+  modelDownloads,
+  onDownloadModel,
 }: {
   models: ModelInfo[];
   model: string;
   onModelChange: (m: string) => void;
   onStart: (model: string) => void;
+  modelDownloads: LocalModelDownloadStatus[];
+  onDownloadModel?: (model: string) => void;
 }) {
   const selected = models.find((m) => m.name === model) ?? models[0];
+  const downloadStatusByModel = new Map(
+    modelDownloads.map((status) => [status.model, status]),
+  );
   const [modelProvenance, setModelProvenance] = useState<
     Record<string, ModelProvenance>
   >({});
@@ -215,10 +229,10 @@ function WelcomeScreen({
   return (
     <div className="drag flex h-full w-full flex-col">
       <div className="h-9" />
-      <div className="flex flex-1 items-center justify-center px-8">
-        <div className="no-drag w-full max-w-md">
-          <div className="anim-fade-up mb-8 text-center">
-            <GemmaLogo className="mx-auto mb-5 h-24 w-24" />
+      <div className="flex min-h-0 flex-1 items-center justify-center px-8 py-6">
+        <div className="no-drag flex max-h-full w-full max-w-md flex-col">
+          <div className="anim-fade-up mb-5 shrink-0 text-center">
+            <GemmaLogo className="mx-auto mb-4 h-20 w-20" />
             <h1 className="text-[26px] font-semibold tracking-tight">
               Welcome to Gemma Code
             </h1>
@@ -229,56 +243,145 @@ function WelcomeScreen({
             </p>
           </div>
 
-          <div className="mb-3 text-[11px] font-medium uppercase tracking-wider text-ink-400">
+          <div className="mb-3 shrink-0 text-[11px] font-medium uppercase tracking-wider text-ink-400">
             Pick a model
           </div>
-          <div className="anim-stagger space-y-2">
-            {models.map((m) => (
-              <button
-                key={m.name}
-                onClick={() => onModelChange(m.name)}
-                className={`anim-fade-up group relative w-full rounded-xl border px-4 py-3 text-left transition active:scale-[0.99] ${
-                  model === m.name
-                    ? "border-white/25 bg-white/[0.06]"
-                    : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{m.label}</span>
-                    {m.recommended && (
-                      <span className="rounded-full bg-white/10 px-2 py-[1px] text-[10px] font-medium uppercase tracking-wider text-ink-100">
-                        Recommended
-                      </span>
-                    )}
+          <div className="anim-stagger min-h-0 max-h-[min(44vh,360px)] space-y-2 overflow-y-auto pr-1">
+            {models.map((m) => {
+              const downloadStatus = downloadStatusByModel.get(m.name);
+              return (
+                <div
+                  key={m.name}
+                  className={`anim-fade-up group relative w-full rounded-xl border px-4 py-3 text-left transition ${
+                    model === m.name
+                      ? "border-white/25 bg-white/[0.06]"
+                      : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      onClick={() => onModelChange(m.name)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium">
+                            {m.label}
+                          </span>
+                          {m.recommended && (
+                            <span className="shrink-0 rounded-full bg-white/10 px-2 py-[1px] text-[10px] font-medium uppercase tracking-wider text-ink-100">
+                              Recommended
+                            </span>
+                          )}
+                        </div>
+                        <span className="shrink-0 text-xs tabular-nums text-ink-400">
+                          {m.size}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[12.5px] leading-snug text-ink-400">
+                        {m.description}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-snug text-ink-500">
+                        {formatModelProvenanceSummary(modelProvenance[m.name]) ||
+                          m.size}
+                      </div>
+                    </button>
+                    <ModelDownloadButton
+                      model={m}
+                      status={downloadStatus}
+                      onDownloadModel={onDownloadModel}
+                    />
                   </div>
-                  <span className="text-xs tabular-nums text-ink-400">
-                    {m.size}
-                  </span>
+                  <ModelDownloadProgress status={downloadStatus} />
                 </div>
-                <div className="mt-1 text-[12.5px] leading-snug text-ink-400">
-                  {m.description}
-                </div>
-                <div className="mt-1 text-[11px] leading-snug text-ink-500">
-                  {formatModelProvenanceSummary(modelProvenance[m.name]) ||
-                    m.size}
-                </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
 
           <button
             onClick={() => onStart(selected.name)}
-            className="mt-6 w-full rounded-xl bg-white py-3 text-sm font-medium text-ink-900 transition hover:bg-white/90 active:scale-[0.99]"
+            className="mt-5 shrink-0 w-full rounded-xl bg-white py-3 text-sm font-medium text-ink-900 transition hover:bg-white/90 active:scale-[0.99]"
           >
             Start with {selected.label} &nbsp;·&nbsp; {selected.size}
           </button>
-          <p className="mt-3 text-center text-[11px] text-ink-400">
+          <p className="mt-3 shrink-0 text-center text-[11px] text-ink-400">
             {selectedUsesMlx
               ? "We'll install MLX runtime if needed. Model weights are loaded from local cache when available."
               : `${selected.endpoint?.apiKeyEnv ?? "Configured endpoint credentials"} must be set before cloud inference starts.`}
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ModelDownloadButton({
+  model,
+  status,
+  onDownloadModel,
+}: {
+  model: ModelInfo;
+  status?: LocalModelDownloadStatus;
+  onDownloadModel?: (model: string) => void;
+}) {
+  if (!isLocalMlxRuntime(model.runtime) || !status || !onDownloadModel) {
+    return null;
+  }
+  if (status.state === "downloaded") {
+    return (
+      <span className="mt-0.5 shrink-0 rounded-md border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-[11px] text-emerald-100">
+        Downloaded
+      </span>
+    );
+  }
+  if (status.state === "downloading" || status.state === "queued") {
+    return (
+      <span className="mt-0.5 shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-ink-300">
+        Downloading
+      </span>
+    );
+  }
+  const label =
+    status.state === "incomplete" || status.state === "failed"
+      ? "Resume download"
+      : "Download";
+  return (
+    <button
+      type="button"
+      onClick={() => onDownloadModel(model.name)}
+      className="mt-0.5 shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-ink-100 hover:bg-white/10"
+    >
+      {label}
+    </button>
+  );
+}
+
+function ModelDownloadProgress({
+  status,
+}: {
+  status?: LocalModelDownloadStatus;
+}) {
+  if (
+    !status ||
+    status.progress == null ||
+    (status.state !== "downloading" &&
+      status.state !== "incomplete" &&
+      status.state !== "failed")
+  ) {
+    return null;
+  }
+  const percent = Math.round(status.progress * 100);
+  return (
+    <div className="mt-2">
+      <div className="h-1 w-full overflow-hidden rounded-full bg-white/5">
+        <div
+          className="h-full rounded-full bg-white/50"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <div className="mt-1 text-[10px] tabular-nums text-ink-500">
+        {percent}%
       </div>
     </div>
   );

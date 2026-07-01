@@ -111,8 +111,9 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 ## Configuration
 
 - The model configuration file defines user-visible labels, descriptions, sizes, byte estimates, runtime type, recommended status, and endpoint information.
-- The configured local catalog includes Gemma 4 MLX models and the experimental Ornith 1.0 9B 4-bit MLX VLM model for local agentic coding tests on 16GB Apple Silicon Macs.
-- Ornith 1.0 9B is cataloged as an MLX VLM model because the selected MLX Community conversion is served through the MLX VLM runtime.
+- The configured local catalog includes Gemma 4 MLX models, Gemma 3 Text 12B as the text-only MLX LM comparison model, Gemma 3 12B 6-bit as a higher-precision MLX VLM experiment, and Ornith 1.0 9B as an experimental MLX VLM agentic coding model for 16GB Apple Silicon Macs.
+- Gemma 3 Text 12B is cataloged as an MLX LM model because the selected MLX Community text conversion is served through the text runtime.
+- Gemma 3 12B 6-bit and Ornith 1.0 9B are cataloged as MLX VLM models because the selected MLX Community conversions are served through the MLX VLM runtime.
 
 ## External Interfaces
 
@@ -122,7 +123,7 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 ## UI And Notification Behavior
 
-- Setup and model picker UI render labels, descriptions, sizes, provenance summaries, endpoint credential prompts, and recommended status from configured data.
+- Setup and model picker UI render labels, descriptions, sizes, provenance summaries, endpoint credential prompts, and recommended status from configured data. The welcome model picker keeps the model choices inside an internal scroll area so the start button remains reachable as the catalog grows.
 
 ## Error Handling
 
@@ -130,4 +131,4 @@ This module supplies shared contracts across the [Architecture](../technical/arc
 
 ## Verification
 
-- Use [tests/shared/modelRegistry.test.ts](../../../tests/shared/modelRegistry.test.ts), [tests/renderer/components/Setup.test.ts](../../../tests/renderer/components/Setup.test.ts), and [tests/cli/args.test.ts](../../../tests/cli/args.test.ts).
+- Use [tests/shared/modelRegistry.test.ts](../../../tests/shared/modelRegistry.test.ts), [tests/renderer/components/Setup.test.ts](../../../tests/renderer/components/Setup.test.ts), [tests/cli/args.test.ts](../../../tests/cli/args.test.ts), and [tests/cli/setup.test.ts](../../../tests/cli/setup.test.ts).

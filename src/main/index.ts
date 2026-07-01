@@ -21,6 +21,7 @@ import {
   isModelCacheReadyForInference,
   warmupInference,
   linkGlobalCacheModel,
+  downloadModelSnapshot,
   getMlxServerLogPath,
   getLastMlxServerCommand,
   MLX_SERVER_PORT,
@@ -31,6 +32,7 @@ import {
   chatStream,
 } from "./modelChat";
 import {
+  allConfiguredModels,
   configuredModelList,
   isLocalModel,
   modelInfoForName,
@@ -62,6 +64,7 @@ import {
 import type {
   ChatRequest,
   CodeSubmode,
+  LocalModelDownloadStatus,
   StreamChunk,
   ToolCall,
 } from "../shared/types";
@@ -123,6 +126,11 @@ import {
   executionLogPath,
   readExecutionLogSnapshot,
 } from "./executionLog";
+import {
+  ModelDownloadManager,
+  readPersistedModelDownloadRecords,
+  writePersistedModelDownloadRecords,
+} from "./modelDownloadState";
 
 const APP_NAME = "Gemma Code";
 const APP_ID = "com.martinbechard.gemmacode";
@@ -331,6 +339,50 @@ async function ensureMLXPython(): Promise<string> {
   return pythonToUse;
 }
 
+async function ensureMLXPythonForDownload(): Promise<string> {
+  let mlx = locateMLX();
+  if (!mlx) {
+    throw new Error(
+      "Python 3.10–3.13 not found. Install via Homebrew: brew install python@3.13",
+    );
+  }
+
+  if (mlx.installed) return mlx.python;
+
+  const pythonToUse = await installMLX(() => {
+    /* background download progress is reported by cache polling */
+  });
+  mlx = { python: pythonToUse, installed: true };
+  return mlx.python;
+}
+
+let modelDownloadManager: ModelDownloadManager | null = null;
+
+function backgroundModelDownloads(): ModelDownloadManager {
+  if (!modelDownloadManager) {
+    modelDownloadManager = new ModelDownloadManager({
+      now: Date.now,
+      loadRecords: readPersistedModelDownloadRecords,
+      saveRecords: writePersistedModelDownloadRecords,
+      emitStatus: (status) => send("models:download-status", status),
+      ensurePython: ensureMLXPythonForDownload,
+      downloadSnapshot: downloadModelSnapshot,
+      inspectCache: inspectModelCache,
+    });
+  }
+  return modelDownloadManager;
+}
+
+function localModelNames(): string[] {
+  return allConfiguredModels()
+    .filter((model) => isLocalModel(model.name))
+    .map((model) => model.name);
+}
+
+function listModelDownloadStatuses(): LocalModelDownloadStatus[] {
+  return backgroundModelDownloads().list(localModelNames());
+}
+
 async function ensureMLXRunning(
   model: string,
   options: EnsureMLXOptions = { allowIncompleteCache: false },
@@ -346,6 +398,16 @@ async function ensureMLXRunning(
   } else {
     console.log(`[mlx] Reused global cache entry for ${model}`);
   }
+
+  send("setup:status", {
+    stage: "validating-model",
+    message: `Checking ${label} files…`,
+  });
+  send("setup:status", {
+    stage: "downloading-model",
+    message: `Waiting for ${label} background download…`,
+  });
+  await backgroundModelDownloads().whenIdle(model);
 
   send("setup:status", {
     stage: "validating-model",
@@ -2638,6 +2700,17 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("model:repair", async (_e, model: string) => {
     await handleRepairModel(model);
+  });
+
+  ipcMain.handle("models:downloads:list", async () => {
+    return listModelDownloadStatuses();
+  });
+
+  ipcMain.handle("models:download", async (_e, model: string) => {
+    if (!isLocalModel(model)) {
+      throw new Error(`${modelLabel(model)} is not a local MLX model.`);
+    }
+    return backgroundModelDownloads().start(model);
   });
 
   ipcMain.handle("models:list-local", async () => {

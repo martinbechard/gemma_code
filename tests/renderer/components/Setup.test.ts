@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 import Setup, {
   setupErrorClipboardText,
 } from "../../../src/renderer/src/components/Setup";
-import type { ModelInfo, SetupStatus } from "../../../src/shared/types";
+import type {
+  LocalModelDownloadStatus,
+  ModelInfo,
+  SetupStatus,
+} from "../../../src/shared/types";
 
 const TEST_MODELS: ModelInfo[] = [
   {
@@ -16,6 +20,11 @@ const TEST_MODELS: ModelInfo[] = [
     runtime: "mlx-lm",
   },
 ];
+
+const WELCOME_STATUS: SetupStatus = {
+  stage: "checking",
+  message: "Welcome",
+};
 
 const ERROR_STATUS: SetupStatus = {
   stage: "error",
@@ -29,6 +38,24 @@ const ERROR_STATUS: SetupStatus = {
     "/Users/example/mlx/venv/bin/python3 -m mlx_lm server --model mlx-community/gemma-4-E4B-it-qat-4bit",
   logFile: "/Users/example/Library/Application Support/gemma-code/mlx/logs/mlx-server.log",
 };
+
+const DOWNLOAD_STATUSES: LocalModelDownloadStatus[] = [
+  {
+    model: TEST_MODELS[0].name,
+    state: "missing",
+    message: "Model has not been downloaded.",
+    updatedAt: 1,
+  },
+  {
+    model: "mlx-community/incomplete-model",
+    state: "incomplete",
+    message: "Download is incomplete.",
+    updatedAt: 1,
+    progress: 0.5,
+    bytesDone: 50,
+    bytesTotal: 100,
+  },
+];
 
 describe("Setup error display", () => {
   it("formats the full setup error for copying", () => {
@@ -60,5 +87,55 @@ describe("Setup error display", () => {
     expect(html).toContain("MLX warmup failed after 60000ms");
     expect(html).toContain("missing model weight shards");
     expect(html).toContain("mlx-server.log");
+  });
+});
+
+describe("Setup welcome model list", () => {
+  it("keeps the model choices in a bounded scroll area", () => {
+    const models = Array.from({ length: 9 }, (_, index): ModelInfo => ({
+      ...TEST_MODELS[0],
+      name: `test-model-${index}`,
+      label: `Test Model ${index}`,
+    }));
+
+    const html = renderToStaticMarkup(
+      createElement(Setup, {
+        models,
+        status: WELCOME_STATUS,
+        model: models[0].name,
+        onModelChange: () => undefined,
+        onStart: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("overflow-y-auto");
+    expect(html).toContain("Start with Test Model 0");
+  });
+
+  it("renders download and resume actions for local model cache states", () => {
+    const models: ModelInfo[] = [
+      TEST_MODELS[0],
+      {
+        ...TEST_MODELS[0],
+        name: "mlx-community/incomplete-model",
+        label: "Incomplete Model",
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      createElement(Setup, {
+        models,
+        status: WELCOME_STATUS,
+        model: models[0].name,
+        modelDownloads: DOWNLOAD_STATUSES,
+        onModelChange: () => undefined,
+        onStart: () => undefined,
+        onDownloadModel: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Download");
+    expect(html).toContain("Resume download");
+    expect(html).toContain("50%");
   });
 });

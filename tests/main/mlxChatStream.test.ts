@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildChatRequestBody,
+  buildServerEnv,
   buildServerArgs,
+  buildSnapshotDownloadArgs,
   chatStream,
   warmupInference,
 } from "../../src/main/mlx";
@@ -161,6 +163,30 @@ describe("buildServerArgs", () => {
       "--kv-quant-scheme",
       "turboquant",
     ]);
+  });
+});
+
+describe("buildServerEnv", () => {
+  it("uses the app cache and resilient Hugging Face download settings", () => {
+    const env = buildServerEnv();
+
+    expect(env.HF_HOME).toContain("gemma-code");
+    expect(env.TRANSFORMERS_CACHE).toBe(env.HF_HOME);
+    expect(env.HF_HUB_DISABLE_TELEMETRY).toBe("1");
+    expect(env.HF_HUB_DISABLE_XET).toBe("1");
+    expect(env.HF_HUB_DOWNLOAD_TIMEOUT).toBe("600");
+  });
+});
+
+describe("buildSnapshotDownloadArgs", () => {
+  it("calls Hugging Face snapshot_download against the app cache", () => {
+    const args = buildSnapshotDownloadArgs(TEST_MODEL);
+
+    expect(args[0]).toBe("-c");
+    expect(args[1]).toContain("snapshot_download");
+    expect(args[2]).toBe(TEST_MODEL);
+    expect(args[3]).toContain("gemma-code");
+    expect(args[3]).toContain("mlx/models");
   });
 });
 

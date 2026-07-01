@@ -120,6 +120,38 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses download-model without requiring a prompt", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "download-model",
+      "--model",
+      "mlx-community/gemma-3-text-12b-it-4bit",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "download-model",
+      model: "mlx-community/gemma-3-text-12b-it-4bit",
+      prompt: "",
+    });
+  });
+
+  it("ignores a package-manager argument separator before the command", () => {
+    const parsed = parseCliArgs([
+      "node",
+      "cli",
+      "--",
+      "download-model",
+      "--model",
+      "mlx-community/gemma-3-text-12b-it-4bit",
+    ]);
+
+    expect(parsed).toMatchObject({
+      command: "download-model",
+      model: "mlx-community/gemma-3-text-12b-it-4bit",
+    });
+  });
+
   it("rejects execute-plan without a plan file", () => {
     expect(() =>
       parseCliArgs(["node", "cli", "execute-plan", "build the tool"]),

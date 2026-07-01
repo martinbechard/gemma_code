@@ -7,6 +7,7 @@
 //   npm run cli -- execute-plan --plan plan.yaml "your original prompt"
 //   npm run cli -- continue --conversation .gemma-cli/conversations/cli-123.json "recap"
 //   npm run cli -- setup
+//   npm run cli -- download-model --model mlx-community/gemma-3-text-12b-it-4bit
 //   npm run cli -- status
 //
 // Set RUN_BASH=1 to allow the run_bash tool. Default is disabled for safety.
@@ -29,13 +30,14 @@ setRuntimePaths({
 });
 
 const { runChat, runContinue } = await import("./agent");
-const { runSetup, runStatus } = await import("./setup");
+const { runDownloadModel, runSetup, runStatus } = await import("./setup");
 
 function printUsage(): void {
   process.stderr.write(
     [
       "Usage:",
       "  cli setup [--model <hf-id>]",
+      "  cli download-model [--model <hf-id>]",
       "  cli status [--model <hf-id>]",
       "  cli chat [--model <hf-id>] [--worktree] <prompt>",
       "  cli code [--model <hf-id>] [--worktree] [--auto|--approve|--freestyle] <prompt>",
@@ -65,6 +67,9 @@ async function main(): Promise<void> {
   switch (args.command) {
     case "setup":
       await runSetup(args.model);
+      return;
+    case "download-model":
+      await runDownloadModel(args.model);
       return;
     case "status":
       await runStatus(args.model);

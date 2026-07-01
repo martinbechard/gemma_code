@@ -5,6 +5,7 @@ export type CliCommand =
   | "plan-ask-done"
   | "execute-plan"
   | "continue"
+  | "download-model"
   | "setup"
   | "status";
 
@@ -22,9 +23,12 @@ export interface ParsedArgs {
 }
 
 export const DEFAULT_MODEL = "mlx-community/gemma-4-e2b-it-4bit";
+const PACKAGE_MANAGER_ARG_SEPARATOR = "--";
 
 export function parseCliArgs(argv: string[]): ParsedArgs {
-  const args = argv.slice(2);
+  const rawArgs = argv.slice(2);
+  const args =
+    rawArgs[0] === PACKAGE_MANAGER_ARG_SEPARATOR ? rawArgs.slice(1) : rawArgs;
   if (args.length === 0) throw new Error("command required");
   const command = parseCommand(args[0]);
   let model = DEFAULT_MODEL;
@@ -126,6 +130,7 @@ function parseCommand(value: string): CliCommand {
     value === "plan-ask-done" ||
     value === "execute-plan" ||
     value === "continue" ||
+    value === "download-model" ||
     value === "setup" ||
     value === "status"
   ) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   isLocalMlxRuntime,
+  type LocalModelDownloadStatus,
   type ModelInfo,
   type ModelListResult,
   type SetupStatus,
@@ -24,6 +25,16 @@ type RepairCapableApi = typeof window.api & {
 export default function App() {
   const [state, setState] = useState<AppState>({ phase: "boot" });
   const [modelList, setModelList] = useState<ModelListResult | null>(null);
+  const [modelDownloads, setModelDownloads] = useState<
+    LocalModelDownloadStatus[]
+  >([]);
+
+  function upsertModelDownloadStatus(status: LocalModelDownloadStatus): void {
+    setModelDownloads((current) => {
+      const next = current.filter((candidate) => candidate.model !== status.model);
+      return [...next, status];
+    });
+  }
 
   function handleRepairModel(model: string): void {
     setState((prev) => {
@@ -73,9 +84,13 @@ export default function App() {
       console.log("[gemma]", ev.chunk);
     });
     let unsub: (() => void) | undefined;
+    const downloadUnsub = window.api.onModelDownloadStatus((status) => {
+      upsertModelDownloadStatus(status);
+    });
     (async () => {
       const loadedModels = await window.api.listModels();
       setModelList(loadedModels);
+      setModelDownloads(await window.api.listModelDownloads());
       const defaultModel = loadedModels.defaultModel;
       unsub = window.api.onSetupStatus((status) => {
         setState((prev) => {
@@ -157,9 +172,20 @@ export default function App() {
     })();
     return () => {
       unsub?.();
+      downloadUnsub?.();
       rawUnsub?.();
     };
   }, []);
+
+  function handleDownloadModel(model: string): void {
+    window.api
+      .downloadModel(model)
+      .then(upsertModelDownloadStatus)
+      .catch((error: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error("model download failed", error);
+      });
+  }
 
   function handleSwitchModel(newModel: string): void {
     setState((prev) => {
@@ -190,6 +216,7 @@ export default function App() {
           models={modelList.models}
           status={state.status}
           model={state.model}
+          modelDownloads={modelDownloads}
           onModelChange={(m) =>
             setState((s) => (s.phase === "setup" ? { ...s, model: m } : s))
           }
@@ -201,6 +228,7 @@ export default function App() {
             });
             window.api.startSetup(model);
           }}
+          onDownloadModel={handleDownloadModel}
           onRepairModel={handleRepairModel}
         />
       </div>

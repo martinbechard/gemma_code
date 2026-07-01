@@ -19,6 +19,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "cli": "tsx src/cli/index.ts",
+    "download:local-models": "bash scripts/download-local-models.sh",
     "cleanup:cli": "tsx src/cli/cleanup.ts",
     "test": "vitest run",
     "test:watch": "vitest"

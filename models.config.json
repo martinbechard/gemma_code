@@ -43,12 +43,20 @@
       "runtime": "mlx-lm"
     },
     {
-      "name": "mlx-community/gemma-3-text-4b-it-4bit",
-      "label": "Gemma 3 Text 4B",
-      "size": "3.2 GB",
-      "sizeBytes": 3200000000,
-      "description": "Text-only fallback. Use if Gemma 4 doesn't load.",
+      "name": "mlx-community/gemma-3-text-12b-it-4bit",
+      "label": "Gemma 3 Text 12B",
+      "size": "7.2 GB",
+      "sizeBytes": 7225400219,
+      "description": "Text-only Gemma 3 comparison model for 16GB Macs.",
       "runtime": "mlx-lm"
+    },
+    {
+      "name": "mlx-community/gemma-3-12b-it-6bit",
+      "label": "Gemma 3 12B 6-bit",
+      "size": "11.3 GB",
+      "sizeBytes": 11261058197,
+      "description": "Higher-precision Gemma 3 experiment. Use short context on 16GB Macs.",
+      "runtime": "mlx-vlm"
     },
     {
       "name": "north-mini-code-1-0",

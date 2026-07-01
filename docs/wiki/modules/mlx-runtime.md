@@ -9,7 +9,7 @@ tags: ["modules"]
 
 ## Current Understanding
 
-The MLX runtime module supervises the app-managed Python environment, model cache inspection, MLX server process, runtime patching, local chat-completion requests, warmup inference, model provenance, and local cache reuse.
+The MLX runtime module supervises the app-managed Python environment, model cache inspection, direct Hugging Face snapshot downloads, MLX server process, runtime patching, local chat-completion requests, warmup inference, model provenance, and local cache reuse.
 
 ## Authoritative Sources
 
@@ -66,6 +66,7 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 - Install MLX packages into the managed venv.
 - Apply local upstream-runtime patches when needed.
 - Inspect Hugging Face model cache folders and validate inference readiness.
+- Download Hugging Face model snapshots into the app cache without starting MLX.
 - Reuse global Hugging Face cache entries by symlink or copy.
 - Start, stop, and monitor the MLX server process.
 - Send local chat-completion requests and report useful failure context.
@@ -73,8 +74,8 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 
 ## Callers
 
-- [Main Process](main-process.md) calls setup, model switch, cache repair, warmup, and chat streaming APIs.
-- [CLI Runtime](cli-runtime.md) calls setup/status and shared chat runtime APIs.
+- [Main Process](main-process.md) calls setup, model switch, background download, cache repair, warmup, and chat streaming APIs.
+- [CLI Runtime](cli-runtime.md) calls setup/status, shared direct local model download, and shared chat runtime APIs.
 
 ## Dependencies
 
@@ -86,6 +87,8 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 
 - Setup functions return Python/runtime status or throw typed errors.
 - Cache inspection returns status, snapshots, weight bytes, incomplete blobs, and readiness inputs.
+- Snapshot download functions run Hugging Face snapshot_download with the same app cache environment used by MLX server startup.
+- The shared model download manager persists app and CLI download state in model-downloads.json under app data.
 - Local chat streaming yields model content and reasoning chunks.
 
 ## Internal Data And State
@@ -97,6 +100,7 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 - Existing venvs are reused only when the runtime import check passes.
 - Incomplete model caches are not considered ready for inference.
 - Warmup inference is the final setup proof.
+- Direct snapshot downloads fill cache folders only; selected-model setup still proves readiness with server startup and warmup inference.
 - MLX server failures include recent log tail and request context.
 
 ## Invariants
@@ -108,17 +112,18 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 ## Configuration
 
 - Model runtime mapping comes from the configured model catalog.
-- Gemma 4 12B QAT and Ornith 1.0 9B route through the MLX VLM server path; standard text-compatible local models route through the MLX LM server path.
+- Gemma 4 12B QAT, Gemma 3 12B 6-bit, and Ornith 1.0 9B route through the MLX VLM server path; standard text-compatible local models such as Gemma 3 Text 12B route through the MLX LM server path.
 - Environment variables can tune MLX VLM KV cache size, KV bits, and quantization scheme.
 - The canonical server port is exported as [MLX_SERVER_PORT](../../../src/main/mlx.ts).
 
 ## External Interfaces
 
-- Python, pip, MLX packages, Hugging Face cache folders, local MLX HTTP server, and Hugging Face model API.
+- Python, pip, MLX packages, Hugging Face cache folders, Hugging Face snapshot_download, local MLX HTTP server, and Hugging Face model API.
 
 ## UI And Notification Behavior
 
 - Setup progress is surfaced through callers as setup status and runtime activity chunks.
+- Background model download progress is surfaced through model download status records and renderer IPC.
 
 ## Error Handling
 

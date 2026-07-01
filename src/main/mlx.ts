@@ -26,7 +26,10 @@ const MLX_URL = `http://${MLX_HOST}`;
 
 const MLX_FIRST_TOKEN_TIMEOUT_MS = 120_000;
 const MLX_HEALTH_POLL_INTERVAL_MS = 1500;
-const MLX_SERVER_START_TIMEOUT_MS = 600_000;
+const MLX_MINUTE_MS = 60_000;
+const MLX_SERVER_START_TIMEOUT_MINUTES = 60;
+const MLX_SERVER_START_TIMEOUT_MS =
+  MLX_SERVER_START_TIMEOUT_MINUTES * MLX_MINUTE_MS;
 const MLX_WARMUP_MAX_TOKENS = 16;
 const MLX_LOG_RETENTION_LINES = 250;
 const MLX_LOG_TAIL_LINES = 80;
@@ -47,13 +50,43 @@ const MLX_RUNTIME_IMPORT_CHECK =
   "import mlx_lm; import mlx_vlm.models.gemma4_unified; print('ok')";
 const MLX_MODEL_WEIGHT_FILE = /^model(?:-[0-9]+-of-[0-9]+)?\.safetensors$/;
 const MLX_GLOBAL_HF_CACHE_DIR = join(homedir(), ".cache", "huggingface");
-const MLX_GLOBAL_HF_HUB_DIR = join(MLX_GLOBAL_HF_CACHE_DIR, "hub");
+const MLX_HF_HUB_CACHE_DIR_NAME = "hub";
+const MLX_GLOBAL_HF_HUB_DIR = join(
+  MLX_GLOBAL_HF_CACHE_DIR,
+  MLX_HF_HUB_CACHE_DIR_NAME,
+);
 const MLX_HF_CACHE_SYMLINK_TYPE = "dir";
 const MLX_SERVER_LOG_FILE_NAME = "mlx-server.log";
 const MLX_VLM_MAX_KV_SIZE_ENV = "GEMMA_MLX_VLM_MAX_KV_SIZE";
 const MLX_VLM_KV_BITS_ENV = "GEMMA_MLX_VLM_KV_BITS";
 const MLX_VLM_KV_QUANT_SCHEME_ENV = "GEMMA_MLX_VLM_KV_QUANT_SCHEME";
+const MLX_HF_HOME_ENV = "HF_HOME";
+const MLX_TRANSFORMERS_CACHE_ENV = "TRANSFORMERS_CACHE";
+const MLX_HF_HUB_DISABLE_TELEMETRY_ENV = "HF_HUB_DISABLE_TELEMETRY";
+const MLX_HF_HUB_DISABLE_XET_ENV = "HF_HUB_DISABLE_XET";
+const MLX_HF_HUB_DOWNLOAD_TIMEOUT_ENV = "HF_HUB_DOWNLOAD_TIMEOUT";
+const MLX_PYTHON_UNBUFFERED_ENV = "PYTHONUNBUFFERED";
+const MLX_ENABLED_ENV_VALUE = "1";
+const MLX_HF_HUB_DOWNLOAD_TIMEOUT_SECONDS = "600";
+const MLX_SNAPSHOT_DOWNLOAD_MAX_WORKERS = 4;
+const MLX_SNAPSHOT_DOWNLOAD_PROGRESS_POLL_MS = 1000;
 const MODEL_PROVENANCE_FETCH_TIMEOUT_MS = 8_000;
+const MLX_SNAPSHOT_DOWNLOAD_SCRIPT = `
+import sys
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+repo_id = sys.argv[1]
+hf_home = Path(sys.argv[2])
+cache_dir = hf_home / "${MLX_HF_HUB_CACHE_DIR_NAME}"
+print(f"snapshot_download_start {repo_id}", flush=True)
+path = snapshot_download(
+    repo_id=repo_id,
+    cache_dir=cache_dir,
+    max_workers=${MLX_SNAPSHOT_DOWNLOAD_MAX_WORKERS},
+)
+print(f"snapshot_download_complete {path}", flush=True)
+`.trim();
 const MLX_SERVER_LOAD_ERROR_INIT_MARKER = "self._default_model_load_error = None";
 const MLX_SERVER_BROKEN_LOAD_BLOCK = `        # Load the default model if it is given
         self.model_provider.load_default()
@@ -931,6 +964,18 @@ export interface ServerProgress {
   progress?: number;
 }
 
+export interface ModelSnapshotDownloadProgress {
+  message: string;
+  progress?: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+}
+
+export interface ModelSnapshotDownloadOptions {
+  onProgress?: (progress: ModelSnapshotDownloadProgress) => void;
+  pollMs?: number;
+}
+
 export function buildServerArgs(model: string): string[] {
   const runtime = modelRuntimeForName(model);
   if (runtime === "mlx-vlm") {
@@ -976,6 +1021,168 @@ export function buildServerArgs(model: string): string[] {
   ];
 }
 
+export function buildServerEnv(): NodeJS.ProcessEnv {
+  const modelCacheDir = modelsDir();
+  return {
+    ...process.env,
+    [MLX_HF_HOME_ENV]: modelCacheDir,
+    [MLX_TRANSFORMERS_CACHE_ENV]: modelCacheDir,
+    [MLX_HF_HUB_DISABLE_TELEMETRY_ENV]: MLX_ENABLED_ENV_VALUE,
+    [MLX_HF_HUB_DISABLE_XET_ENV]: MLX_ENABLED_ENV_VALUE,
+    [MLX_HF_HUB_DOWNLOAD_TIMEOUT_ENV]: MLX_HF_HUB_DOWNLOAD_TIMEOUT_SECONDS,
+  };
+}
+
+export function buildSnapshotDownloadArgs(model: string): string[] {
+  return ["-c", MLX_SNAPSHOT_DOWNLOAD_SCRIPT, model, modelsDir()];
+}
+
+function buildSnapshotDownloadEnv(): NodeJS.ProcessEnv {
+  return {
+    ...buildServerEnv(),
+    [MLX_PYTHON_UNBUFFERED_ENV]: MLX_ENABLED_ENV_VALUE,
+  };
+}
+
+function modelSnapshotDownloadProgress(
+  model: string,
+  message: string,
+  fallbackProgress?: number,
+): ModelSnapshotDownloadProgress {
+  const inspection = inspectModelCache(model);
+  const bytesTotal = inspection.metadataTotalSizeBytes;
+  const bytesDone =
+    bytesTotal != null
+      ? Math.min(inspection.modelWeightsBytes, bytesTotal)
+      : inspection.modelWeightsBytes;
+  return {
+    message,
+    ...(bytesTotal != null && bytesTotal > 0
+      ? {
+          bytesDone,
+          bytesTotal,
+          progress: Math.min(bytesDone / bytesTotal, 1),
+        }
+      : {
+          ...(bytesDone > 0 ? { bytesDone } : {}),
+          ...(fallbackProgress != null ? { progress: fallbackProgress } : {}),
+        }),
+  };
+}
+
+interface HuggingFaceFetchProgress {
+  message: string;
+  progress: number;
+}
+
+function parseHuggingFaceFetchProgress(
+  line: string,
+): HuggingFaceFetchProgress | null {
+  const fetchMatch = line.match(
+    /Fetching\s+(\d+)\s+files?:\s+(\d+)%.*?(\d+)\/(\d+)/,
+  );
+  if (!fetchMatch) return null;
+  const pct = parseInt(fetchMatch[2], 10);
+  const done = parseInt(fetchMatch[3], 10);
+  const total = parseInt(fetchMatch[4], 10);
+  return {
+    message: `Downloading model files… ${done}/${total}`,
+    progress: pct / 100,
+  };
+}
+
+export async function downloadModelSnapshot(
+  python: string,
+  model: string,
+  options: ModelSnapshotDownloadOptions = {},
+): Promise<void> {
+  const args = buildSnapshotDownloadArgs(model);
+  const env = buildSnapshotDownloadEnv();
+  const pollMs = options.pollMs ?? MLX_SNAPSHOT_DOWNLOAD_PROGRESS_POLL_MS;
+  let stderrBuf = "";
+  let fallbackProgress: number | undefined;
+  let latestMessage = "Downloading model snapshot…";
+
+  options.onProgress?.(
+    modelSnapshotDownloadProgress(model, latestMessage, fallbackProgress),
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(python, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+    });
+    const progressPoll = setInterval(() => {
+      options.onProgress?.(
+        modelSnapshotDownloadProgress(model, latestMessage, fallbackProgress),
+      );
+    }, pollMs);
+
+    const handleOutput = (text: string): void => {
+      const lines = text.split("\n");
+      for (const line of lines) {
+        if (line.trim().length === 0) continue;
+        const parsed = parseHuggingFaceFetchProgress(line);
+        if (parsed) {
+          latestMessage = parsed.message;
+          fallbackProgress = parsed.progress;
+          options.onProgress?.(
+            modelSnapshotDownloadProgress(
+              model,
+              latestMessage,
+              fallbackProgress,
+            ),
+          );
+        } else if (line.includes("snapshot_download_start")) {
+          latestMessage = "Resolving model snapshot…";
+        } else if (line.includes("snapshot_download_complete")) {
+          latestMessage = "Model snapshot downloaded.";
+        }
+      }
+    };
+
+    proc.stdout?.on("data", (d) => {
+      handleOutput(d.toString());
+    });
+    proc.stderr?.on("data", (d) => {
+      const text = d.toString();
+      stderrBuf += text;
+      handleOutput(text);
+    });
+    proc.on("error", (error) => {
+      clearInterval(progressPoll);
+      reject(error);
+    });
+    proc.on("exit", (code) => {
+      clearInterval(progressPoll);
+      if (code !== 0) {
+        reject(
+          new Error(
+            `Hugging Face snapshot_download failed for ${model} (exit ${code}): ${stderrBuf.slice(
+              -MLX_ERROR_TEXT_TAIL_CHARS,
+            )}`,
+          ),
+        );
+        return;
+      }
+      const inspection = inspectModelCache(model);
+      if (!isModelCacheReadyForInference(inspection)) {
+        reject(
+          new Error(
+            `Hugging Face snapshot_download finished, but ${model} is not ready for inference. cacheStatus=${inspection.status}`,
+          ),
+        );
+        return;
+      }
+      options.onProgress?.(
+        modelSnapshotDownloadProgress(model, "Download complete.", 1),
+      );
+      resolve();
+    });
+  });
+}
+
 export async function startServer(
   python: string,
   model: string,
@@ -986,13 +1193,7 @@ export async function startServer(
   // Kill existing server if running with different model
   stopServer();
 
-  const env = {
-    ...process.env,
-    // HuggingFace cache dir — keep models in our app data
-    HF_HOME: modelsDir(),
-    TRANSFORMERS_CACHE: modelsDir(),
-    HF_HUB_DISABLE_TELEMETRY: "1",
-  };
+  const env = buildServerEnv();
 
   // Track early exit so waitForHealth can bail out immediately
   let earlyExit: { code: number | null; stderr: string } | null = null;
@@ -1029,17 +1230,11 @@ export async function startServer(
     if (onProgress) {
       const lines = text.split("\n");
       for (const line of lines) {
-        // Match "Fetching N files: XX%" pattern
-        const fetchMatch = line.match(
-          /Fetching\s+(\d+)\s+files?:\s+(\d+)%.*?(\d+)\/(\d+)/,
-        );
-        if (fetchMatch) {
-          const pct = parseInt(fetchMatch[2], 10);
-          const done = parseInt(fetchMatch[3], 10);
-          const total = parseInt(fetchMatch[4], 10);
+        const fetchProgress = parseHuggingFaceFetchProgress(line);
+        if (fetchProgress) {
           onProgress({
-            message: `Downloading model files… ${done}/${total}`,
-            progress: pct / 100,
+            message: fetchProgress.message,
+            progress: fetchProgress.progress,
           });
           continue;
         }
@@ -1511,6 +1706,7 @@ interface MLXCompletionResponse {
 export async function warmupInference(
   model: string,
   signal?: AbortSignal,
+  firstTokenTimeoutMs = MLX_FIRST_TOKEN_TIMEOUT_MS,
 ): Promise<void> {
   const maxTokens = MLX_WARMUP_MAX_TOKENS;
   const start = Date.now();
@@ -1538,7 +1734,7 @@ export async function warmupInference(
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   timeoutHandle = setTimeout(
     () => abortController.abort("warmup timeout"),
-    MLX_FIRST_TOKEN_TIMEOUT_MS,
+    firstTokenTimeoutMs,
   );
   try {
     const res = await fetch(endpoint, {

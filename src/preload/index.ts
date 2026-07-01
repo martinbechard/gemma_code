@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
 import type {
   ChatRequest,
   ExecutionLogSnapshot,
+  LocalModelDownloadStatus,
   ModelListResult,
   ModelProvenance,
   SetupStatus,
@@ -20,6 +21,9 @@ const api = {
   repairModel: (model: string): Promise<void> =>
     ipcRenderer.invoke("model:repair", model),
 
+  downloadModel: (model: string): Promise<LocalModelDownloadStatus> =>
+    ipcRenderer.invoke("models:download", model),
+
   checkMLX: (): Promise<{ hasMLX: boolean }> =>
     ipcRenderer.invoke("setup:status"),
 
@@ -33,6 +37,20 @@ const api = {
     ipcRenderer.invoke("models:list-local"),
 
   listModels: (): Promise<ModelListResult> => ipcRenderer.invoke("models:list"),
+
+  listModelDownloads: (): Promise<LocalModelDownloadStatus[]> =>
+    ipcRenderer.invoke("models:downloads:list"),
+
+  onModelDownloadStatus: (
+    cb: (status: LocalModelDownloadStatus) => void,
+  ): (() => void) => {
+    const listener = (
+      _: IpcRendererEvent,
+      status: LocalModelDownloadStatus,
+    ): void => cb(status);
+    ipcRenderer.on("models:download-status", listener);
+    return () => ipcRenderer.removeListener("models:download-status", listener);
+  },
 
   getModelProvenance: (model: string): Promise<ModelProvenance | null> =>
     ipcRenderer.invoke("models:provenance", model),

@@ -296,6 +296,25 @@ export interface ModelProvenance {
   weightsBytes: number | null;
 }
 
+export type LocalModelDownloadState =
+  | "missing"
+  | "queued"
+  | "downloading"
+  | "incomplete"
+  | "downloaded"
+  | "failed";
+
+export interface LocalModelDownloadStatus {
+  model: string;
+  state: LocalModelDownloadState;
+  message: string;
+  updatedAt: number;
+  progress?: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+  error?: string;
+}
+
 const MODEL_PROVENANCE_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",

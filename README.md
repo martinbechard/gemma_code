@@ -30,6 +30,8 @@ The project is used to explore what a small local model can do when the surround
 - Per-run execution logs with actual prompts, model responses, tool calls, and tool results.
 - Tool implementations split into one file per tool under src/main/tools.
 - Local MLX setup, status checks, and server reuse.
+- App and CLI local model cache downloads with percent, throughput, and estimated time.
+- Setup-screen Download and Resume download controls for local model caches.
 - Configured remote model endpoints for online experiments.
 
 ## Documentation
@@ -53,7 +55,7 @@ Key entry pages:
 - Node 20 or newer.
 - Git.
 
-The first local MLX run creates the local Python environment, installs MLX packages, and downloads the selected model. Remote models require their configured provider credential environment variable.
+The first local MLX run creates the local Python environment, installs MLX packages, and downloads the selected model before warmup. Local models can also be downloaded ahead of selection from the setup screen or CLI. Remote models require their configured provider credential environment variable.
 
 ## Install And Run
 
@@ -86,6 +88,7 @@ The CLI lives at src/cli/index.ts and is exposed through the package script:
 ```bash
 npm run cli -- status
 npm run cli -- setup
+npm run cli -- download-model --model mlx-community/gemma-3-text-12b-it-4bit
 npm run cli -- chat "Explain this repository."
 npm run cli -- code "Add a focused feature."
 ```
@@ -102,7 +105,9 @@ Use a specific model with:
 npm run cli -- code --model mlx-community/gemma-4-e4b-it-4bit "Add a focused feature."
 ```
 
-The configured local catalog includes Gemma models for the default local workflow and an experimental Ornith 1.0 9B 4-bit MLX VLM option for agentic coding tests on 16GB Apple Silicon Macs.
+The configured local catalog includes Gemma models for the default local workflow, Gemma 3 Text 12B for local comparison, Gemma 3 12B 6-bit as a higher-precision local experiment, and Ornith 1.0 9B 4-bit as an experimental MLX VLM option for agentic coding tests on 16GB Apple Silicon Macs.
+
+The download-model command uses Hugging Face snapshot_download into the same app cache and model-download state used by Electron. It can run while the Electron app keeps using an already-started local model, and interrupted downloads remain resumable from the setup screen.
 
 Allow shell execution with:
 
@@ -128,6 +133,7 @@ npm run cleanup:cli
 
 ```text
 cli setup [--model <hf-id>]
+cli download-model [--model <hf-id>]
 cli status [--model <hf-id>]
 cli chat [--model <hf-id>] [--worktree] <prompt>
 cli code [--model <hf-id>] [--worktree] [--auto|--approve] <prompt>
@@ -270,6 +276,12 @@ Prepare runtime and warm up inference:
 
 ```bash
 npm run cli -- setup
+```
+
+Download the local comparison models sequentially:
+
+```bash
+npm run download:local-models
 ```
 
 Run the standalone MLX smoke test:

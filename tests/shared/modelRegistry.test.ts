@@ -22,6 +22,13 @@ const GEMMA_4_12B_QAT_BYTES = 11_000_000_000;
 const ORNITH_9B_REPO = "mlx-community/Ornith-1.0-9B-4bit";
 const ORNITH_9B_SIZE = "6.0 GB";
 const ORNITH_9B_BYTES = 5_977_072_107;
+const GEMMA_3_TEXT_12B_REPO = "mlx-community/gemma-3-text-12b-it-4bit";
+const GEMMA_3_TEXT_12B_SIZE = "7.2 GB";
+const GEMMA_3_TEXT_12B_BYTES = 7_225_400_219;
+const GEMMA_3_12B_6BIT_REPO = "mlx-community/gemma-3-12b-it-6bit";
+const GEMMA_3_12B_6BIT_SIZE = "11.3 GB";
+const GEMMA_3_12B_6BIT_BYTES = 11_261_058_197;
+const GEMMA_3_TEXT_4B_REPO = "mlx-community/gemma-3-text-4b-it-4bit";
 
 function modelByName(name: string) {
   return allConfiguredModels().find((model) => model.name === name);
@@ -77,6 +84,25 @@ describe("configured models", () => {
       size: ORNITH_9B_SIZE,
       sizeBytes: ORNITH_9B_BYTES,
       description: "Agentic coding model. Experimental 9B 4-bit MLX VLM option for 16GB Macs.",
+      runtime: "mlx-vlm",
+    });
+  });
+
+  it("replaces the small Gemma 3 fallback with the 12B text recommendation", () => {
+    expect(modelByName(GEMMA_3_TEXT_4B_REPO)).toBeUndefined();
+    expect(modelByName(GEMMA_3_TEXT_12B_REPO)).toMatchObject({
+      label: "Gemma 3 Text 12B",
+      size: GEMMA_3_TEXT_12B_SIZE,
+      sizeBytes: GEMMA_3_TEXT_12B_BYTES,
+      runtime: "mlx-lm",
+    });
+  });
+
+  it("offers Gemma 3 12B 6-bit as a local VLM experiment", () => {
+    expect(modelByName(GEMMA_3_12B_6BIT_REPO)).toMatchObject({
+      label: "Gemma 3 12B 6-bit",
+      size: GEMMA_3_12B_6BIT_SIZE,
+      sizeBytes: GEMMA_3_12B_6BIT_BYTES,
       runtime: "mlx-vlm",
     });
   });
