@@ -169,6 +169,7 @@ const MLX_SUPPORTED_ARCH = "arm64";
 const FILE_MODE_PERMISSION_MASK = 0o777;
 const FILE_MODE_RADIX = 8;
 const FILE_MODE_DIGITS = 3;
+const MODEL_TURN_NUMBER_OFFSET = 1;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -1313,12 +1314,21 @@ async function handleChat(req: ChatRequest, channel: string): Promise<void> {
         }
       };
 
-      emitRuntimeActivity("connecting to MLX");
-      emitRuntimeActivity("waiting for first token");
       const requestMessages = planSemanticReviewMessages ?? baseMessages;
       const requestSource = planSemanticReviewMessages
         ? "plan_semantic_review"
         : "conversation";
+      const modelTurnNumber = round + MODEL_TURN_NUMBER_OFFSET;
+      logExecution.startTurn({
+        label:
+          requestSource === "plan_semantic_review"
+            ? "plan semantic review"
+            : "model request",
+        source: requestSource,
+        round: modelTurnNumber,
+      });
+      emitRuntimeActivity("connecting to MLX");
+      emitRuntimeActivity("waiting for first token");
       const previousMessageCount =
         lastModelRequestMessageCounts.get(requestSource) ?? 0;
       const newMessageStart =

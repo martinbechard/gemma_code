@@ -144,6 +144,7 @@ export interface ExecutionLogEntry {
   conversationId?: string;
   mode?: string;
   model?: string;
+  turn?: number;
   event: string;
   data: unknown;
   raw?: string;

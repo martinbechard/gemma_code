@@ -162,6 +162,85 @@ describe("executionLog", () => {
     });
   });
 
+  it("groups trace records into model turns", () => {
+    const log = createExecutionLogger(true, {
+      conversationId: "c1",
+      mode: "code",
+      model: "gemma-test",
+    });
+    const turnLogger = log as typeof log & {
+      startTurn?: (data: { label: string; source: string }) => number;
+    };
+
+    expect(turnLogger.startTurn).toBeTypeOf("function");
+
+    const firstTurn = turnLogger.startTurn?.({
+      label: "initial model request",
+      source: "conversation",
+    });
+    log("model_request", { callId: "model-1" });
+    log("tool_call", { id: "call-1", name: "read_file" });
+    const secondTurn = turnLogger.startTurn?.({
+      label: "tool result follow-up",
+      source: "conversation",
+    });
+    log("model_request", { callId: "model-2" });
+
+    expect(firstTurn).toBe(1);
+    expect(secondTurn).toBe(2);
+
+    const lines = readFileSync(executionLogPath(), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toMatchObject({
+      turn: 1,
+      event: "turn_start",
+      data: {
+        turn: 1,
+        label: "initial model request",
+        source: "conversation",
+      },
+    });
+    expect(lines[1]).toMatchObject({
+      turn: 1,
+      event: "model_request",
+      data: { callId: "model-1" },
+    });
+    expect(lines[2]).toMatchObject({
+      turn: 1,
+      event: "tool_call",
+      data: { id: "call-1", name: "read_file" },
+    });
+    expect(lines[3]).toMatchObject({
+      turn: 2,
+      event: "turn_start",
+      data: {
+        turn: 2,
+        label: "tool result follow-up",
+        source: "conversation",
+      },
+    });
+    expect(lines[4]).toMatchObject({
+      turn: 2,
+      event: "model_request",
+      data: { callId: "model-2" },
+    });
+
+    const snapshot = readExecutionLogSnapshot();
+    expect(snapshot.entries.map(({ event, turn }) => ({ event, turn }))).toEqual(
+      [
+        { event: "turn_start", turn: 1 },
+        { event: "model_request", turn: 1 },
+        { event: "tool_call", turn: 1 },
+        { event: "turn_start", turn: 2 },
+        { event: "model_request", turn: 2 },
+      ],
+    );
+  });
+
   it("creates an empty execution log file for opening", () => {
     const path = ensureExecutionLogFile();
 

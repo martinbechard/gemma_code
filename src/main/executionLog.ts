@@ -21,6 +21,9 @@ const REASONING_STREAM_CHUNK_TYPE = "reasoning";
 const MODEL_CONTENT_CHUNK_FIELD = "content";
 const MODEL_REASONING_CHUNK_FIELD = "reasoning";
 const CONSOLIDATED_CHUNK_INITIAL_COUNT = 1;
+const NO_ACTIVE_TURN = 0;
+const TURN_INCREMENT = 1;
+const TURN_START_EVENT = "turn_start";
 
 export interface ExecutionLogMeta {
   conversationId: string;
@@ -28,7 +31,16 @@ export interface ExecutionLogMeta {
   model: string;
 }
 
-export type ExecutionLogger = (event: string, data: unknown) => void;
+export interface ExecutionLogTurnData {
+  label: string;
+  source: string;
+  round: number;
+}
+
+export interface ExecutionLogger {
+  (event: string, data: unknown): void;
+  startTurn(data: ExecutionLogTurnData): number;
+}
 
 interface ConsolidatedChunkLog {
   event: string;
@@ -118,9 +130,10 @@ export function createExecutionLogger(
   enabled: boolean,
   meta: ExecutionLogMeta,
 ): ExecutionLogger {
-  if (!enabled) return () => undefined;
+  if (!enabled) return createDisabledExecutionLogger();
   const path = createExecutionLogFile(meta);
   let pendingChunk: ConsolidatedChunkLog | null = null;
+  let activeTurn: number | null = null;
 
   const appendRecord = (event: string, data: unknown): void => {
     ensureExecutionLogDir();
@@ -129,6 +142,7 @@ export function createExecutionLogger(
       conversationId: meta.conversationId,
       mode: meta.mode,
       model: meta.model,
+      ...(activeTurn === null ? {} : { turn: activeTurn }),
       event,
       data,
     };
@@ -144,7 +158,7 @@ export function createExecutionLogger(
     pendingChunk = null;
   };
 
-  return (event: string, data: unknown): void => {
+  const logger = ((event: string, data: unknown): void => {
     const chunk = consolidatableChunkLog(event, data);
     if (!chunk) {
       flushPendingChunk();
@@ -162,7 +176,25 @@ export function createExecutionLogger(
       String(pendingChunk.data[pendingChunk.textField] ?? "") +
       String(chunk.data[chunk.textField] ?? "");
     pendingChunk.chunks += CONSOLIDATED_CHUNK_INITIAL_COUNT;
+  }) as ExecutionLogger;
+
+  logger.startTurn = (data: ExecutionLogTurnData): number => {
+    flushPendingChunk();
+    activeTurn = (activeTurn ?? NO_ACTIVE_TURN) + TURN_INCREMENT;
+    appendRecord(TURN_START_EVENT, {
+      ...data,
+      turn: activeTurn,
+    });
+    return activeTurn;
   };
+
+  return logger;
+}
+
+function createDisabledExecutionLogger(): ExecutionLogger {
+  const logger = (() => undefined) as ExecutionLogger;
+  logger.startTurn = () => NO_ACTIVE_TURN;
+  return logger;
 }
 
 function isLogRecord(value: unknown): value is Record<string, unknown> {
@@ -243,6 +275,7 @@ export function readExecutionLogSnapshot(
         conversationId?: unknown;
         mode?: unknown;
         model?: unknown;
+        turn?: unknown;
         event?: unknown;
         data?: unknown;
       };
@@ -256,6 +289,10 @@ export function readExecutionLogSnapshot(
             : undefined,
         mode: typeof parsed.mode === "string" ? parsed.mode : undefined,
         model: typeof parsed.model === "string" ? parsed.model : undefined,
+        turn:
+          typeof parsed.turn === "number" && Number.isFinite(parsed.turn)
+            ? parsed.turn
+            : undefined,
         event: typeof parsed.event === "string" ? parsed.event : "unknown",
         data: parsed.data,
       };

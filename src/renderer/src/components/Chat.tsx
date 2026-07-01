@@ -1138,7 +1138,7 @@ function ExecutionLogViewer({
                   key={entry.line}
                   className={`group rounded-lg border bg-white/[0.025] ${executionLogEventClass(entry)}`}
                 >
-                  <summary className="grid cursor-pointer grid-cols-[12px_76px_150px_minmax(0,1fr)_56px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
+                  <summary className="grid cursor-pointer grid-cols-[12px_76px_58px_150px_minmax(0,1fr)_56px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
                     <svg
                       viewBox="0 0 12 12"
                       className="h-2.5 w-2.5 text-ink-500 transition group-open:rotate-90"
@@ -1148,6 +1148,9 @@ function ExecutionLogViewer({
                     </svg>
                     <span className="font-mono text-ink-500">
                       {entryTimeLabel(entry)}
+                    </span>
+                    <span className="font-mono text-ink-600">
+                      {entryTurnLabel(entry)}
                     </span>
                     <span className="truncate font-medium text-ink-100">
                       {entry.event}
@@ -1400,6 +1403,8 @@ export function executionLogSummary(entry: ExecutionLogEntry): string {
       return compactLogText(
         `${logStringField(data, "label")} ${logStringField(data, "content")}`,
       );
+    case "turn_start":
+      return turnStartSummary(data);
     case "model_request":
       return modelRequestSummary(data);
     case "model_response":
@@ -1453,6 +1458,12 @@ function modelRequestSummary(data: Record<string, unknown>): string {
   const preview = logStringField(latestMessage, "preview");
   return compactLogText(
     `${messageCount} messages | ${newMessageCount} new | latest ${role}: ${preview}`,
+  );
+}
+
+function turnStartSummary(data: Record<string, unknown>): string {
+  return compactLogText(
+    `turn ${String(data.turn ?? "")} ${logStringField(data, "source")} ${logStringField(data, "label")}`,
   );
 }
 
@@ -1556,6 +1567,7 @@ function modelRequestDetails(
     `conversationId: ${entry.conversationId ?? ""}`,
     `mode: ${entry.mode ?? ""}`,
     `model: ${entry.model ?? ""}`,
+    `turn: ${entry.turn ?? ""}`,
     `promptPath: ${logStringField(data, "promptPath")}`,
     `messageCount: ${String(data.messageCount ?? "")}`,
     "",
@@ -1588,6 +1600,7 @@ function modelResponseDetails(
     `conversationId: ${entry.conversationId ?? ""}`,
     `mode: ${entry.mode ?? ""}`,
     `model: ${entry.model ?? ""}`,
+    `turn: ${entry.turn ?? ""}`,
     `callId: ${logStringField(data, "callId")}`,
     `requestSource: ${logStringField(data, "requestSource")}`,
     `outcome: ${logStringField(data, "outcome")}`,
@@ -1609,6 +1622,7 @@ function executionLogDetailsJson(entry: ExecutionLogEntry): string {
       conversationId: entry.conversationId,
       mode: entry.mode,
       model: entry.model,
+      turn: entry.turn,
       event: entry.event,
       data: entry.data,
       raw: entry.raw,
@@ -1627,6 +1641,10 @@ function entryTimeLabel(entry: ExecutionLogEntry): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function entryTurnLabel(entry: ExecutionLogEntry): string {
+  return typeof entry.turn === "number" ? `turn ${entry.turn}` : "";
 }
 
 function executionLogEventClass(entry: ExecutionLogEntry): string {

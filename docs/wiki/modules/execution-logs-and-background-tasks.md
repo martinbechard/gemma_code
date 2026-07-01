@@ -1,7 +1,7 @@
 ---
 type: "Topic"
 title: "Execution Logs And Background Tasks Design"
-description: "Execution logging records per-run JSONL debug events, consolidates adjacent model and stream chunks, and provides bounded snapshots for the UI."
+description: "Execution logging records per-run JSONL debug events, groups model-round traces into turns, consolidates adjacent model and stream chunks, and provides bounded snapshots for the UI."
 tags: ["modules"]
 ---
 
@@ -9,7 +9,7 @@ tags: ["modules"]
 
 ## Current Understanding
 
-Execution logging records per-run JSONL debug events, consolidates adjacent model and stream chunks, and provides bounded snapshots for the UI. Background task management tracks long-running shell commands spawned by tools and allows listing, killing, and cleanup by conversation.
+Execution logging records per-run JSONL debug events, groups model-round traces into turns, consolidates adjacent model and stream chunks, and provides bounded snapshots for the UI. Background task management tracks long-running shell commands spawned by tools and allows listing, killing, and cleanup by conversation.
 
 ## Authoritative Sources
 
@@ -61,7 +61,8 @@ This module implements [Observability And Debugging](../subsystems/observability
 ## Responsibilities
 
 - Create one execution log per debug-enabled run.
-- Append structured events with timestamp, conversation id, mode, model, event, and data.
+- Append structured events with timestamp, conversation id, mode, model, turn, event, and data.
+- Start each model round with a turn_start marker so related request, chunk, tool, and follow-up events can be read together.
 - Consolidate adjacent token and reasoning chunks to keep logs readable.
 - Return bounded log snapshots with line numbers and truncation status.
 - Spawn background shell tasks with bounded stdout and stderr capture.
@@ -79,17 +80,18 @@ This module implements [Observability And Debugging](../subsystems/observability
 
 ## Public Contracts
 
-- ExecutionLogSnapshot is returned to preload and renderer.
+- ExecutionLogSnapshot is returned to preload and renderer with optional turn numbers on entries.
 - BackgroundTaskSnapshot is returned by background task tools.
 
 ## Internal Data And State
 
-- Execution log module tracks the active log path and sequence.
+- Execution log module tracks the active log path, file sequence, and active turn.
 - Background task module tracks task records in memory.
 
 ## Processing Rules
 
-- Adjacent stream and model chunks consolidate by event and text field.
+- Each model round starts a new turn before runtime activity and model request events are logged.
+- Adjacent stream and model chunks consolidate by event and text field within the active turn.
 - Log snapshots return the latest bounded lines.
 - Background task output keeps only the newest bounded characters.
 

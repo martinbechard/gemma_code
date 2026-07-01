@@ -210,4 +210,16 @@ describe("execution log summaries", () => {
       ),
     ).toBe("end verify failed missing mutation evidence");
   });
+
+  it("summarizes turn boundaries", () => {
+    expect(
+      executionLogSummary(
+        entry("turn_start", {
+          turn: 3,
+          label: "tool result follow-up",
+          source: "conversation",
+        }),
+      ),
+    ).toBe("turn 3 conversation tool result follow-up");
+  });
 });
