@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1180" viewBox="0 0 1180 1180" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1320" viewBox="0 0 1180 1320" role="img" aria-labelledby="title desc">
   <title id="title">Code mode sequence diagram</title>
-  <desc id="desc">Sequence diagram with four timelines: User, App, Harness, and Model. Code mode binds to a user-selected working directory, assembles and reviews a plan, resets into execution, gathers tool evidence, verifies each step, and reports completion.</desc>
+  <desc id="desc">Sequence diagram with four timelines: User, App, Harness, and Model. Code mode binds to a user-selected working directory, assembles and reviews a plan, retries rejected semantic reviews, accepts pass or corrected plans, resets into execution, gathers tool evidence, verifies each step, and reports completion.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#31546f" />
@@ -28,8 +28,8 @@
     </style>
   </defs>
 
-  <rect class="background" x="0" y="0" width="1180" height="1180" />
-  <rect class="panel" x="28" y="28" width="1124" height="1124" rx="18" />
+  <rect class="background" x="0" y="0" width="1180" height="1320" />
+  <rect class="panel" x="28" y="28" width="1124" height="1264" rx="18" />
 
   <text class="title" x="64" y="78">Code Mode</text>
   <text class="subtitle" x="64" y="107">Project-working workflow. The harness plans, reviews, executes, and verifies against the selected working directory.</text>
@@ -48,10 +48,10 @@
     <text class="participant-text" x="945" y="162">Model</text>
   </g>
 
-  <line class="lifeline" x1="165" y1="180" x2="165" y2="1118" />
-  <line class="lifeline" x1="425" y1="180" x2="425" y2="1118" />
-  <line class="lifeline" x1="685" y1="180" x2="685" y2="1118" />
-  <line class="lifeline" x1="945" y1="180" x2="945" y2="1118" />
+  <line class="lifeline" x1="165" y1="180" x2="165" y2="1258" />
+  <line class="lifeline" x1="425" y1="180" x2="425" y2="1258" />
+  <line class="lifeline" x1="685" y1="180" x2="685" y2="1258" />
+  <line class="lifeline" x1="945" y1="180" x2="945" y2="1258" />
 
   <line class="message" x1="165" y1="220" x2="425" y2="220" />
   <text class="label" x="295" y="210">Choose Code; select project folder</text>
@@ -79,36 +79,49 @@
   <line class="message-soft" x1="685" y1="586" x2="425" y2="586" />
   <text class="label" x="555" y="576">Planning activity and plan nodes</text>
 
-  <line class="message" x1="685" y1="654" x2="945" y2="654" />
-  <text class="label" x="815" y="644">Semantic review prompt</text>
+  <rect class="loop" x="602" y="628" width="432" height="206" rx="10" />
+  <rect class="loop-label-bg" x="614" y="618" width="178" height="24" rx="6" />
+  <text class="loop-label" x="626" y="635">Semantic review loop</text>
 
-  <line class="message" x1="945" y1="714" x2="685" y2="714" />
-  <text class="label" x="815" y="704">Reviewed executable plan</text>
+  <line class="message" x1="685" y1="670" x2="945" y2="670" />
+  <text class="label" x="815" y="660">Structured review prompt</text>
 
-  <line class="message" x1="685" y1="774" x2="945" y2="774" />
-  <text class="label" x="815" y="764">Reset into execution prompt</text>
+  <line class="message" x1="945" y1="724" x2="685" y2="724" />
+  <text class="label" x="815" y="714">Review YAML</text>
 
-  <rect class="loop" x="602" y="806" width="432" height="170" rx="10" />
-  <rect class="loop-label-bg" x="614" y="796" width="176" height="24" rx="6" />
-  <text class="loop-label" x="626" y="813">Per-step execution</text>
+  <line class="message-soft" x1="685" y1="778" x2="945" y2="778" />
+  <text class="label" x="815" y="768">Retry prompt when rejected</text>
 
-  <line class="message-soft" x1="945" y1="846" x2="685" y2="846" />
-  <text class="label" x="815" y="836">Tool action or step summary</text>
+  <line class="message-soft" x1="945" y1="818" x2="685" y2="818" />
+  <text class="label" x="815" y="808">Pass or valid corrected plan</text>
 
-  <line class="message-soft" x1="685" y1="900" x2="945" y2="900" />
-  <text class="label" x="815" y="890">Tool result and evidence</text>
+  <line class="message" x1="685" y1="870" x2="425" y2="870" />
+  <text class="label" x="555" y="860">Plan reviewed event</text>
 
-  <line class="message-soft" x1="685" y1="954" x2="945" y2="954" />
-  <text class="label" x="815" y="944">Verify prompt for step</text>
+  <line class="message" x1="685" y1="930" x2="945" y2="930" />
+  <text class="label" x="815" y="920">Reset into execution prompt</text>
 
-  <line class="message" x1="945" y1="1016" x2="685" y2="1016" />
-  <text class="label" x="815" y="1006">Pass, fail, or retry reason</text>
+  <rect class="loop" x="602" y="962" width="432" height="170" rx="10" />
+  <rect class="loop-label-bg" x="614" y="952" width="176" height="24" rx="6" />
+  <text class="loop-label" x="626" y="969">Per-step execution</text>
 
-  <line class="message" x1="685" y1="1044" x2="425" y2="1044" />
-  <text class="label" x="555" y="1034">Plan state, evidence, done/error</text>
+  <line class="message-soft" x1="945" y1="1002" x2="685" y2="1002" />
+  <text class="label" x="815" y="992">Tool action or step summary</text>
 
-  <line class="message" x1="425" y1="1078" x2="165" y2="1078" />
-  <text class="label" x="295" y="1068">Show applied change and verification</text>
+  <line class="message-soft" x1="685" y1="1056" x2="945" y2="1056" />
+  <text class="label" x="815" y="1046">Tool result and evidence</text>
 
-  <text class="small-label" x="590" y="1144">Four timelines: user, app, harness, model</text>
+  <line class="message-soft" x1="685" y1="1110" x2="945" y2="1110" />
+  <text class="label" x="815" y="1100">Verify prompt for step</text>
+
+  <line class="message" x1="945" y1="1172" x2="685" y2="1172" />
+  <text class="label" x="815" y="1162">Pass, fail, or retry reason</text>
+
+  <line class="message" x1="685" y1="1200" x2="425" y2="1200" />
+  <text class="label" x="555" y="1190">Plan state, evidence, done/error</text>
+
+  <line class="message" x1="425" y1="1234" x2="165" y2="1234" />
+  <text class="label" x="295" y="1224">Show applied change and verification</text>
+
+  <text class="small-label" x="590" y="1284">Four timelines: user, app, harness, model</text>
 </svg>
