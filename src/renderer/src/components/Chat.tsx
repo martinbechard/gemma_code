@@ -27,6 +27,8 @@ import {
   isModeLocked,
   pickLastWorkingDir,
   resolveConversationModel,
+  shouldStartNewConversationForSelectedModel,
+  stampConversationModelBeforeFirstPrompt,
   rewindToUserRequest,
   shouldSendConversationMessage,
   writePersistedSelectedModel,
@@ -124,6 +126,7 @@ function newConversation(
   mode: AgentMode = "code",
   workingDir?: string,
   codeSubmode?: CodeSubmode,
+  model?: string,
 ): Conversation {
   return {
     id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -133,6 +136,7 @@ function newConversation(
     mode,
     canvasOpen: mode === "code",
     workingDir,
+    ...(model ? { model } : {}),
     codeSubmode: workingDir ? (codeSubmode ?? DEFAULT_CODE_SUBMODE) : undefined,
   };
 }
@@ -224,10 +228,27 @@ function fileContextPathsFromResult(result: string): string[] {
   return paths.filter((path) => path.length > 0);
 }
 
+function initialConversationsForModel(model: string): Conversation[] {
+  const loaded = loadConversations();
+  if (loaded.length === 0) {
+    return [newConversation("code", undefined, undefined, model)];
+  }
+  const active = loaded[0];
+  if (shouldStartNewConversationForSelectedModel(active, model)) {
+    return [
+      newConversation(active.mode, active.workingDir, active.codeSubmode, model),
+      ...loaded,
+    ];
+  }
+  return [
+    stampConversationModelBeforeFirstPrompt(active, model),
+    ...loaded.slice(1),
+  ];
+}
+
 export default function Chat({ model, models, onSwitchModel }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
-    const loaded = loadConversations();
-    return loaded.length ? loaded : [newConversation()];
+    return initialConversationsForModel(model);
   });
   const [activeId, setActiveId] = useState<string>(() => conversations[0].id);
   const [streaming, setStreaming] = useState(false);
@@ -376,9 +397,19 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     workingDir?: string,
     codeSubmode?: CodeSubmode,
   ): void {
-    const c = newConversation(mode, workingDir, codeSubmode);
+    const c = newConversation(mode, workingDir, codeSubmode, activeModel);
     setConversations((cs) => [c, ...cs]);
     setActiveId(c.id);
+  }
+
+  function stampActiveConversationModel(nextModel: string): void {
+    const nextConversations = conversations.map((conversation) =>
+      conversation.id === activeId
+        ? stampConversationModelBeforeFirstPrompt(conversation, nextModel)
+        : conversation,
+    );
+    saveConversations(nextConversations);
+    setConversations(nextConversations);
   }
 
   function rememberWorkingDir(path: string): void {
@@ -390,7 +421,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     setConversations((cs) => {
       const filtered = cs.filter((c) => c.id !== id);
       if (filtered.length === 0) {
-        const nc = newConversation();
+        const nc = newConversation("code", undefined, undefined, activeModel);
         setActiveId(nc.id);
         return [nc];
       }
@@ -844,6 +875,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
             onToggleCanvas={toggleCanvas}
             onSwitchModel={(nextModel) => {
               if (modelLocked) return;
+              stampActiveConversationModel(nextModel);
               writePersistedSelectedModel(nextModel);
               onSwitchModel(nextModel);
             }}

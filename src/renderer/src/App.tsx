@@ -248,7 +248,7 @@ export default function App() {
     return (
       <div key="switching" className="anim-fade-in h-full w-full">
         <Chat
-          model={state.model}
+          model={state.toModel}
           models={modelList.models}
           onSwitchModel={handleSwitchModel}
         />

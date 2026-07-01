@@ -12,6 +12,8 @@ import {
   hasSystemPromptSnapshot,
   hasConversationStarted,
   resolveConversationModel,
+  shouldStartNewConversationForSelectedModel,
+  stampConversationModelBeforeFirstPrompt,
   rewindToUserRequest,
   shouldDisplayConversationMessage,
   shouldSendConversationMessage,
@@ -240,6 +242,64 @@ describe("resolveConversationModel", () => {
         ["mlx-community/gemma-4-e4b-it-4bit"],
       ),
     ).toBe("mlx-community/gemma-4-e4b-it-4bit");
+  });
+});
+
+describe("stampConversationModelBeforeFirstPrompt", () => {
+  it("stamps an empty conversation with the selected model", () => {
+    expect(
+      stampConversationModelBeforeFirstPrompt(
+        conv({ model: "mlx-community/gemma-4-e4b-it-4bit", messages: [] }),
+        "north-mini-code-1-0",
+      ),
+    ).toMatchObject({ model: "north-mini-code-1-0" });
+  });
+
+  it("does not change a conversation after the first prompt", () => {
+    expect(
+      stampConversationModelBeforeFirstPrompt(
+        conv({
+          model: "mlx-community/gemma-4-e4b-it-4bit",
+          messages: [{ id: "u1", role: "user" }],
+        }),
+        "north-mini-code-1-0",
+      ),
+    ).toMatchObject({ model: "mlx-community/gemma-4-e4b-it-4bit" });
+  });
+});
+
+describe("shouldStartNewConversationForSelectedModel", () => {
+  it("starts a new conversation when a selected model conflicts with a started conversation", () => {
+    expect(
+      shouldStartNewConversationForSelectedModel(
+        conv({
+          model: "mlx-community/gemma-4-e4b-it-4bit",
+          messages: [{ id: "u1", role: "user" }],
+        }),
+        "north-mini-code-1-0",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not start a new conversation for empty conversations", () => {
+    expect(
+      shouldStartNewConversationForSelectedModel(
+        conv({ model: "mlx-community/gemma-4-e4b-it-4bit", messages: [] }),
+        "north-mini-code-1-0",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not start a new conversation when the started conversation already uses the selected model", () => {
+    expect(
+      shouldStartNewConversationForSelectedModel(
+        conv({
+          model: "north-mini-code-1-0",
+          messages: [{ id: "u1", role: "user" }],
+        }),
+        "north-mini-code-1-0",
+      ),
+    ).toBe(false);
   });
 });
 
@@ -579,6 +639,10 @@ describe("prompt display helpers", () => {
       join(process.cwd(), "src/renderer/src/components/Chat.tsx"),
       "utf8",
     );
+    const appSource = readFileSync(
+      join(process.cwd(), "src/renderer/src/App.tsx"),
+      "utf8",
+    );
 
     expect(chatSource).toContain(
       "const modelLocked = hasConversationStarted(activeConversation)",
@@ -587,7 +651,11 @@ describe("prompt display helpers", () => {
     expect(chatSource).toContain("modelLocked={modelLocked}");
     expect(chatSource).toContain("disabled={modelLocked}");
     expect(chatSource).toContain("if (modelLocked) return");
+    expect(chatSource).toContain("stampActiveConversationModel(nextModel)");
+    expect(chatSource).toContain("saveConversations(nextConversations)");
     expect(chatSource).toContain("writePersistedSelectedModel(nextModel)");
+    expect(chatSource).toContain("initialConversationsForModel(model)");
+    expect(appSource).toContain("model={state.toModel}");
   });
 
   it("recognizes duplicate system prompt snapshots across assistant messages", () => {

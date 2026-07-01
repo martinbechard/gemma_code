@@ -1,19 +1,48 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildRemoteChatRequestBody,
   remoteChatStream,
 } from "../../src/main/remoteChat";
+import { setRuntimePaths } from "../../src/main/runtimePaths";
 
 const NORTH_MODEL = "north-mini-code-1-0";
 const GEMMA_REMOTE_MODEL = "gemma-4-31b-it";
+const REMOTE_CHAT_TEST_PREFIX = "gemma-remote-chat-";
+const MODEL_CONFIG_PATH = join(process.cwd(), "models.config.json");
+const TEMP_DIRS: string[] = [];
+
+function isolateCredentialEnv(): void {
+  const appRoot = mkdtempSync(join(tmpdir(), REMOTE_CHAT_TEST_PREFIX));
+  TEMP_DIRS.push(appRoot);
+  vi.stubEnv("GEMMA_MODEL_CONFIG", MODEL_CONFIG_PATH);
+  vi.stubEnv("COHERE_API_KEY", "");
+  setRuntimePaths({
+    appRoot,
+    packaged: false,
+    userData: appRoot,
+  });
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  setRuntimePaths({
+    appRoot: process.cwd(),
+    packaged: false,
+    userData: process.cwd(),
+  });
+  for (const dir of TEMP_DIRS.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("remoteChatStream", () => {
   it("requires the configured endpoint key", async () => {
+    isolateCredentialEnv();
+
     await expect(async () => {
       for await (const _chunk of remoteChatStream({
         model: NORTH_MODEL,

@@ -92,6 +92,23 @@ export function hasConversationStarted(c: PersistedConversationLite): boolean {
   return (c.messages ?? []).some(shouldSendConversationMessage);
 }
 
+export function stampConversationModelBeforeFirstPrompt<
+  T extends PersistedConversationLite,
+>(c: T, selectedModel: string): T {
+  const selected = selectedModel.trim();
+  if (!selected || hasConversationStarted(c)) return c;
+  return { ...c, model: selected };
+}
+
+export function shouldStartNewConversationForSelectedModel(
+  c: PersistedConversationLite,
+  selectedModel: string,
+): boolean {
+  const selected = selectedModel.trim();
+  if (!selected || !hasConversationStarted(c)) return false;
+  return c.model?.trim() !== selected;
+}
+
 export function resolveConversationModel(
   c: PersistedConversationLite,
   fallbackModel: string,
