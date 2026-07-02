@@ -192,9 +192,9 @@ export function createExecutionLogger(
 }
 
 function createDisabledExecutionLogger(): ExecutionLogger {
-  const logger = (() => undefined) as ExecutionLogger;
-  logger.startTurn = () => NO_ACTIVE_TURN;
-  return logger;
+  return Object.assign((_event: string, _data: unknown): void => undefined, {
+    startTurn: (): number => NO_ACTIVE_TURN,
+  });
 }
 
 function isLogRecord(value: unknown): value is Record<string, unknown> {

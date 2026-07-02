@@ -1,23 +1,48 @@
+import React from "react";
+import type { AgentMode, ModelInfo } from "@shared/types";
+
 interface Conversation {
-  id: string
-  title: string
-  createdAt: number
+  id: string;
+  title: string;
+  createdAt: number;
+  mode: AgentMode;
+  workingDir?: string;
+  model?: string;
 }
 
 interface Props {
-  conversations: Conversation[]
-  activeId: string
-  onSelect: (id: string) => void
-  onNew: () => void
-  onDelete: (id: string) => void
+  conversations: Conversation[];
+  models: ModelInfo[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+  onDelete: (id: string) => void;
+}
+
+export function conversationSidebarTitle(
+  conversation: Conversation,
+  models: ModelInfo[],
+): string {
+  const model = conversation.model
+    ? models.find((candidate) => candidate.name === conversation.model)
+    : undefined;
+  const modelLabel = model?.label ?? conversation.model;
+  if (!modelLabel) return conversation.title;
+  return `[${modelLabel}] ${conversation.title}`;
+}
+
+export function conversationModeLabel(conversation: Conversation): string {
+  if (conversation.mode === "chat") return "Chat";
+  return conversation.workingDir ? "Code" : "Build";
 }
 
 export default function Sidebar({
   conversations,
+  models,
   activeId,
   onSelect,
   onNew,
-  onDelete
+  onDelete,
 }: Props) {
   return (
     <div className="drag flex h-full w-60 shrink-0 flex-col border-r border-white/[0.06] bg-black/20">
@@ -38,20 +63,29 @@ export default function Sidebar({
           <div key={c.id} className="group relative">
             <button
               onClick={() => onSelect(c.id)}
-              className={`w-full truncate rounded-lg px-3 py-2 text-left text-[13px] transition-all duration-200 ease-out ${
+              className={`w-full rounded-lg px-3 py-2 pr-8 text-left transition-all duration-200 ease-out ${
                 activeId === c.id
                   ? 'bg-white/[0.07] text-white'
                   : 'text-ink-200 hover:bg-white/[0.03]'
               }`}
             >
-              {c.title}
+              <span className="block truncate text-[13px]">
+                {conversationSidebarTitle(c, models)}
+              </span>
+              <span
+                className={`mt-0.5 block truncate text-[10.5px] ${
+                  activeId === c.id ? "text-ink-300" : "text-ink-500"
+                }`}
+              >
+                {conversationModeLabel(c)}
+              </span>
             </button>
             <button
               onClick={(e) => {
-                e.stopPropagation()
-                if (confirm('Delete this chat?')) onDelete(c.id)
+                e.stopPropagation();
+                if (confirm('Delete this chat?')) onDelete(c.id);
               }}
-              className="absolute right-1.5 top-1.5 hidden h-6 w-6 items-center justify-center rounded-md text-ink-400 hover:bg-white/10 hover:text-white group-hover:flex"
+              className="absolute right-1.5 top-2 hidden h-6 w-6 items-center justify-center rounded-md text-ink-400 hover:bg-white/10 hover:text-white group-hover:flex"
             >
               <svg viewBox="0 0 16 16" className="h-3 w-3" fill="currentColor">
                 <path d="M4 4l8 8M12 4L4 12" stroke="currentColor" strokeWidth="1.5" />

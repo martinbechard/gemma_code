@@ -80,7 +80,7 @@ Renderer actions call preload API methods, preload invokes main IPC, main stream
 
 ## Lifecycle
 
-The app configures runtime paths, creates the window, starts workspace services, runs local or remote setup, accepts chat/code requests, and stops local model/runtime resources during shutdown.
+The app configures runtime paths, creates the window, starts workspace services, runs setup when the setup screen starts a model, prepares the selected request model before prompt processing, accepts chat/code requests, and stops local model/runtime resources during shutdown.
 
 ## Data Shapes And Contracts
 

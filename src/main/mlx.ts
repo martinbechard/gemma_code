@@ -41,6 +41,7 @@ const MLX_CHAT_MAX_TOKENS = 8192;
 const MLX_CHAT_TEMPERATURE = 0.7;
 const MLX_ERROR_TEXT_TAIL_CHARS = 500;
 const MLX_LOG_TEXT_LENGTH_LIMIT = 180;
+const MLX_SERVER_STOP_TIMEOUT_MS = 5_000;
 const MLX_PYTHON_PACKAGES = [
   "mlx",
   "mlx-lm>=0.31.3",
@@ -1191,7 +1192,7 @@ export async function startServer(
   if (serverProc && !serverProc.killed && currentModel === model) return;
 
   // Kill existing server if running with different model
-  stopServer();
+  await stopServerForRestart();
 
   const env = buildServerEnv();
 
@@ -1270,6 +1271,41 @@ export function stopServer(): void {
   if (serverProc && !serverProc.killed) {
     console.log("[mlx] Stopping server");
     serverProc.kill("SIGTERM");
+    serverProc = null;
+    currentModel = null;
+  }
+  closeMlxLogFile();
+}
+
+async function stopServerForRestart(): Promise<void> {
+  if (!serverProc || serverProc.killed) {
+    closeMlxLogFile();
+    return;
+  }
+
+  const proc = serverProc;
+  console.log("[mlx] Stopping server");
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      if (!proc.killed) {
+        proc.kill("SIGKILL");
+      }
+      finish();
+    }, MLX_SERVER_STOP_TIMEOUT_MS);
+
+    proc.once("exit", finish);
+    proc.kill("SIGTERM");
+  });
+
+  if (serverProc === proc) {
     serverProc = null;
     currentModel = null;
   }

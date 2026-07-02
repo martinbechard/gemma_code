@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   applySetupStatus,
+  preparedModelFromSetupStatus,
+  runtimePreparationState,
+  selectReadyModel,
   type AppState,
 } from "../../../src/renderer/src/lib/appState";
 import type { SetupStatus } from "../../../src/shared/types";
@@ -75,5 +78,104 @@ describe("applySetupStatus", () => {
       model: "north-mini-code-1-0",
       status: ERROR_STATUS,
     });
+  });
+});
+
+describe("selectReadyModel", () => {
+  it("changes the selected ready model without starting runtime switching", () => {
+    expect(
+      selectReadyModel(
+        {
+          phase: "ready",
+          model: "gemma-4-31b-it",
+        },
+        "mlx-community/gemma-4-e4b-it-4bit",
+      ),
+    ).toEqual({
+      phase: "ready",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+    });
+  });
+
+  it("keeps setup selection inside setup state", () => {
+    expect(
+      selectReadyModel(
+        {
+          phase: "setup",
+          model: "gemma-4-31b-it",
+          status: CHECKING_STATUS,
+        },
+        "mlx-community/gemma-4-e4b-it-4bit",
+      ),
+    ).toEqual({
+      phase: "setup",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+      status: CHECKING_STATUS,
+    });
+  });
+});
+
+describe("runtimePreparationState", () => {
+  it("enters switching only when a send needs a different prepared model", () => {
+    expect(
+      runtimePreparationState(
+        {
+          phase: "ready",
+          model: "mlx-community/gemma-4-e4b-it-4bit",
+        },
+        "gemma-4-31b-it",
+      ),
+    ).toEqual({
+      phase: "switching",
+      model: "mlx-community/gemma-4-e4b-it-4bit",
+      toModel: "gemma-4-31b-it",
+      status: {
+        stage: "checking",
+        message: "Preparing selected model...",
+      },
+    });
+  });
+});
+
+describe("preparedModelFromSetupStatus", () => {
+  it("records the setup model when setup reaches ready", () => {
+    expect(
+      preparedModelFromSetupStatus(
+        {
+          phase: "setup",
+          model: "mlx-community/gemma-4-e4b-it-4bit",
+          status: CHECKING_STATUS,
+        },
+        READY_STATUS,
+      ),
+    ).toBe("mlx-community/gemma-4-e4b-it-4bit");
+  });
+
+  it("records the target model when switching reaches ready", () => {
+    expect(
+      preparedModelFromSetupStatus(
+        {
+          phase: "switching",
+          model: "gemma-4-31b-it",
+          toModel: "mlx-community/gemma-4-e4b-it-4bit",
+          status: CHECKING_STATUS,
+        },
+        READY_STATUS,
+      ),
+    ).toBe("mlx-community/gemma-4-e4b-it-4bit");
+  });
+
+  it("does not record a prepared model for non-ready statuses", () => {
+    expect(
+      preparedModelFromSetupStatus(
+        {
+          phase: "switching",
+          model: "gemma-4-31b-it",
+          toModel: "mlx-community/gemma-4-e4b-it-4bit",
+          status: CHECKING_STATUS,
+        },
+        CHECKING_STATUS,
+      ),
+    ).toBeNull();
   });
 });

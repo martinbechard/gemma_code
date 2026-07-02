@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   isLocalMlxRuntime,
   type LocalModelDownloadStatus,
@@ -8,7 +8,13 @@ import {
 } from "@shared/types";
 import Setup from "./components/Setup";
 import Chat from "./components/Chat";
-import { applySetupStatus, type AppState } from "./lib/appState";
+import {
+  applySetupStatus,
+  preparedModelFromSetupStatus,
+  runtimePreparationState,
+  selectReadyModel,
+  type AppState,
+} from "./lib/appState";
 import {
   pickStartupModel,
   readPersistedSelectedModel,
@@ -26,6 +32,7 @@ export default function App() {
   const [modelDownloads, setModelDownloads] = useState<
     LocalModelDownloadStatus[]
   >([]);
+  const preparedModelRef = useRef<string | null>(null);
 
   function upsertModelDownloadStatus(status: LocalModelDownloadStatus): void {
     setModelDownloads((current) => {
@@ -91,7 +98,11 @@ export default function App() {
       setModelDownloads(await window.api.listModelDownloads());
       const defaultModel = loadedModels.defaultModel;
       unsub = window.api.onSetupStatus((status) => {
-        setState((prev) => applySetupStatus(prev, status));
+        setState((prev) => {
+          const prepared = preparedModelFromSetupStatus(prev, status);
+          if (prepared) preparedModelRef.current = prepared;
+          return applySetupStatus(prev, status);
+        });
       });
 
       const local = await window.api.listLocalModels();
@@ -112,12 +123,17 @@ export default function App() {
       // model yet (first launch). The Setup welcome screen and the in-chat
       // model picker remain reachable as a safe-mode fallback when the
       // chosen model isn't locally available.
+      const persistedConversations = readPersistedConversations();
       const stamped = pickStartupModel(
-        readPersistedConversations(),
+        persistedConversations,
         readPersistedSelectedModel(),
       );
       const startupModel =
         stamped && isVisibleStartupModel(stamped) ? stamped : defaultModel;
+      if (persistedConversations.length > 0) {
+        setState({ phase: "ready", model: startupModel });
+        return;
+      }
 
       const startupModelInfo = modelInfoForName(startupModel);
       if (
@@ -164,18 +180,14 @@ export default function App() {
 
   function handleSwitchModel(newModel: string): void {
     writePersistedSelectedModel(newModel);
-    if (state.phase === "setup") {
-      setState({ ...state, model: newModel });
-      return;
-    }
-    if (state.phase !== "ready" || state.model === newModel) return;
-    setState({
-      phase: "switching",
-      model: state.model,
-      toModel: newModel,
-      status: { stage: "downloading-model", message: "Switching model…" },
-    });
-    void window.api.switchModel(newModel);
+    setState((prev) => selectReadyModel(prev, newModel));
+  }
+
+  async function handleEnsureModelReady(model: string): Promise<void> {
+    if (preparedModelRef.current === model) return;
+    setState((prev) => runtimePreparationState(prev, model));
+    await window.api.switchModel(model);
+    preparedModelRef.current = model;
   }
 
   if (state.phase === "boot") {
@@ -221,6 +233,7 @@ export default function App() {
         model={chatModel}
         models={modelList.models}
         onSwitchModel={handleSwitchModel}
+        onEnsureModelReady={handleEnsureModelReady}
       />
       {state.phase === "switching" && <SwitchingOverlay status={state.status} />}
     </div>

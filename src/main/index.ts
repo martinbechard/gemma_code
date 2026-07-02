@@ -2806,22 +2806,23 @@ app.whenReady().then(async () => {
       message: `Switching to ${label}…`,
     });
     try {
-      stopServer();
       if (isLocalModel(model)) {
         await ensureMLXRunning(model);
       } else {
+        stopServer();
         validateRemoteModelReady(model);
       }
       send("setup:status", { stage: "ready", message: "Ready to chat." });
     } catch (e) {
       if (e instanceof ModelCacheRepairRequiredError) {
         sendRepairableModelError(e.model, e.reason);
-        return;
+        throw e;
       }
+      const error = e as Error;
       send("setup:status", {
         stage: "error",
-        message: "Model switch failed",
-        error: (e as Error).message,
+        message: "Switch failed",
+        error: error.message,
         ...(isLocalModel(model)
           ? {
               command:
@@ -2831,6 +2832,7 @@ app.whenReady().then(async () => {
             }
           : {}),
       });
+      throw error;
     }
   });
 

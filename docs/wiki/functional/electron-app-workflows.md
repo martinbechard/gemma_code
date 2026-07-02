@@ -108,7 +108,7 @@ Includes conversation management, chat, renderer-side voice input, build/code wo
 - Conversations persist in localStorage.
 - Code mode with a working directory locks mode after messages are exchanged.
 - System and harness messages are not resent as normal user-visible conversation history.
-- Model switching shows overlay while local runtime setup or remote endpoint validation for the target model runs.
+- Model selection and saved-conversation selection update renderer state without preparing runtime. The preparation overlay appears when sending a prompt or executing an approved plan needs local runtime setup or remote endpoint validation for the request model.
 - Execution log viewer polls while open.
 - Voice input transcribes in the renderer with Whisper and stays independent of the selected Gemma chat or code model.
 

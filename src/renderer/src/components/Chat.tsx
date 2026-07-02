@@ -42,6 +42,7 @@ interface Props {
   model: string;
   models: ModelInfo[];
   onSwitchModel: (model: string) => void;
+  onEnsureModelReady: (model: string) => Promise<void>;
 }
 
 interface Conversation {
@@ -250,7 +251,12 @@ function initialConversationsForModel(model: string): Conversation[] {
   ).conversations;
 }
 
-export default function Chat({ model, models, onSwitchModel }: Props) {
+export default function Chat({
+  model,
+  models,
+  onSwitchModel,
+  onEnsureModelReady,
+}: Props) {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     return initialConversationsForModel(model);
   });
@@ -582,45 +588,47 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
         ? "planning"
         : undefined;
 
-    const userMsg: ChatMessage = {
-      id: newId("m"),
-      role: "user",
-      content: input,
-      createdAt: Date.now(),
-      phase,
-    };
-    const assistantMsg: ChatMessage = {
-      id: newId("m"),
-      role: "assistant",
-      content: "",
-      createdAt: Date.now(),
-      model: requestModel,
-      toolCalls: [],
-      activity: { kind: "thinking" },
-      phase,
-    };
-
-    updateActive((c) => {
-      const title =
-        !priorMessages.some((m) => m.role === "user")
-          ? input.slice(0, 48) + (input.length > 48 ? "…" : "")
-          : c.title;
-      // Stamp the request model so the conversation reopens with the same
-      // runtime.
-      return {
-        ...c,
-        title,
-        model: requestModel,
-        messages: [...priorMessages, userMsg, assistantMsg],
-      };
-    });
-
-    const history = requestHistory([...priorMessages, userMsg]);
-
     setStreaming(true);
     streamRef.current.abort = false;
 
     try {
+      await onEnsureModelReady(requestModel);
+
+      const userMsg: ChatMessage = {
+        id: newId("m"),
+        role: "user",
+        content: input,
+        createdAt: Date.now(),
+        phase,
+      };
+      const assistantMsg: ChatMessage = {
+        id: newId("m"),
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+        model: requestModel,
+        toolCalls: [],
+        activity: { kind: "thinking" },
+        phase,
+      };
+
+      updateActive((c) => {
+        const title =
+          !priorMessages.some((m) => m.role === "user")
+            ? input.slice(0, 48) + (input.length > 48 ? "…" : "")
+            : c.title;
+        // Stamp the request model so the conversation reopens with the same
+        // runtime.
+        return {
+          ...c,
+          title,
+          model: requestModel,
+          messages: [...priorMessages, userMsg, assistantMsg],
+        };
+      });
+
+      const history = requestHistory([...priorMessages, userMsg]);
+
       await window.api.sendChat(
         {
           conversationId: activeId,
@@ -788,33 +796,35 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     const proposalMsg = conv.messages.find((m) => m.id === messageId);
     if (!proposalMsg || !proposalMsg.proposedPlan) return;
 
-    const assistantMsg: ChatMessage = {
-      id: newId("m"),
-      role: "assistant",
-      content: "",
-      createdAt: Date.now(),
-      model: requestModel,
-      toolCalls: [],
-      activity: { kind: "thinking" },
-      phase: "execution",
-    };
-
-    updateActive((c) => ({
-      ...c,
-      messages: [
-        ...c.messages.map((m) =>
-          m.id === messageId ? { ...m, planExecuted: true } : m,
-        ),
-        assistantMsg,
-      ],
-    }));
-
-    const history = requestHistory(conv.messages);
-
     setStreaming(true);
     streamRef.current.abort = false;
 
     try {
+      await onEnsureModelReady(requestModel);
+
+      const assistantMsg: ChatMessage = {
+        id: newId("m"),
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+        model: requestModel,
+        toolCalls: [],
+        activity: { kind: "thinking" },
+        phase: "execution",
+      };
+
+      updateActive((c) => ({
+        ...c,
+        messages: [
+          ...c.messages.map((m) =>
+            m.id === messageId ? { ...m, planExecuted: true } : m,
+          ),
+          assistantMsg,
+        ],
+      }));
+
+      const history = requestHistory(conv.messages);
+
       await window.api.sendChat(
         {
           conversationId: activeId,
@@ -846,14 +856,6 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
   // stamped model inherit the current global model on their next send.
   function selectConversation(nextId: string): void {
     setActiveId(nextId);
-    const next = conversations.find((c) => c.id === nextId);
-    if (
-      next?.model &&
-      next.model !== model &&
-      models.some((candidate) => candidate.name === next.model)
-    ) {
-      onSwitchModel(next.model);
-    }
   }
 
   const modeLocked = isModeLocked(activeConversation);
@@ -866,6 +868,7 @@ export default function Chat({ model, models, onSwitchModel }: Props) {
     <div className="flex h-full w-full">
       <Sidebar
         conversations={conversations}
+        models={models}
         activeId={activeId}
         onSelect={selectConversation}
         onNew={() =>

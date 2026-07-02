@@ -98,15 +98,15 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 ## Internal Data And State
 
-- App owns setup phase state and the current selected model preference. Chat owns conversations, active id, conversation model stamping, streaming state, log viewer state, runtime toggles, last working directory, and model provenance cache.
+- App owns setup phase state, the current selected model preference, and the last successfully prepared model. Chat owns conversations, active id, conversation model stamping, streaming state, log viewer state, runtime toggles, last working directory, and model provenance cache.
 
 ## Processing Rules
 
-- Startup prefers the persisted selected-model preference when it remains available in the filtered configured model list, then falls back to the most recently stamped conversation model, then to the configured default. Local models also need local cache availability for auto-start.
-- Empty conversations can switch models before the first sendable message. Model selection stamps the active empty conversation before runtime switching starts, and switching keeps Chat mounted so the active conversation state is preserved. Once a conversation has sendable history, the model picker becomes read-only and model requests use the conversation-stamped model.
+- Startup prefers the persisted selected-model preference when it remains available in the filtered configured model list, then falls back to the most recently stamped conversation model, then to the configured default. When persisted conversations exist, startup enters chat without preparing local runtime so history browsing stays cheap.
+- Empty conversations can switch models before the first sendable message. Model selection stamps the active empty conversation and stores the selected model without preparing local or remote runtime. Runtime preparation happens immediately before sending a prompt or executing an approved plan, and switching keeps Chat mounted so the active conversation state is preserved. Once a conversation has sendable history, the model picker becomes read-only and model requests use the conversation-stamped model.
 - When startup or setup selects a model that differs from the most-recent started conversation, Chat creates a fresh empty conversation stamped with the selected model instead of reusing the locked conversation.
 - Setup status events are applied only while setup or switching is active, so late global runtime status events cannot reset an already-ready chat to the configured default model.
-- If runtime switching fails, App shows setup error state for the target model instead of silently restoring the previous model.
+- If send-time runtime preparation fails, App shows setup error state for the target model instead of sending the prompt against the wrong runtime.
 - Remote model setup surfaces a Configure API key action from the setup picker and a Set API key action from missing-key setup errors.
 - Code conversations with a working directory lock mode after messages are exchanged.
 - System and harness messages are not sent back as normal conversation history.
@@ -118,7 +118,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 
 - Nothing in the renderer calls Node or Electron APIs directly.
 - Setup repair UI appears only when setup status includes repair metadata.
-- The selected-model preference drives startup model preference within the filtered configured model list, and conversation model stamping preserves the runtime for started conversations.
+- The selected-model preference drives startup model preference within the filtered configured model list, conversation model stamping preserves the request model for started conversations, and the prepared-model marker prevents redundant setup between sends.
 - Voice transcription remains independent of the chat and code model runtime.
 
 ## Configuration

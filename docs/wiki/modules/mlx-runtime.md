@@ -100,6 +100,7 @@ This module implements the [Local Model Runtime](../subsystems/local-model-runti
 - Existing venvs are reused only when the runtime import check passes.
 - Incomplete model caches are not considered ready for inference.
 - Warmup inference is the final setup proof.
+- Replacing a managed local server waits for the previous child process to exit before binding the canonical port for the next model.
 - Direct snapshot downloads fill cache folders only; selected-model setup still proves readiness with server startup and warmup inference.
 - MLX server failures include recent log tail and request context.
 
