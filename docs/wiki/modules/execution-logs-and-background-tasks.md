@@ -92,6 +92,7 @@ This module implements [Observability And Debugging](../subsystems/observability
 
 - Each model round starts a new turn before runtime activity and model request events are logged.
 - Adjacent stream and model chunks consolidate by event and text field within the active turn.
+- The renderer groups snapshot entries by session setup and turn so raw trace entries are visible only inside the expanded group.
 - Log snapshots return the latest bounded lines.
 - Background task output keeps only the newest bounded characters.
 
@@ -111,7 +112,7 @@ This module implements [Observability And Debugging](../subsystems/observability
 
 ## UI And Notification Behavior
 
-- The UI log viewer shows log snapshots and can open the current execution log.
+- The UI log viewer shows session and turn groups, exposes raw trace rows when a group is expanded, and can open the current execution log.
 
 ## Error Handling
 

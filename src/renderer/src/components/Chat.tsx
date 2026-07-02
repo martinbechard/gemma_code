@@ -69,6 +69,27 @@ const DEFAULT_CODE_SUBMODE: CodeSubmode = "auto";
 const PLAN_ONE_SHOT_WHEN_THINKING_STORAGE_KEY =
   "gemma-code:plan-one-shot-when-thinking";
 const EXECUTION_LOGGING_STORAGE_KEY = "gemma-code:execution-logging";
+const SESSION_SETUP_GROUP_ID = "session-setup";
+const SESSION_SETUP_GROUP_TITLE = "Session setup";
+const UNGROUPED_TRACE_GROUP_TITLE = "Ungrouped trace";
+
+export interface ExecutionLogEntryGroup {
+  id: string;
+  title: string;
+  summary: string;
+  entries: ExecutionLogEntry[];
+  startLine: number;
+  endLine: number;
+  startedAt: string;
+  turn?: number;
+}
+
+interface MutableExecutionLogEntryGroup {
+  id: string;
+  title: string;
+  entries: ExecutionLogEntry[];
+  turn?: number;
+}
 const THINKING_ENABLED_STORAGE_KEY = "gemma-code:thinking-enabled";
 const LOG_VIEWER_REFRESH_MS = 2_000;
 const LOG_DETAIL_PREVIEW_MAX_CHARS = 220;
@@ -1054,6 +1075,96 @@ function FileContextZone({ paths }: { paths: string[] }) {
   );
 }
 
+export function groupExecutionLogEntries(
+  entries: ExecutionLogEntry[],
+): ExecutionLogEntryGroup[] {
+  const groups: MutableExecutionLogEntryGroup[] = [];
+  const groupsByTurn = new Map<number, MutableExecutionLogEntryGroup>();
+
+  for (const entry of entries) {
+    if (typeof entry.turn === "number") {
+      const existing = groupsByTurn.get(entry.turn);
+      const group =
+        existing ?? createTurnEntryGroup(entry.turn, entry, groupsByTurn);
+      group.entries.push(entry);
+      if (!existing) groups.push(group);
+      continue;
+    }
+
+    const previous = groups[groups.length - 1];
+    if (previous && previous.turn === undefined) {
+      previous.entries.push(entry);
+      continue;
+    }
+
+    const group = createUntypedEntryGroup(entry, groups.length === 0);
+    group.entries.push(entry);
+    groups.push(group);
+  }
+
+  return groups.map(finalizeExecutionLogGroup);
+}
+
+function createTurnEntryGroup(
+  turn: number,
+  entry: ExecutionLogEntry,
+  groupsByTurn: Map<number, MutableExecutionLogEntryGroup>,
+): MutableExecutionLogEntryGroup {
+  const group = {
+    id: `turn-${turn}`,
+    title: `Turn ${turn}`,
+    entries: [],
+    turn,
+  };
+  groupsByTurn.set(entry.turn ?? turn, group);
+  return group;
+}
+
+function createUntypedEntryGroup(
+  entry: ExecutionLogEntry,
+  isFirstGroup: boolean,
+): MutableExecutionLogEntryGroup {
+  const title = isFirstGroup
+    ? SESSION_SETUP_GROUP_TITLE
+    : UNGROUPED_TRACE_GROUP_TITLE;
+  return {
+    id: `${SESSION_SETUP_GROUP_ID}-${entry.line}`,
+    title,
+    entries: [],
+  };
+}
+
+function finalizeExecutionLogGroup(
+  group: MutableExecutionLogEntryGroup,
+): ExecutionLogEntryGroup {
+  const firstEntry = group.entries[0];
+  const lastEntry = group.entries[group.entries.length - 1] ?? firstEntry;
+  const startLine = firstEntry?.line ?? 0;
+  const endLine = lastEntry?.line ?? startLine;
+  return {
+    id: `${group.id}-${startLine}-${endLine}`,
+    title: group.title,
+    summary: executionLogGroupSummary(group),
+    entries: group.entries,
+    startLine,
+    endLine,
+    startedAt: firstEntry?.timestamp ?? "",
+    turn: group.turn,
+  };
+}
+
+function executionLogGroupSummary(
+  group: MutableExecutionLogEntryGroup,
+): string {
+  const turnStart = group.entries.find(
+    (entry) => entry.event === "turn_start",
+  );
+  const lead = turnStart ? executionLogSummary(turnStart) : group.title;
+  return compactLogText(
+    `${lead}, ${group.entries.length} entries, lines ${group.entries[0]?.line ?? ""}-${group.entries[group.entries.length - 1]?.line ?? ""}`,
+  );
+}
+
 function ExecutionLogViewer({
   snapshot,
   error,
@@ -1072,6 +1183,7 @@ function ExecutionLogViewer({
   endRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const entries = snapshot?.entries ?? [];
+  const groups = groupExecutionLogEntries(entries);
   return (
     <div className="no-drag fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="flex h-[78vh] w-[min(980px,calc(100vw-2rem))] flex-col rounded-lg border border-white/10 bg-[#111111] shadow-2xl">
@@ -1124,6 +1236,7 @@ function ExecutionLogViewer({
         <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-4 py-2 text-[11px] text-ink-500">
           <span>{snapshot?.totalLines ?? 0} lines</span>
           <span>{entries.length} shown</span>
+          {groups.length > 0 && <span>{groups.length} groups</span>}
           {snapshot?.truncated && (
             <span className="text-amber-200">Older entries hidden</span>
           )}
@@ -1136,12 +1249,12 @@ function ExecutionLogViewer({
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {entries.map((entry) => (
+              {groups.map((group) => (
                 <details
-                  key={entry.line}
-                  className={`group rounded-lg border bg-white/[0.025] ${executionLogEventClass(entry)}`}
+                  key={group.id}
+                  className={`group rounded-lg border bg-white/[0.025] ${executionLogGroupClass(group)}`}
                 >
-                  <summary className="grid cursor-pointer grid-cols-[12px_76px_58px_150px_minmax(0,1fr)_56px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
+                  <summary className="grid cursor-pointer grid-cols-[12px_76px_86px_minmax(0,1fr)_84px] items-center gap-3 px-3 py-2 text-[11.5px] marker:hidden">
                     <svg
                       viewBox="0 0 12 12"
                       className="h-2.5 w-2.5 text-ink-500 transition group-open:rotate-90"
@@ -1150,22 +1263,54 @@ function ExecutionLogViewer({
                       <path d="M4 2l4 4-4 4V2z" />
                     </svg>
                     <span className="font-mono text-ink-500">
-                      {entryTimeLabel(entry)}
-                    </span>
-                    <span className="font-mono text-ink-600">
-                      {entryTurnLabel(entry)}
+                      {entryGroupTimeLabel(group)}
                     </span>
                     <span className="truncate font-medium text-ink-100">
-                      {entry.event}
+                      {group.title}
                     </span>
                     <span className="truncate text-ink-300">
-                      {executionLogSummary(entry)}
+                      {group.summary}
                     </span>
                     <span className="text-right font-mono text-ink-600">
-                      #{entry.line}
+                      #{group.startLine}-{group.endLine}
                     </span>
                   </summary>
-                  <ExecutionLogEntryDetails entry={entry} />
+                  <div className="border-t border-white/[0.06] bg-black/15 px-2 py-2">
+                    <div className="flex flex-col gap-1.5">
+                      {group.entries.map((entry) => (
+                        <details
+                          key={entry.line}
+                          className={`rounded-md border bg-black/20 ${executionLogEventClass(entry)}`}
+                        >
+                          <summary className="grid cursor-pointer grid-cols-[12px_76px_58px_150px_minmax(0,1fr)_56px] items-center gap-3 px-2 py-1.5 text-[11px] marker:hidden">
+                            <svg
+                              viewBox="0 0 12 12"
+                              className="h-2.5 w-2.5 text-ink-600 transition group-open:rotate-90"
+                              fill="currentColor"
+                            >
+                              <path d="M4 2l4 4-4 4V2z" />
+                            </svg>
+                            <span className="font-mono text-ink-500">
+                              {entryTimeLabel(entry)}
+                            </span>
+                            <span className="font-mono text-ink-600">
+                              {entryTurnLabel(entry)}
+                            </span>
+                            <span className="truncate font-medium text-ink-100">
+                              {entry.event}
+                            </span>
+                            <span className="truncate text-ink-300">
+                              {executionLogSummary(entry)}
+                            </span>
+                            <span className="text-right font-mono text-ink-600">
+                              #{entry.line}
+                            </span>
+                          </summary>
+                          <ExecutionLogEntryDetails entry={entry} />
+                        </details>
+                      ))}
+                    </div>
+                  </div>
                 </details>
               ))}
               <div ref={endRef} />
@@ -1646,6 +1791,17 @@ function entryTimeLabel(entry: ExecutionLogEntry): string {
   });
 }
 
+function entryGroupTimeLabel(group: ExecutionLogEntryGroup): string {
+  if (!group.startedAt) return "--:--:--";
+  const date = new Date(group.startedAt);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function entryTurnLabel(entry: ExecutionLogEntry): string {
   return typeof entry.turn === "number" ? `turn ${entry.turn}` : "";
 }
@@ -1663,6 +1819,20 @@ function executionLogEventClass(entry: ExecutionLogEntry): string {
   }
   if (entry.event === "verify_result" || entry.event === "plan_event") {
     return "border-amber-300/15";
+  }
+  return "border-white/[0.07]";
+}
+
+function executionLogGroupClass(group: ExecutionLogEntryGroup): string {
+  if (
+    group.entries.some(
+      (entry) => executionLogEventClass(entry) === "border-red-400/20",
+    )
+  ) {
+    return "border-red-400/20";
+  }
+  if (group.turn !== undefined) {
+    return "border-emerald-300/15";
   }
   return "border-white/[0.07]";
 }

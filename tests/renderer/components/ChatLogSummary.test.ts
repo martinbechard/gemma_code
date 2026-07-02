@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ExecutionLogEntryDetails,
   executionLogDetails,
+  groupExecutionLogEntries,
   executionLogSummary,
 } from "../../../src/renderer/src/components/Chat";
 import type { ExecutionLogEntry } from "../../../src/shared/types";
@@ -12,6 +13,7 @@ function entry(
   event: string,
   data: unknown,
   line = 1,
+  turn?: number,
 ): ExecutionLogEntry {
   return {
     line,
@@ -19,6 +21,7 @@ function entry(
     conversationId: "c1",
     mode: "code",
     model: "gemma",
+    turn,
     event,
     data,
   };
@@ -221,5 +224,46 @@ describe("execution log summaries", () => {
         }),
       ),
     ).toBe("turn 3 conversation tool result follow-up");
+  });
+
+  it("groups execution log entries into top-level turns", () => {
+    const groups = groupExecutionLogEntries([
+      entry("session_start", { messageCount: 2 }, 1),
+      entry("system_prompt", { label: "code", content: "prompt" }, 2),
+      entry(
+        "turn_start",
+        { turn: 1, label: "model request", source: "conversation" },
+        3,
+        1,
+      ),
+      entry("model_request", { messageCount: 4 }, 4, 1),
+      entry("stream_chunk", { type: "token", text: "hello" }, 5, 1),
+      entry("model_response", { chars: 5, content: "hello" }, 6, 1),
+      entry(
+        "turn_start",
+        { turn: 2, label: "model request", source: "conversation" },
+        7,
+        2,
+      ),
+      entry("model_request", { messageCount: 6 }, 8, 2),
+      entry("tool_result", { tool: "git", result: "ok" }, 9, 2),
+    ]);
+
+    expect(groups).toHaveLength(3);
+    expect(groups.map((group) => group.title)).toEqual([
+      "Session setup",
+      "Turn 1",
+      "Turn 2",
+    ]);
+    expect(groups.map((group) => group.entries.map((item) => item.line))).toEqual(
+      [
+        [1, 2],
+        [3, 4, 5, 6],
+        [7, 8, 9],
+      ],
+    );
+    expect(groups[1].summary).toContain("conversation model request");
+    expect(groups[1].summary).toContain("4 entries");
+    expect(groups[2].summary).toContain("3 entries");
   });
 });
