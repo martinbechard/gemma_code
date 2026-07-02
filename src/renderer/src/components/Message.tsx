@@ -110,6 +110,38 @@ function parseMessageContent(message: ChatMessage): Parsed {
   };
 }
 
+function markdownHtml(content: string): string {
+  try {
+    return marked.parse(content, {
+      async: false,
+      breaks: true,
+    }) as string;
+  } catch {
+    return escapeHtml(content).replace(/\n/g, "<br/>");
+  }
+}
+
+function MarkdownBlock({
+  content,
+  showCursor,
+}: {
+  content: string;
+  showCursor?: boolean;
+}) {
+  const visible = stripActionMarkup(content);
+  if (!visible) return null;
+  return (
+    <div
+      className="markdown-body text-[14.5px] text-ink-100"
+      dangerouslySetInnerHTML={{
+        __html:
+          markdownHtml(visible) +
+          (showCursor ? '<span class="anim-caret">▍</span>' : ""),
+      }}
+    />
+  );
+}
+
 export default function Message({
   message,
   streaming,
@@ -121,14 +153,7 @@ export default function Message({
   const parsed = React.useMemo(() => parseMessageContent(message), [message]);
   const html = React.useMemo(() => {
     if (!parsed.visible) return "";
-    try {
-      return marked.parse(parsed.visible, {
-        async: false,
-        breaks: true,
-      }) as string;
-    } catch {
-      return escapeHtml(parsed.visible).replace(/\n/g, "<br/>");
-    }
+    return markdownHtml(parsed.visible);
   }, [parsed.visible]);
   const localPlanNodeIds = React.useMemo(
     () => new Set((message.planNodes ?? []).map((node) => node.id)),
@@ -146,6 +171,8 @@ export default function Message({
     [message.toolCalls],
   );
   const hasTimeline = (message.timeline?.length ?? 0) > 0;
+  const hasTextTimeline =
+    message.timeline?.some((item) => item.kind === "text") ?? false;
 
   if (message.role === "system") return null;
 
@@ -252,6 +279,10 @@ export default function Message({
 
         {hasTimeline
           ? message.timeline?.map((item, index) => {
+              if (item.kind === "text") {
+                return <MarkdownBlock key={item.id} content={item.content} />;
+              }
+
               if (item.kind === "thinking") {
                 return (
                   <ThinkingBlock
@@ -276,7 +307,7 @@ export default function Message({
               <ToolCallView key={tc.id} call={tc} />
             ))}
 
-        {parsed.visible && (
+        {parsed.visible && !hasTextTimeline && (
           <div
             className="markdown-body text-[14.5px] text-ink-100"
             dangerouslySetInnerHTML={{

@@ -58,12 +58,21 @@ export interface ThinkingTimelineItem {
   content: string;
 }
 
+export interface TextTimelineItem {
+  kind: "text";
+  id: string;
+  content: string;
+}
+
 export interface ToolCallTimelineItem {
   kind: "tool_call";
   toolCallId: string;
 }
 
-export type MessageTimelineItem = ThinkingTimelineItem | ToolCallTimelineItem;
+export type MessageTimelineItem =
+  | TextTimelineItem
+  | ThinkingTimelineItem
+  | ToolCallTimelineItem;
 
 export type Role = "user" | "assistant" | "system" | "tool" | "harness";
 

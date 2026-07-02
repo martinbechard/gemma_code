@@ -2,6 +2,33 @@ import type { ChatMessage, MessageTimelineItem, ToolCall } from "@shared/types";
 
 const FIRST_TIMELINE_ITEM_NUMBER = 1;
 
+export function appendTextToMessage(
+  message: ChatMessage,
+  text: string,
+): ChatMessage {
+  const timeline = [...(message.timeline ?? [])];
+  const lastItem = timeline[timeline.length - 1];
+
+  if (lastItem?.kind === "text") {
+    timeline[timeline.length - 1] = {
+      ...lastItem,
+      content: lastItem.content + text,
+    };
+  } else {
+    timeline.push({
+      kind: "text",
+      id: `text-${nextTextItemNumber(timeline)}`,
+      content: text,
+    });
+  }
+
+  return {
+    ...message,
+    content: message.content + text,
+    timeline,
+  };
+}
+
 export function appendReasoningToMessage(
   message: ChatMessage,
   text: string,
@@ -48,6 +75,13 @@ export function appendToolCallToMessage(
 function nextThinkingItemNumber(timeline: MessageTimelineItem[]): number {
   return (
     timeline.filter((item) => item.kind === "thinking").length +
+    FIRST_TIMELINE_ITEM_NUMBER
+  );
+}
+
+function nextTextItemNumber(timeline: MessageTimelineItem[]): number {
+  return (
+    timeline.filter((item) => item.kind === "text").length +
     FIRST_TIMELINE_ITEM_NUMBER
   );
 }

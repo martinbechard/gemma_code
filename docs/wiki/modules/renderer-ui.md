@@ -110,6 +110,7 @@ This module implements the UI side of the [Electron App Runtime](../subsystems/e
 - Remote model setup surfaces a Configure API key action from the setup picker and a Set API key action from missing-key setup errors.
 - Code conversations with a working directory lock mode after messages are exchanged.
 - System and harness messages are not sent back as normal conversation history.
+- Streamed assistant token chunks become visible text timeline items, so Message renders visible prose, thinking blocks, and tool cards in stream order. Tool cards appear at the invocation point instead of being grouped above the surrounding assistant prose.
 - Planning messages can collapse once execution begins.
 - Voice transcription uses Hugging Face Transformers.js with the ONNX Whisper model onnx-community/whisper-base.en. It tries WebGPU first and falls back to WASM when WebGPU initialization fails.
 - The selected Gemma chat or code model is separate from voice transcription and does not change the Whisper model.

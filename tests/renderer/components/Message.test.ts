@@ -121,6 +121,50 @@ describe("Message", () => {
     expect(html).not.toContain("markdown-body");
   });
 
+  it("renders timeline tool calls at the point they occur in visible text", () => {
+    const beforeToolText = "I will confirm the live tool list now.";
+    const afterToolText = "The requested tool is available.";
+    const html = renderMessage({
+      id: "assistant-visible-tool-order",
+      role: "assistant",
+      content: `${beforeToolText}\n\n${afterToolText}`,
+      createdAt: 1,
+      toolCalls: [
+        {
+          id: "call-1",
+          name: "generate_uuid",
+          args: {},
+          result: "2f5cc4ec-a41c-491e-a978-7e60b1af03f1",
+          running: false,
+        },
+      ],
+      timeline: [
+        {
+          kind: "text",
+          id: "text-1",
+          content: beforeToolText,
+        },
+        {
+          kind: "tool_call",
+          toolCallId: "call-1",
+        },
+        {
+          kind: "text",
+          id: "text-2",
+          content: afterToolText,
+        },
+      ],
+    });
+
+    const beforeToolIndex = html.indexOf(beforeToolText);
+    const toolIndex = html.indexOf("generate_uuid");
+    const afterToolIndex = html.indexOf(afterToolText);
+
+    expect(beforeToolIndex).toBeGreaterThanOrEqual(0);
+    expect(toolIndex).toBeGreaterThan(beforeToolIndex);
+    expect(afterToolIndex).toBeGreaterThan(toolIndex);
+  });
+
   it("renders separate thinking content without mixing it into markdown", () => {
     const html = renderMessage({
       id: "assistant-thinking-field",

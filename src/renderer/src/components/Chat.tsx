@@ -35,6 +35,7 @@ import {
 } from "../lib/conversationStore";
 import {
   appendReasoningToMessage,
+  appendTextToMessage,
   appendToolCallToMessage,
 } from "../lib/messageTimeline";
 
@@ -683,10 +684,7 @@ export default function Chat({
         const last = msgs[msgs.length - 1];
         if (!last || last.role !== "assistant") return c;
         if (chunk.type === "token") {
-          msgs[msgs.length - 1] = {
-            ...last,
-            content: last.content + chunk.text,
-          };
+          msgs[msgs.length - 1] = appendTextToMessage(last, chunk.text);
         } else if (chunk.type === "reasoning") {
           msgs[msgs.length - 1] = appendReasoningToMessage(last, chunk.text);
         } else if (chunk.type === "system_prompt") {
@@ -735,7 +733,13 @@ export default function Chat({
           );
           msgs[msgs.length - 1] = { ...last, planNodes: nodes };
         } else if (chunk.type === "set_assistant_content") {
-          msgs[msgs.length - 1] = { ...last, content: chunk.text };
+          msgs[msgs.length - 1] = {
+            ...last,
+            content: chunk.text,
+            timeline: chunk.text
+              ? [{ kind: "text", id: "text-1", content: chunk.text }]
+              : [],
+          };
         } else if (chunk.type === "harness_message") {
           const harnessMsg: ChatMessage = {
             id: newId("m"),

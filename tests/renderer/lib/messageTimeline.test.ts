@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ToolCall } from "../../../src/shared/types";
 import {
+  appendTextToMessage,
   appendReasoningToMessage,
   appendToolCallToMessage,
 } from "../../../src/renderer/src/lib/messageTimeline";
@@ -27,6 +28,19 @@ function toolCall(partial: Partial<ToolCall> = {}): ToolCall {
 }
 
 describe("message timeline", () => {
+  it("records visible text around tool calls in stream order", () => {
+    const withIntro = appendTextToMessage(assistant(), "Before tool.");
+    const withTool = appendToolCallToMessage(withIntro, toolCall());
+    const withOutro = appendTextToMessage(withTool, "After tool.");
+
+    expect(withOutro.content).toBe("Before tool.After tool.");
+    expect(withOutro.timeline).toEqual([
+      { kind: "text", id: "text-1", content: "Before tool." },
+      { kind: "tool_call", toolCallId: "tc1" },
+      { kind: "text", id: "text-2", content: "After tool." },
+    ]);
+  });
+
   it("starts a fresh thinking item when reasoning arrives after a tool call", () => {
     const firstReasoning = appendReasoningToMessage(assistant(), "Before action.");
     const withTool = appendToolCallToMessage(firstReasoning, toolCall());
