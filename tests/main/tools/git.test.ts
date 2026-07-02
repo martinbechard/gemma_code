@@ -6,7 +6,10 @@ vi.mock('../../../src/main/workspace', () => ({
   wsRunBash: vi.fn(),
 }));
 
+const GIT_TOOL_TIMEOUT_MS = 120_000;
+
 describe('gitTool', () => {
+  const mockWsRunBash = vi.mocked(workspace.wsRunBash);
   const mockCtx = {
     conversationId: 'test-conv',
     onFileChange: vi.fn(),
@@ -17,7 +20,7 @@ describe('gitTool', () => {
   });
 
   it('should execute a simple git command', async () => {
-    (workspace.wsRunBash as any).mockResolvedValue({
+    mockWsRunBash.mockResolvedValue({
       exitCode: 0,
       durationMs: 10,
       stdout: 'On branch main',
@@ -26,14 +29,18 @@ describe('gitTool', () => {
     });
 
     const result = await gitTool.run({ command: 'status' }, mockCtx);
-    
-    expect(workspace.wsRunBash).toHaveBeenCalledWith('test-conv', 'git status', 60000);
+
+    expect(mockWsRunBash).toHaveBeenCalledWith(
+      'test-conv',
+      'git status',
+      GIT_TOOL_TIMEOUT_MS,
+    );
     expect(result).toContain('exit=0');
     expect(result).toContain('stdout:\nOn branch main');
   });
 
   it('should execute a git command with arguments', async () => {
-    (workspace.wsRunBash as any).mockResolvedValue({
+    mockWsRunBash.mockResolvedValue({
       exitCode: 0,
       durationMs: 15,
       stdout: 'Changes staged',
@@ -42,8 +49,12 @@ describe('gitTool', () => {
     });
 
     const result = await gitTool.run({ command: 'add', args: '.' }, mockCtx);
-    
-    expect(workspace.wsRunBash).toHaveBeenCalledWith('test-conv', 'git add .', 60000);
+
+    expect(mockWsRunBash).toHaveBeenCalledWith(
+      'test-conv',
+      'git add .',
+      GIT_TOOL_TIMEOUT_MS,
+    );
     expect(result).toContain('exit=0');
     expect(result).toContain('stdout:\nChanges staged');
   });
@@ -55,7 +66,7 @@ describe('gitTool', () => {
   });
 
   it('should handle git errors correctly', async () => {
-    (workspace.wsRunBash as any).mockResolvedValue({
+    mockWsRunBash.mockResolvedValue({
       exitCode: 1,
       durationMs: 5,
       stdout: '',
@@ -64,13 +75,13 @@ describe('gitTool', () => {
     });
 
     const result = await gitTool.run({ command: 'status' }, mockCtx);
-    
+
     expect(result).toContain('exit=1');
     expect(result).toContain('stderr:\nfatal: not a git repository');
   });
 
   it('should call onFileChange after execution', async () => {
-    (workspace.wsRunBash as any).mockResolvedValue({
+    mockWsRunBash.mockResolvedValue({
       exitCode: 0,
       durationMs: 10,
       stdout: 'done',

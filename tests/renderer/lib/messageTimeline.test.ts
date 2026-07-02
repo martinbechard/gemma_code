@@ -39,4 +39,21 @@ describe("message timeline", () => {
     ]);
     expect(afterToolReasoning.thinking).toBe("Before action.After action.");
   });
+
+  it("clears first-token waiting activity when reasoning arrives", () => {
+    const withReasoning = appendReasoningToMessage(
+      assistant({
+        activity: {
+          kind: "runtime",
+          label: "waiting for first token",
+          model: "gemma-4",
+        },
+      }),
+      "First thought.",
+    );
+
+    expect(withReasoning.thinking).toBe("First thought.");
+    expect(withReasoning.thinkingInProgress).toBe(true);
+    expect(withReasoning.activity).toEqual({ kind: "idle" });
+  });
 });

@@ -26,6 +26,7 @@ export function appendReasoningToMessage(
     ...message,
     thinking: (message.thinking ?? "") + text,
     thinkingInProgress: true,
+    activity: { kind: "idle" },
     timeline,
   };
 }
