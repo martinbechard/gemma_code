@@ -37,9 +37,9 @@ The wiki is not the highest authority. Code and tests describe actual behavior, 
 Run these from the repository root before treating a wiki pass as complete.
 
 ```bash
-python3 ~/.codex/skills/project-wiki/scripts/wiki_ops.py status
-python3 ~/.codex/skills/project-wiki/scripts/wiki_ops.py lint
-python3 ~/.codex/skills/project-wiki/scripts/wiki_ops.py questions
+python3 project-wiki-skill-root/scripts/wiki_ops.py status
+python3 project-wiki-skill-root/scripts/wiki_ops.py lint
+python3 project-wiki-skill-root/scripts/wiki_ops.py questions
 ```
 
 Functional and technical pages under this wiki use the shared wiki-compatible section set first, then add their specialized sections.
